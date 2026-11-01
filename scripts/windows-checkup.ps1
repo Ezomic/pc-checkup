@@ -62,11 +62,14 @@ function Try-Run([scriptblock]$Block) {
 }
 
 function Add-Section([string]$Title, [scriptblock]$Block) {
+    $failure = $null
+    $items = @()
     try {
-        $text = (& $Block | Out-String -Width 200).Trim()
+        & $Block | ForEach-Object { $items += , $_ }
     } catch {
-        $text = Explain-Error $_
+        $failure = Explain-Error $_
     }
+    $text = (($items | Out-String -Width 200).Trim(), $failure | Where-Object { $_ }) -join "`n"
     if (-not $text) { $text = '(nothing to show)' }
     $fence = '```'
     $Body.Add("`n## $Title`n`n$fence`n$text`n$fence")
@@ -154,7 +157,8 @@ $displayVersion = (Try-Run { Get-RegValue $currentVersion 'DisplayVersion' }).Va
 $ubr = (Try-Run { Get-RegValue $currentVersion 'UBR' }).Value
 $buildNumber = [int]($os.BuildNumber)
 $osCaption = One-Line ($os.Caption -replace '^Microsoft\s+', '')
-$osLine = "$osCaption $displayVersion (build $($os.BuildNumber).$ubr)"
+if (-not $displayVersion) { $displayVersion = (Try-Run { Get-RegValue $currentVersion 'ReleaseId' }).Value }
+$osLine = One-Line "$osCaption $displayVersion (build $($os.BuildNumber).$ubr)"
 
 # ---------- Battery ----------
 $batteryDesign = $null; $batteryFull = $null; $batteryCycles = $null; $batteryNote = $null
@@ -165,6 +169,7 @@ if ($batteries.Count -gt 0) {
     $batteryDesign = ($static.Value | Measure-Object -Property DesignedCapacity -Sum).Sum
     $batteryFull = ($fullCap.Value | Measure-Object -Property FullChargedCapacity -Sum).Sum
     $batteryCycles = ($cycleCount.Value | Select-Object -First 1).CycleCount
+    if ($batteryCycles -eq 0) { $batteryCycles = $null }
 
     if (-not $batteryDesign -or -not $batteryFull -or $null -eq $batteryCycles) {
         $reportPath = Join-Path ([IO.Path]::GetTempPath()) "pcc-battery-$PID.xml"
@@ -231,13 +236,11 @@ if ($memory.Value -and $os.TotalVisibleMemorySize) {
 }
 if ($ramGb -and $ramGb -lt 8) { Add-Flag "Only $ramGb GB of RAM." }
 
-$load = ($cpus | Measure-Object -Property LoadPercentage -Average).Average
-if ($null -ne $load -and $load -ge 80) { Add-Flag "CPU load is $([math]::Round($load))% right now." }
 
 $uptimeDays = $null
 if ($os.LastBootUpTime) {
     $uptimeDays = [int][math]::Floor(((Get-Date) - $os.LastBootUpTime).TotalDays)
-    if ($uptimeDays -ge 30) { Add-Flag "Not restarted for $uptimeDays days." }
+    if ($uptimeDays -ge 30) { Add-Flag "Up for $uptimeDays days since the last full boot (Fast Startup can inflate this)." }
 }
 
 # ---------- Security ----------
@@ -269,14 +272,11 @@ if ($tpm.Value) {
         Add-Flag 'No TPM found (Windows 11 needs TPM 2.0).'
     }
 } else {
-    $tpmDevice = Try-Run { Get-PnpDevice -PresentOnly | Where-Object { $_.FriendlyName -like 'Trusted Platform Module*' } | Select-Object -First 1 }
+    $tpmDevice = Try-Run { Get-CimInstance Win32_PnPEntity | Where-Object { $_.PNPClass -eq 'SecurityDevices' -and $_.DeviceID -match '^ACPI\\(MSFT0101|MSFT0200|IFX|NTC|STM|INTC|AMDI|BCM)' } | Select-Object -First 1 }
     if ($tpmDevice.Value) {
-        $tpmSummary = "present ($(One-Line $tpmDevice.Value.FriendlyName)), details unavailable (needs admin)"
-    } elseif ($tpmDevice.Note) {
-        $tpmSummary = $tpm.Note
+        $tpmSummary = "present ($(One-Line $tpmDevice.Value.Name)), details unavailable (needs admin)"
     } else {
-        $tpmSummary = 'no TPM device visible (missing, or disabled in the BIOS)'
-        Add-Flag 'No TPM device visible (missing, or disabled in the BIOS).'
+        $tpmSummary = 'unavailable (needs admin to read the TPM; no TPM device was visible without it)'
     }
 }
 
@@ -310,7 +310,7 @@ $otherAv = Try-Run { Get-CimInstance -Namespace root\SecurityCenter2 -ClassName 
 $thirdPartyAv = @($otherAv.Value | Where-Object { $_ })
 if ($defender.Value) {
     if (-not $defender.Value.RealTimeProtectionEnabled -and $thirdPartyAv.Count -eq 0) { Add-Flag 'Defender real-time protection is OFF and no other antivirus was found.' }
-    if ($defender.Value.AntivirusSignatureAge -gt 7) { Add-Flag "Defender signatures are $($defender.Value.AntivirusSignatureAge) days old." }
+    if ($defender.Value.AntivirusSignatureAge -gt 7 -and $thirdPartyAv.Count -eq 0) { Add-Flag "Defender signatures are $($defender.Value.AntivirusSignatureAge) days old." }
     if ($defender.Value.IsTamperProtected -eq $false) { Add-Flag 'Defender tamper protection is off.' }
 }
 
@@ -335,8 +335,8 @@ if (@($securityAgents.Value).Count -gt 0) { Add-Flag "Security, management or re
 $dsreg = Try-Run { dsregcmd /status }
 if ($dsreg.Value) {
     $dsregText = @($dsreg.Value) -join "`n"
-    if ($dsregText -match '(?m)^\s*AzureAdJoined\s*:\s*YES') { Add-Flag 'Joined to Entra ID / Azure AD (managed by an organisation).' }
-    if ($dsregText -match '(?m)^\s*MdmUrl\s*:\s*\S') { Add-Flag 'Enrolled in MDM (managed by an organisation).' }
+    if ($dsregText -match '(?m)^[ \t]*AzureAdJoined[ \t]*:[ \t]*YES') { Add-Flag 'Joined to Entra ID / Azure AD (managed by an organisation).' }
+    if ($dsregText -match '(?m)^[ \t]*MdmUrl[ \t]*:[ \t]*\S') { Add-Flag 'Enrolled in MDM (managed by an organisation).' }
 }
 if ($cs.PartOfDomain) { Add-Flag "Joined to the domain $(One-Line $cs.Domain) (managed by an organisation)." }
 
@@ -355,7 +355,6 @@ $lastInstall = $null
 if ($hotfixes.Value -and @($hotfixes.Value).Count -gt 0) { $lastInstall = @($hotfixes.Value)[0].InstalledOn }
 if ($lastInstall) {
     $installAge = [int][math]::Floor(((Get-Date) - $lastInstall).TotalDays)
-    if ($installAge -ge 90) { Add-Flag "Newest installed Windows update is $installAge days old." }
 }
 
 $pendingUpdates = Try-Run {
@@ -377,12 +376,13 @@ if ($pendingUpdates.Value -and @($pendingUpdates.Value).Count -gt 0) { Add-Flag 
 $startup = Try-Run { @(Get-CimInstance Win32_StartupCommand) }
 if ($startup.Value -and @($startup.Value).Count -gt 15) { Add-Flag "$(@($startup.Value).Count) programs start with Windows (slows boot)." }
 
-$badDevices = Try-Run { @(Get-CimInstance Win32_PnPEntity -Filter 'ConfigManagerErrorCode <> 0') }
+$badDevices = Try-Run { @(Get-CimInstance Win32_PnPEntity -Filter 'ConfigManagerErrorCode <> 0 AND ConfigManagerErrorCode <> 22 AND ConfigManagerErrorCode <> 24') }
 if ($badDevices.Value -and @($badDevices.Value).Count -gt 0) { Add-Flag "$(@($badDevices.Value).Count) device(s) report a driver problem in Device Manager (see Devices with problems section)." }
 
 $since = (Get-Date).AddDays(-30)
 $crashEvents = Try-Run { @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 41, 1001, 6008; StartTime = $since } -ErrorAction SilentlyContinue) }
-$unexpected = @($crashEvents.Value | Where-Object { $_.Id -eq 41 -or $_.Id -eq 6008 }).Count
+$unexpected = @($crashEvents.Value | Where-Object { $_.Id -eq 41 }).Count
+if ($unexpected -eq 0) { $unexpected = @($crashEvents.Value | Where-Object { $_.Id -eq 6008 }).Count }
 if ($unexpected -gt 0) { Add-Flag "$unexpected unexpected shutdown(s) in the last 30 days (crash, power loss or forced power off)." }
 $diskEvents = Try-Run { @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'disk'; Id = 7, 11; StartTime = $since } -ErrorAction SilentlyContinue) }
 if (@($diskEvents.Value).Count -gt 0) { Add-Flag "$(@($diskEvents.Value).Count) disk error event(s) in the last 30 days (bad blocks or controller errors)." }

@@ -29,9 +29,9 @@ describe('Windows checkup report', function () {
             ->and($parsed->serial)->toBeNull()
             ->and($parsed->hardwareUuid)->toBe('4C4C4544-0053-5410-8058-B7C04F4B4E31')
             ->and($parsed->model)->toBe('Gigabyte Technology Co., Ltd. Z790 GAMING X AX')
-            ->and($parsed->flags)->toHaveCount(8)
-            ->and($parsed->flags[1])->toBe('Secure Boot is OFF.')
-            ->and($parsed->flags[2])->toBe('BitLocker is OFF on C:.');
+            ->and($parsed->flags)->toHaveCount(6)
+            ->and($parsed->flags[0])->toBe('Secure Boot is OFF.')
+            ->and($parsed->flags[1])->toBe('BitLocker is OFF on C:.');
     });
 
     it('imports as a machine identified by its uuid when the firmware serial was a placeholder', function () {

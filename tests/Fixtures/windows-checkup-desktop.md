@@ -18,13 +18,11 @@
 
 ## Things to look at
 
-- Only 12% of memory is available (high memory pressure).
 - Secure Boot is OFF.
 - BitLocker is OFF on C:.
 - Security, management or remote access agents running (can slow a PC or give someone else access): rustdesk
 - Windows updates are pending (see Windows Update section): 3.
-- 1 device(s) report a driver problem in Device Manager (see Devices with problems section).
-- 18 unexpected shutdown(s) in the last 30 days (crash, power loss or forced power off).
+- 10 unexpected shutdown(s) in the last 30 days (crash, power loss or forced power off).
 - 1 disk error event(s) in the last 30 days (bad blocks or controller errors).
 
 ## Identity as reported by firmware (before placeholders are removed)
