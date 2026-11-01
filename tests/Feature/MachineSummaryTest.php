@@ -38,7 +38,7 @@ it('shows the machine details and status', function () {
     $user = User::factory()->create();
     $machine = Machine::factory()->for($user)->create([
         'name' => 'Demo', 'serial' => 'C02ABC', 'os' => 'macOS', 'device_type' => 'laptop',
-        'model' => 'MacBook Pro', 'hardware_uuid' => 'uuid-1', 'status' => MachineStatus::Ready,
+        'model' => 'MacBook Pro', 'hardware_uuid' => 'uuid-1', 'status' => MachineStatus::Reject,
     ]);
 
     actingAs($user)->get("/machines/{$machine->id}/summary")
@@ -51,7 +51,7 @@ it('shows the machine details and status', function () {
             ->where('machine.os', 'macOS')
             ->where('machine.device_type', 'laptop')
             ->where('machine.model', 'MacBook Pro')
-            ->where('machine.status', 'ready'));
+            ->where('machine.status', 'reject'));
 });
 
 it('shows the flags of the latest report without the raw markdown', function () {

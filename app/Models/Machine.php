@@ -34,7 +34,7 @@ class Machine extends Model
     use HasFactory, SoftDeletes;
 
     /** @var array<string, string> */
-    protected $attributes = ['status' => 'checking'];
+    protected $attributes = ['status' => 'needs_work'];
 
     /**
      * @return array<string, string>

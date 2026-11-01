@@ -10,9 +10,9 @@ const props = defineProps<{
 }>();
 
 const options: { value: MachineStatus; label: string }[] = [
-    { value: 'checking', label: 'Checking' },
-    { value: 'ready', label: 'Ready' },
+    { value: 'ok', label: 'OK' },
     { value: 'needs_work', label: 'Needs work' },
+    { value: 'reject', label: 'Reject' },
 ];
 
 function choose(status: MachineStatus): void {

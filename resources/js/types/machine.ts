@@ -1,4 +1,4 @@
-export type MachineStatus = 'checking' | 'ready' | 'needs_work';
+export type MachineStatus = 'ok' | 'needs_work' | 'reject';
 
 export type Machine = {
     id: number;

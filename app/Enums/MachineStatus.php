@@ -6,7 +6,7 @@ namespace App\Enums;
 
 enum MachineStatus: string
 {
-    case Checking = 'checking';
-    case Ready = 'ready';
+    case Ok = 'ok';
     case NeedsWork = 'needs_work';
+    case Reject = 'reject';
 }

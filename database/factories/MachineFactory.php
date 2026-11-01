@@ -32,7 +32,7 @@ class MachineFactory extends Factory
             'os' => 'macOS',
             'device_type' => 'laptop',
             'model' => 'MacBook Pro (MacBookPro18,3)',
-            'status' => MachineStatus::Checking,
+            'status' => MachineStatus::NeedsWork,
         ];
     }
 }
