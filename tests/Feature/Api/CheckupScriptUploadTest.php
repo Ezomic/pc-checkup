@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use App\Models\Report;
+use App\Models\ScanCode;
+use App\Models\User;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Testing\TestResponse;
 
@@ -32,6 +34,11 @@ function macScript(string $code, array $args = [], array $env = []): string
 function postRawJson(string $body): TestResponse
 {
     return call('POST', '/api/reports', [], [], [], ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json'], $body);
+}
+
+function postRawScan(string $body): TestResponse
+{
+    return call('POST', '/api/scans', [], [], [], ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json'], $body);
 }
 
 describe('the JSON body the Windows script builds', function () {
@@ -104,6 +111,80 @@ describe('the Mac script helpers', function () {
         'whitespace' => ['https://example.test/ x', false],
         'empty' => ['', false],
     ]);
+
+    it('builds a scan body that the scan endpoint imports once', function () {
+        $user = User::factory()->create();
+        ScanCode::factory()->for($user)->withCode('012345')->create();
+        $path = tempnam(sys_get_temp_dir(), 'pcc');
+        file_put_contents($path, specialReport());
+
+        $body = macScript('pcc_json_body "$1" "$2"', [$path, '012345']);
+        unlink($path);
+
+        expect(json_decode($body, true, flags: JSON_THROW_ON_ERROR))->toBe(['code' => '012345', 'markdown' => specialReport()]);
+
+        postRawScan($body)->assertCreated();
+        postRawScan($body)->assertUnprocessable();
+
+        expect($user->machines()->count())->toBe(1);
+    });
+
+    it('never puts something that is not 6 digits into the body as a code', function (string $code) {
+        $path = tempnam(sys_get_temp_dir(), 'pcc');
+        file_put_contents($path, 'x');
+
+        $body = macScript('pcc_json_body "$1" "$2"', [$path, $code]);
+        unlink($path);
+
+        expect($body)->toBe('{"markdown":"x"}');
+    })->with(['letters' => ['abcdef'], 'short' => ['12345'], 'quote' => ['1","a":"2'], 'empty' => ['']]);
+
+    it('accepts exactly 6 ascii digits as a code', function (string $code, bool $accepted) {
+        expect(trim(macScript('pcc_valid_code "$1" && echo yes || echo no', [$code])))->toBe($accepted ? 'yes' : 'no');
+    })->with([
+        'digits' => ['012345', true],
+        'short' => ['12345', false],
+        'long' => ['1234567', false],
+        'letters' => ['12345a', false],
+        'arabic digits' => ['١٢٣٤٥٦', false],
+        'empty' => ['', false],
+    ]);
+
+    it('takes the code from the option, then the environment, dropping the space the app shows', function () {
+        $find = fn (string $cli, array $env) => trim(macScript('pcc_find_code "$1"; echo "$PCC_CODE_SOURCE:$PCC_CODE"', [$cli], $env));
+
+        expect($find(' 012 345 ', ['PC_CHECKUP_CODE' => '999999']))->toBe('option:012345')
+            ->and($find('', ['PC_CHECKUP_CODE' => "654 321\r\n"]))->toBe('environment:654321')
+            ->and($find('', ['PC_CHECKUP_CODE' => '  ']))->toBe(':');
+    });
+
+    it('does not prompt without a terminal and leaves the code empty', function () {
+        expect(trim(macScript('pcc_prompt_code; echo "[$PCC_CODE]"')))->toBe('[]');
+    });
+
+    it('says how to upload with neither a token nor a code', function () {
+        expect(macScript('PCC_TOKEN=""; PCC_CODE=""; pcc_upload_report /dev/null'))
+            ->toContain('Start a scan')->toContain('--code')->toContain('pc-checkup.token');
+    });
+
+    it('skips the upload for a malformed code or an insecure address without sending anything', function () {
+        expect(macScript('PCC_CODE=12; PCC_CODE_SOURCE=option; pcc_upload_report /dev/null'))
+            ->toContain('exactly 6 digits')
+            ->and(macScript('PCC_CODE=123456; PCC_CLI_URL=http://example.test; pcc_upload_report /dev/null'))
+            ->toContain('must start with https://');
+    });
+
+    it('lets a token win over a code', function () {
+        $output = macScript('PCC_TOKEN=1\|abc; PCC_CODE=123456; pcc_upload() { echo "token=[$3] code=[${4:-}]"; }; pcc_upload_report /dev/null', env: ['PC_CHECKUP_URL' => 'http://localhost:9']);
+
+        expect($output)->toContain('token=[1|abc] code=[]')->toContain('Token safety');
+    });
+
+    it('uploads with the code only when there is no token', function () {
+        $output = macScript('PCC_CODE=123456; pcc_upload() { echo "token=[$3] code=[${4:-}]"; }; pcc_upload_report /dev/null', env: ['PC_CHECKUP_URL' => 'http://localhost:9']);
+
+        expect($output)->toBe("token=[] code=[123456]\n");
+    });
 
     it('takes the token from the option, then the environment, then the token file, trimmed', function () {
         $dir = sys_get_temp_dir().'/pcc-token-'.bin2hex(random_bytes(4));
