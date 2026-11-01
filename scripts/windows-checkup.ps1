@@ -1,10 +1,22 @@
 # Read-only Windows checkup. Writes a Markdown report to the Desktop.
-# Usage: powershell -ExecutionPolicy Bypass -File windows-checkup.ps1
+# Usage: powershell -ExecutionPolicy Bypass -File windows-checkup.ps1 [-Token <token>] [-Url <url>]
 # Works on Windows PowerShell 5.1 and PowerShell 7. Needs no admin rights; sections that
 # do need them say "unavailable (needs admin)". Keep this file ASCII only: 5.1 reads a
 # file without a byte order mark as ANSI.
+#
+# Optional upload: with a token the finished report is also sent to PC Checkup. The token is
+# read from, in this order: -Token, the PC_CHECKUP_TOKEN environment variable, or a file named
+# pc-checkup.token next to this script. The site is $DefaultUrl below; -Url or PC_CHECKUP_URL
+# override it (https only, plus http://localhost for testing). The token is never written to
+# the report or printed.
+
+param(
+    [string]$Token,
+    [string]$Url
+)
 
 $ErrorActionPreference = 'Stop'
+$DefaultUrl = 'https://pc-checkup.thijssensoftware.nl'
 
 if ($PSVersionTable.PSEdition -eq 'Core' -and -not $IsWindows) {
     Write-Host 'This script only runs on Windows. Use mac-checkup.sh on a Mac.'
@@ -101,6 +113,129 @@ function Read-BatteryReport([string]$Path) {
 
 function Get-RegValue([string]$Path, [string]$Name) {
     return (Get-ItemProperty -LiteralPath $Path -Name $Name).$Name
+}
+
+# ---------- Upload helpers ----------
+# Returns the token and where it came from, or $null: parameter, environment, then a file.
+function Get-UploadToken([string]$Given, [string]$Folder) {
+    $candidates = @(
+        [pscustomobject]@{ Source = 'parameter'; Value = $Given },
+        [pscustomobject]@{ Source = 'environment'; Value = $env:PC_CHECKUP_TOKEN }
+    )
+    $file = if ($Folder) { Join-Path $Folder 'pc-checkup.token' } else { $null }
+    if ($file -and (Test-Path -LiteralPath $file -PathType Leaf)) {
+        $first = @(Get-Content -LiteralPath $file -TotalCount 1)[0]
+        $candidates += [pscustomobject]@{ Source = 'file'; Value = $first }
+    }
+    foreach ($candidate in $candidates) {
+        $value = ([string]$candidate.Value).Trim()
+        if ($value -ne '') { return [pscustomobject]@{ Source = $candidate.Source; Value = $value } }
+    }
+    return $null
+}
+
+function Test-UploadToken([string]$Value) { return $Value -cmatch '^[A-Za-z0-9|_.~+/=-]{1,255}$' }
+
+function Test-UploadUrl([string]$Value) {
+    return $Value -match '^(https://[A-Za-z0-9.-]+|http://(localhost|127\.0\.0\.1))(:[0-9]+)?(/[^\s\\?#]*)?$'
+}
+
+# The request body: {"markdown": "..."} as UTF-8 bytes without a byte order mark.
+function New-UploadBody([string]$Markdown) {
+    $json = ConvertTo-Json -InputObject @{ markdown = $Markdown } -Compress
+    return , (New-Object System.Text.UTF8Encoding($false)).GetBytes($json)
+}
+
+function Read-FailedResponse($ErrorRecord) {
+    $response = $ErrorRecord.Exception.Response
+    if ($null -eq $response) { return $null }
+    $content = $null
+    if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message) {
+        $content = $ErrorRecord.ErrorDetails.Message
+    } elseif ($response -is [System.Net.WebResponse]) {
+        try {
+            $reader = New-Object System.IO.StreamReader($response.GetResponseStream(), [System.Text.Encoding]::UTF8)
+            $content = $reader.ReadToEnd()
+            $reader.Dispose()
+        } catch { $content = $null }
+    }
+    return [pscustomobject]@{ Status = [int]$response.StatusCode; Content = $content }
+}
+
+# Never throws: Status is the HTTP status (0 when there was none), Data the parsed JSON body.
+function Send-Report([string]$Markdown, [string]$BaseUrl, [string]$ApiToken) {
+    $result = [pscustomobject]@{ Status = 0; Data = $null; Failure = $null }
+    $content = $null
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        $headers = @{ Authorization = "Bearer $ApiToken"; Accept = 'application/json' }
+        $response = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$BaseUrl/api/reports" -Headers $headers `
+            -ContentType 'application/json; charset=utf-8' -Body (New-UploadBody $Markdown) -TimeoutSec 30 -MaximumRedirection 0
+        $result.Status = [int]$response.StatusCode
+        $content = $response.Content
+    } catch {
+        $failed = Read-FailedResponse $_
+        if ($failed) {
+            $result.Status = $failed.Status
+            $content = $failed.Content
+        } else {
+            $result.Failure = One-Line $_.Exception.Message
+        }
+    }
+    try { if ($content) { $result.Data = ConvertFrom-Json -InputObject ([string]$content) } } catch { $result.Data = $null }
+    return $result
+}
+
+function Get-RejectionText($Data) {
+    $parts = New-Object System.Collections.Generic.List[string]
+    if ($Data -and $Data.message) { $parts.Add((One-Line $Data.message)) }
+    if ($Data -and $Data.errors) {
+        foreach ($property in $Data.errors.PSObject.Properties) {
+            foreach ($text in @($property.Value)) { $parts.Add((One-Line $text)) }
+        }
+    }
+    if ($parts.Count -eq 0) { return 'no reason given' }
+    return (($parts | Select-Object -Unique) -join ' | ')
+}
+
+function Show-UploadResult($Result, [string]$BaseUrl) {
+    $machineId = $null
+    if ($Result.Data -and "$($Result.Data.machine_id)" -match '^\d+$') { $machineId = $Result.Data.machine_id }
+    $machineText = if ($machineId) { "machine $machineId, $BaseUrl/machines/$machineId" } else { 'machine unknown' }
+    switch ($Result.Status) {
+        0   { Write-Host "Upload failed: could not reach $BaseUrl ($($Result.Failure))." }
+        201 { Write-Host "Uploaded as a new report: $machineText" }
+        200 { Write-Host "Already uploaded: this identical report is already in PC Checkup ($machineText)." }
+        401 { Write-Host 'Upload failed: the token was not accepted (invalid, expired or revoked). Create a new one in the app under Settings, API tokens.' }
+        403 { Write-Host 'Upload failed: the token does not have the Write ability. Create a new token with the Write ability.' }
+        422 { Write-Host "The server rejected the report: $(Get-RejectionText $Result.Data)" }
+        429 { Write-Host 'Upload skipped: the server is rate limiting this token, try again in a minute.' }
+        default { Write-Host "Upload failed: the server answered HTTP $($Result.Status)." }
+    }
+}
+
+# Called once the report is saved: uploads it, or says how to. Never throws.
+function Invoke-ReportUpload([string]$Markdown, $Found, [string]$GivenUrl) {
+    if (-not $Found) {
+        Write-Host 'To upload this report: create a token with only the Write ability in the app (Settings, API tokens), then run again with PC_CHECKUP_TOKEN set or a pc-checkup.token file next to this script.'
+        return
+    }
+    try {
+        $base = $GivenUrl
+        if (-not $base) { $base = $env:PC_CHECKUP_URL }
+        if (-not $base) { $base = $DefaultUrl }
+        $base = ([string]$base).Trim().TrimEnd('/')
+        if (-not (Test-UploadUrl $base)) {
+            Write-Host 'Upload skipped: the site address must start with https:// (http://localhost is allowed for testing).'
+        } elseif (-not (Test-UploadToken $Found.Value)) {
+            Write-Host "Upload skipped: the token contains characters a token never has. Check the $($Found.Source) it came from."
+        } else {
+            Show-UploadResult (Send-Report $Markdown $base $Found.Value) $base
+        }
+    } catch {
+        Write-Host "Upload failed unexpectedly: $(One-Line $_.Exception.Message)"
+    }
+    Write-Host 'Token safety: use a token with only the Write ability and a short lifetime, and delete the token from any machine that is not yours.'
 }
 
 $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -600,5 +735,9 @@ $text = ($lines -join "`n") -replace "`r`n", "`n" -replace "`r", "`n"
 Write-Host ''
 Write-Host 'Done. Report saved to:'
 Write-Host "  $Out"
+Write-Host ''
+$found = $null
+try { $found = Get-UploadToken $Token $PSScriptRoot } catch { Write-Host "Upload skipped: could not read the token ($(One-Line $_.Exception.Message))." }
+Invoke-ReportUpload ($text + "`n") $found $Url
 Write-Host ''
 Write-Host 'Optional: for the sections that need admin rights (TPM details, BitLocker, disk wear), run again from an elevated PowerShell.'
