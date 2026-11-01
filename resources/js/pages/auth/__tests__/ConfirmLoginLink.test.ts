@@ -19,8 +19,13 @@ describe('ConfirmLoginLink', () => {
     // A mail scanner that opens the link must not log anyone in, so the page
     // only offers a button and posts the token it was given when pressed.
     it('posts the token it was given from a button', () => {
-        const wrapper = mount(ConfirmLoginLink, { props: { token: 'abc123' } });
+        const wrapper = mount(ConfirmLoginLink, {
+            props: { token: 'abc123', email: 'm*@example.com' },
+        });
 
+        expect(wrapper.get('[data-test="login-link-email"]').text()).toContain(
+            'm*@example.com',
+        );
         expect(consumeForm).toHaveBeenCalledWith('abc123');
         expect(wrapper.get('form').attributes('data-token')).toBe('abc123');
         expect(wrapper.get('button').text()).toBe('Continue to PC Checkup');

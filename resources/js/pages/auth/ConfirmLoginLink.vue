@@ -13,6 +13,7 @@ defineOptions({
 
 defineProps<{
     token: string;
+    email: string;
 }>();
 </script>
 
@@ -24,6 +25,9 @@ defineProps<{
         class="flex flex-col gap-6"
         v-slot="{ processing }"
     >
+        <p class="text-center text-sm" data-test="login-link-email">
+            You will be logged in as {{ email }}
+        </p>
         <Button
             type="submit"
             class="w-full"

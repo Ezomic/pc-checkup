@@ -204,13 +204,13 @@ describe('requesting a link', function () {
 
 describe('opening the link', function () {
     it('shows a confirm page and neither signs in nor consumes on GET', function () {
-        [, $token] = userWithLink();
+        [$user, $token] = userWithLink();
 
         get(route('login.link.show', $token))
             ->assertOk()
             ->assertHeader('Referrer-Policy', 'no-referrer')
             ->assertHeader('Cache-Control')
-            ->assertInertia(fn (Assert $page) => $page->component('auth/ConfirmLoginLink')->where('token', $token));
+            ->assertInertia(fn (Assert $page) => $page->component('auth/ConfirmLoginLink')->where('token', $token)->where('email', fn (string $email) => str_contains($email, '*') && str_ends_with($email, strstr($user->email, '@'))));
 
         assertGuest();
         expect(linkOf($token)->used_at)->toBeNull();
