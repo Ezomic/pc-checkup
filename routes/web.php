@@ -2,9 +2,12 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\ChecklistEntryController;
 use App\Http\Controllers\HealthController;
 use App\Http\Controllers\MachineController;
+use App\Http\Controllers\MachineNoteController;
 use App\Http\Controllers\NoteController;
+use App\Http\Controllers\PhotoController;
 use App\Http\Controllers\ReportImportController;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
@@ -23,6 +26,17 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::resource('notes', NoteController::class)->except('show');
 
     Route::get('machines', [MachineController::class, 'index'])->name('machines.index');
+    Route::get('machines/{machine}', [MachineController::class, 'show'])->name('machines.show');
+    Route::put('machines/{machine}/checklist/{item}', [ChecklistEntryController::class, 'update'])
+        ->where('item', '[a-z0-9_]+')->name('machines.checklist.update');
+
+    Route::scopeBindings()->group(function () {
+        Route::post('machines/{machine}/notes', [MachineNoteController::class, 'store'])->name('machines.notes.store');
+        Route::delete('machines/{machine}/notes/{note}', [MachineNoteController::class, 'destroy'])->name('machines.notes.destroy');
+        Route::post('machines/{machine}/photos', [PhotoController::class, 'store'])->name('machines.photos.store');
+        Route::get('machines/{machine}/photos/{photo}', [PhotoController::class, 'show'])->name('machines.photos.show');
+        Route::delete('machines/{machine}/photos/{photo}', [PhotoController::class, 'destroy'])->name('machines.photos.destroy');
+    });
     Route::get('imports/create', [ReportImportController::class, 'create'])->name('imports.create');
     Route::post('imports', [ReportImportController::class, 'store'])->name('imports.store');
 });

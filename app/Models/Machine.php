@@ -46,4 +46,28 @@ class Machine extends Model
     {
         return $this->hasMany(Report::class);
     }
+
+    /**
+     * @return HasMany<ChecklistEntry, $this>
+     */
+    public function checklistEntries(): HasMany
+    {
+        return $this->hasMany(ChecklistEntry::class);
+    }
+
+    /**
+     * @return HasMany<MachineNote, $this>
+     */
+    public function notes(): HasMany
+    {
+        return $this->hasMany(MachineNote::class);
+    }
+
+    /**
+     * @return HasMany<Photo, $this>
+     */
+    public function photos(): HasMany
+    {
+        return $this->hasMany(Photo::class);
+    }
 }
