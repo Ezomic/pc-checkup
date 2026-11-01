@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use App\Http\Controllers\ChecklistEntryController;
 use App\Http\Controllers\HealthController;
+use App\Http\Controllers\LoginLinkController;
+use App\Http\Controllers\LoginLinkRequestController;
 use App\Http\Controllers\MachineController;
 use App\Http\Controllers\MachineNoteController;
 use App\Http\Controllers\MachineStatusController;
@@ -20,6 +22,17 @@ Route::get('/', fn () => Auth::check()
     : Inertia::render('Welcome'))->name('home');
 
 Route::get('health', HealthController::class)->name('health');
+
+Route::middleware('guest')->group(function () {
+    Route::post('login/link', LoginLinkRequestController::class)
+        ->middleware('throttle:login-link')->name('login.link.request');
+    Route::get('login/link-invalid', [LoginLinkController::class, 'invalid'])->name('login.link.invalid');
+
+    Route::middleware('throttle:10,1')->group(function () {
+        Route::get('login/link/{token}', [LoginLinkController::class, 'show'])->name('login.link.show');
+        Route::post('login/link/{token}', [LoginLinkController::class, 'consume'])->name('login.link.consume');
+    });
+});
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('dashboard', fn () => Inertia::render('Dashboard'))->name('dashboard');
