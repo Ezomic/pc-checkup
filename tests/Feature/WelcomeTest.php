@@ -13,10 +13,12 @@ it('shows the landing page to a guest', function () {
         ->assertInertia(fn (Assert $page) => $page->component('Welcome'));
 });
 
-it('sends a signed-in visitor to the app instead of the front door', function () {
+it('still shows the landing page to a signed-in visitor', function () {
     actingAs(User::factory()->create(['email_verified_at' => now()]));
 
-    $this->get('/')->assertRedirect(route('dashboard'));
+    $this->get('/')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page->component('Welcome'));
 });
 
 // The whole reason this ticket exists: the stock page advertised Laracasts and

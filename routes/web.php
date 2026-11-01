@@ -13,14 +13,10 @@ use App\Http\Controllers\MachineStatusController;
 use App\Http\Controllers\NoteController;
 use App\Http\Controllers\PhotoController;
 use App\Http\Controllers\ReportImportController;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
-// A signed-in visitor wants the app, not the front door.
-Route::get('/', fn () => Auth::check()
-    ? redirect()->route('dashboard')
-    : Inertia::render('Welcome'))->name('home');
+Route::get('/', fn () => Inertia::render('Welcome'))->name('home');
 
 Route::get('health', HealthController::class)->name('health');
 
