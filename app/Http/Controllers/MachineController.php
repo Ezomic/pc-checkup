@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Models\Machine;
+use App\Models\Photo;
 use App\Models\User;
+use App\Services\Checklist\ChecklistResolver;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;
 use Inertia\Inertia;
@@ -25,6 +28,37 @@ final class MachineController extends Controller
                 ->latest('id')
                 ->paginate(Config::integer('pagination.per_page'))
                 ->withQueryString(),
+        ]);
+    }
+
+    public function show(Machine $machine, ChecklistResolver $resolver): Response
+    {
+        $this->authorize('view', $machine);
+
+        $report = $machine->reports()->latest()->latest('id')->first();
+        $entries = $machine->checklistEntries()->get()->keyBy('item_key');
+
+        return Inertia::render('machines/Show', [
+            'machine' => $machine->only(['id', 'name', 'serial', 'hardware_uuid', 'os', 'device_type', 'model']),
+            'report' => $report === null ? null : [
+                'id' => $report->id,
+                'created_at' => $report->created_at,
+                'flags' => $report->flags,
+                'markdown' => $report->markdown,
+            ],
+            'checklist' => array_map(fn (array $item): array => [
+                ...$item,
+                'outcome' => $entries->get($item['key'])?->outcome->value,
+                'note' => $entries->get($item['key'])?->note,
+            ], $resolver->for($machine)),
+            'notes' => $machine->notes()->latest()->latest('id')->get(['id', 'body', 'created_at']),
+            'photos' => $machine->photos()->oldest()->oldest('id')->get()->map(fn (Photo $photo): array => [
+                'id' => $photo->id,
+                'caption' => $photo->caption,
+                'width' => $photo->width,
+                'height' => $photo->height,
+                'url' => route('machines.photos.show', [$machine, $photo], false),
+            ])->all(),
         ]);
     }
 }

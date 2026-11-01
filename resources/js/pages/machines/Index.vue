@@ -4,7 +4,7 @@ import { Upload } from '@lucide/vue';
 import Paginator from '@/components/Paginator.vue';
 import { Button } from '@/components/ui/button';
 import { create } from '@/routes/imports';
-import { index } from '@/routes/machines';
+import { index, show } from '@/routes/machines';
 import type { Machine, Paginated } from '@/types';
 
 defineProps<{
@@ -56,7 +56,12 @@ function details(machine: Machine): string {
                 class="flex items-start justify-between gap-4 rounded-xl border border-sidebar-border/70 p-4"
             >
                 <div class="min-w-0">
-                    <p class="font-medium">{{ title(machine) }}</p>
+                    <Link
+                        :href="show(machine.id)"
+                        class="font-medium underline-offset-4 hover:underline"
+                    >
+                        {{ title(machine) }}
+                    </Link>
                     <p class="truncate text-sm text-muted-foreground">
                         {{ details(machine) }}
                     </p>
