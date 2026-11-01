@@ -8,6 +8,8 @@ final class ReportParser
 {
     private const MAX_VALUE_LENGTH = 255;
 
+    private const MAX_FLAGS = 100;
+
     private const NOTHING_FLAGGED = 'Nothing flagged automatically.';
 
     public function parse(string $markdown): ParsedReport
@@ -101,6 +103,10 @@ final class ReportParser
 
             if ($flag !== null && $flag !== self::NOTHING_FLAGGED) {
                 $flags[] = $flag;
+            }
+
+            if (count($flags) === self::MAX_FLAGS) {
+                break;
             }
         }
 

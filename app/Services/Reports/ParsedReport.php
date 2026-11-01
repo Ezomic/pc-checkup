@@ -8,6 +8,8 @@ final readonly class ParsedReport
 {
     private const MAX_SERIAL_LENGTH = 100;
 
+    private const MAX_UUID_LENGTH = 100;
+
     private const PLACEHOLDER_SERIALS = [
         'to be filled by o.e.m.',
         'default string',
@@ -46,8 +48,18 @@ final readonly class ParsedReport
             return null;
         }
 
-        // A run of one repeated character (0000000, FFFFFFF) is a blank firmware default.
-        return preg_match('/^(.)\1*$/u', $serial) === 1 ? null : $serial;
+        return $this->isBlankDefault($serial) ? null : $serial;
+    }
+
+    public function usableUuid(): ?string
+    {
+        $uuid = $this->hardwareUuid;
+
+        if ($uuid === null || mb_strlen($uuid) > self::MAX_UUID_LENGTH) {
+            return null;
+        }
+
+        return $this->isBlankDefault(str_replace('-', '', $uuid)) ? null : $uuid;
     }
 
     public function identityKey(): ?string
@@ -58,6 +70,14 @@ final readonly class ParsedReport
             return 'serial:'.mb_strtoupper($serial);
         }
 
-        return $this->hardwareUuid === null ? null : 'uuid:'.mb_strtolower($this->hardwareUuid);
+        $uuid = $this->usableUuid();
+
+        return $uuid === null ? null : 'uuid:'.mb_strtolower($uuid);
+    }
+
+    // A run of one repeated character (0000000, FFFFFFF) is what firmware reports when nothing was set.
+    private function isBlankDefault(string $value): bool
+    {
+        return $value === '' || preg_match('/^(.)\1*$/u', $value) === 1;
     }
 }

@@ -9,6 +9,7 @@ use App\Models\Report;
 use App\Models\User;
 use App\Services\Reports\ParsedReport;
 use App\Services\Reports\ReportParser;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -30,46 +31,39 @@ final class ImportReport
             ]);
         }
 
-        return DB::transaction(function () use ($user, $markdown, $parsed, $identity): Report {
-            $machine = $this->machine($user, $identity, $parsed);
-
-            return $this->report($machine, $markdown, $parsed);
-        });
+        try {
+            return DB::transaction(fn (): Report => $this->store($user, $markdown, $parsed, $identity));
+        } catch (UniqueConstraintViolationException) {
+            // A double submit raced us to the same machine or report, so the retry finds it.
+            return DB::transaction(fn (): Report => $this->store($user, $markdown, $parsed, $identity));
+        }
     }
 
-    // A byte order mark and CRLF are what a Windows editor adds to the same text, so
-    // neither may make an identical report look new.
+    // A byte order mark, CRLF and trailing whitespace are what an editor, a Windows shell
+    // or the paste box adds to the same text, so none may make an identical report look new.
     private function normalise(string $markdown): string
     {
-        return str_replace(["\r\n", "\r"], "\n", ltrim($markdown, "\u{FEFF}"));
+        $markdown = preg_replace('/^\x{FEFF}/u', '', $markdown) ?? $markdown;
+
+        return trim(str_replace(["\r\n", "\r"], "\n", $markdown))."\n";
     }
 
-    private function machine(User $user, string $identity, ParsedReport $parsed): Machine
+    private function store(User $user, string $markdown, ParsedReport $parsed, string $identity): Report
     {
-        $machine = $user->machines()->withTrashed()->where('identity_key', $identity)->first()
-            ?? (new Machine)->forceFill(['user_id' => $user->id, 'identity_key' => $identity]);
-
-        $machine->forceFill([
-            'serial' => $parsed->usableSerial() ?? $machine->serial,
-            'hardware_uuid' => $parsed->hardwareUuid ?? $machine->hardware_uuid,
-            'name' => $parsed->name ?? $machine->name,
-            'os' => $parsed->os ?? $machine->os,
-            'device_type' => $parsed->deviceType ?? $machine->device_type,
-            'model' => $parsed->model ?? $machine->model,
-            'deleted_at' => null,
-        ])->save();
-
-        return $machine;
-    }
-
-    private function report(Machine $machine, string $markdown, ParsedReport $parsed): Report
-    {
+        $machine = $user->machines()->withTrashed()->where('identity_key', $identity)->first();
         $checksum = hash('sha256', $markdown);
+        $existing = $machine?->reports()->withTrashed()->where('checksum', $checksum)->first();
 
-        $existing = $machine->reports()->withTrashed()->where('checksum', $checksum)->first();
+        // Re-importing a report we already hold must not roll the machine back to what an
+        // older report said about it.
+        if ($machine !== null && ! $machine->trashed() && $existing !== null && ! $existing->trashed()) {
+            return $existing;
+        }
 
-        if ($existing instanceof Report) {
-            return $existing->trashed() ? tap($existing)->restore() : $existing;
+        $machine = $this->saveMachine($machine ?? (new Machine)->forceFill(['user_id' => $user->id, 'identity_key' => $identity]), $parsed);
+
+        if ($existing !== null) {
+            return tap($existing)->restore();
         }
 
         return $machine->reports()->create([
@@ -78,5 +72,20 @@ final class ImportReport
             'format_version' => $parsed->formatVersion,
             'flags' => $parsed->flags,
         ]);
+    }
+
+    private function saveMachine(Machine $machine, ParsedReport $parsed): Machine
+    {
+        $machine->forceFill([
+            'serial' => $parsed->usableSerial() ?? $machine->serial,
+            'hardware_uuid' => $parsed->usableUuid() ?? $machine->hardware_uuid,
+            'name' => $parsed->name ?? $machine->name,
+            'os' => $parsed->os ?? $machine->os,
+            'device_type' => $parsed->deviceType ?? $machine->device_type,
+            'model' => $parsed->model ?? $machine->model,
+            'deleted_at' => null,
+        ])->save();
+
+        return $machine;
     }
 }

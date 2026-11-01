@@ -8,6 +8,7 @@ use App\Models\Report;
 use App\Models\User;
 use App\Services\Reports\ReportParser;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 use function Pest\Laravel\actingAs;
@@ -229,8 +230,8 @@ describe('ImportReport', function () {
     it('never merges two pcs that both report a placeholder serial but differ in uuid', function () {
         $user = User::factory()->create();
 
-        (new ImportReport)->handle($user, reportMarkdown(['Serial' => 'To be filled by O.E.M.', 'Hardware UUID' => 'AAAA']));
-        (new ImportReport)->handle($user, reportMarkdown(['Serial' => 'To be filled by O.E.M.', 'Hardware UUID' => 'BBBB']));
+        (new ImportReport)->handle($user, reportMarkdown(['Serial' => 'To be filled by O.E.M.', 'Hardware UUID' => '4C4C4544-0035-5110-8052-C4C04F544E32']));
+        (new ImportReport)->handle($user, reportMarkdown(['Serial' => 'To be filled by O.E.M.', 'Hardware UUID' => '4C4C4544-0042-5710-8030-B8C04F4C4E32']));
 
         assertDatabaseCount('machines', 2);
     });
@@ -409,5 +410,132 @@ describe('POST /imports', function () {
     it('is not reachable with a wrong field type', function () {
         actingAs(User::factory()->create())->post('/imports', ['text' => ['nested'], 'file' => 'not a file'])
             ->assertSessionHasErrors(['text', 'file']);
+    });
+
+    it('does not import the same report twice when it is uploaded and then pasted', function () {
+        $user = User::factory()->create();
+        $file = UploadedFile::fake()->createWithContent('report.md', reportMarkdown());
+
+        actingAs($user)->post('/imports', ['file' => $file])->assertRedirect('/machines');
+        actingAs($user)->post('/imports', ['text' => reportMarkdown()])->assertRedirect('/machines');
+
+        assertDatabaseCount('reports', 1);
+    });
+});
+
+describe('ImportReport edge cases', function () {
+    afterEach(function () {
+        Machine::flushEventListeners();
+        Report::flushEventListeners();
+    });
+
+    it('does not roll a machine back when an older report is imported again', function () {
+        $user = User::factory()->create();
+        (new ImportReport)->handle($user, reportMarkdown(['Model' => 'Old model']));
+        (new ImportReport)->handle($user, reportMarkdown(['Model' => 'New model'], flags: ['x']));
+
+        (new ImportReport)->handle($user, reportMarkdown(['Model' => 'Old model']));
+
+        expect(Machine::query()->sole()->model)->toBe('New model');
+    });
+
+    it('keeps a leading character that shares bytes with a byte order mark', function () {
+        $user = User::factory()->create();
+
+        $report = (new ImportReport)->handle($user, "\u{FF61}".reportMarkdown());
+
+        expect($report->markdown)->toStartWith("\u{FF61}");
+    });
+
+    it('stores at most one hundred flags', function () {
+        $user = User::factory()->create();
+
+        $report = (new ImportReport)->handle($user, reportMarkdown(flags: array_map(fn (int $i): string => "flag {$i}", range(1, 150))));
+
+        expect($report->flags)->toHaveCount(100)->and($report->flags[0])->toBe('flag 1');
+    });
+
+    it('rejects a placeholder hardware uuid', function (string $uuid) {
+        $user = User::factory()->create();
+
+        expect(fn () => (new ImportReport)->handle($user, reportMarkdown(['Serial' => 'None', 'Hardware UUID' => $uuid])))
+            ->toThrow(ValidationException::class);
+    })->with([
+        'zeros' => '00000000-0000-0000-0000-000000000000',
+        'effs' => 'FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF',
+        'too long' => str_repeat('a1', 60),
+    ]);
+
+    it('does not store a placeholder uuid on a machine identified by its serial', function () {
+        $user = User::factory()->create();
+
+        (new ImportReport)->handle($user, reportMarkdown(['Hardware UUID' => '00000000-0000-0000-0000-000000000000']));
+
+        expect(Machine::query()->sole()->hardware_uuid)->toBeNull();
+    });
+
+    it('leaves another user’s deleted machine alone', function () {
+        $owner = User::factory()->create();
+        $other = User::factory()->create();
+        (new ImportReport)->handle($owner, reportMarkdown());
+        Machine::query()->sole()->delete();
+
+        (new ImportReport)->handle($other, reportMarkdown());
+
+        expect(Machine::withTrashed()->where('user_id', $owner->id)->sole()->trashed())->toBeTrue()
+            ->and($other->machines()->count())->toBe(1);
+    });
+
+    it('survives a concurrent import creating the same machine', function () {
+        $user = User::factory()->create();
+        $raced = false;
+
+        Machine::creating(function () use ($user, &$raced): void {
+            if ($raced) {
+                return;
+            }
+
+            $raced = true;
+            DB::table('machines')->insert([
+                'user_id' => $user->id,
+                'identity_key' => 'serial:C02ABC123XYZ',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        });
+
+        (new ImportReport)->handle($user, reportMarkdown());
+
+        expect($raced)->toBeTrue();
+        assertDatabaseCount('machines', 1);
+        assertDatabaseCount('reports', 1);
+    });
+
+    it('survives a concurrent import creating the same report', function () {
+        $user = User::factory()->create();
+        (new ImportReport)->handle($user, reportMarkdown(flags: ['first']));
+        $machine = Machine::query()->sole();
+        $raced = false;
+
+        Report::creating(function () use ($machine, &$raced): void {
+            if ($raced) {
+                return;
+            }
+
+            $raced = true;
+            DB::table('reports')->insert([
+                'machine_id' => $machine->id,
+                'markdown' => 'x',
+                'checksum' => hash('sha256', reportMarkdown(flags: ['second'])),
+                'flags' => '[]',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        });
+
+        (new ImportReport)->handle($user, reportMarkdown(flags: ['second']));
+
+        expect($raced)->toBeTrue();
+        assertDatabaseCount('reports', 2);
     });
 });
