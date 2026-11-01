@@ -129,6 +129,9 @@ describe('POST /machines', function () {
         'digits' => '123456789',
         'repeated zeros' => '0000000000',
         'repeated letters' => 'FFFFFFFF',
+        'windows not defined' => 'Not Defined',
+        'windows oem' => 'O.E.M.',
+        'windows serialnumber' => 'SerialNumber',
     ]);
 
     it('rejects a placeholder uuid', function (string $uuid) {
@@ -139,6 +142,8 @@ describe('POST /machines', function () {
     })->with([
         'all zeros' => '00000000-0000-0000-0000-000000000000',
         'all fs' => 'FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF',
+        'shared board uuid' => '03000200-0400-0500-0006-000700080009',
+        'other shared board uuid' => '00020003-0004-0005-0006-000700080009',
     ]);
 
     it('rejects a placeholder uuid next to a usable serial', function () {

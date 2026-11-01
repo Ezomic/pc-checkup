@@ -20,6 +20,20 @@ final readonly class MachineIdentity
         'unknown',
         'n/a',
         '123456789',
+        '0123456789',
+        'not defined',
+        'o.e.m.',
+        'oem',
+        'invalid',
+        'serialnumber',
+        'serial number',
+        'chassis serial number',
+    ];
+
+    // Cheap boards ship the same UUID in every unit, which would merge unrelated PCs into one machine.
+    private const PLACEHOLDER_UUIDS = [
+        '03000200-0400-0500-0006-000700080009',
+        '00020003-0004-0005-0006-000700080009',
     ];
 
     public function __construct(
@@ -47,6 +61,10 @@ final readonly class MachineIdentity
         $uuid = $this->hardwareUuid;
 
         if ($uuid === null || mb_strlen($uuid) > self::MAX_UUID_LENGTH) {
+            return null;
+        }
+
+        if (in_array(mb_strtolower($uuid), self::PLACEHOLDER_UUIDS, true)) {
             return null;
         }
 
