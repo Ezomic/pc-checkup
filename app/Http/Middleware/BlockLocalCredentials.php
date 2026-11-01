@@ -41,6 +41,7 @@ final class BlockLocalCredentials
         'password.reset',
         'password.update',
         'login.store',
+        'login.link.*',
         // Confirmation goes through ID instead (WEB-28), so a local password set before
         // the switch to workflow mode cannot stand in for it.
         'password.confirm.store',

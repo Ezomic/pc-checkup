@@ -9,8 +9,10 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
 import { store } from '@/routes/login';
+import { request as requestLoginLink } from '@/routes/login/link';
 import { request } from '@/routes/password';
 import { redirect as ssoRedirect } from '@/routes/sso';
 
@@ -121,6 +123,41 @@ watchEffect(() => {
                     Log in
                 </Button>
             </div>
+        </Form>
+
+        <Separator class="my-6" />
+
+        <Form
+            v-bind="requestLoginLink.form()"
+            v-slot="{ errors, processing }"
+            class="grid gap-4"
+            data-test="login-link-form"
+        >
+            <div class="grid gap-2">
+                <Label for="link-email">Or get a login link by email</Label>
+                <Input
+                    id="link-email"
+                    type="email"
+                    name="email"
+                    required
+                    :tabindex="6"
+                    autocomplete="email"
+                    placeholder="email@example.com"
+                />
+                <InputError :message="errors.email" />
+            </div>
+
+            <Button
+                type="submit"
+                variant="outline"
+                class="w-full"
+                :tabindex="7"
+                :disabled="processing"
+                data-test="login-link-button"
+            >
+                <Spinner v-if="processing" />
+                Email me a login link
+            </Button>
         </Form>
     </template>
 </template>

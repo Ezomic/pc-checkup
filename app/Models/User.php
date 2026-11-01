@@ -47,6 +47,14 @@ class User extends Authenticatable implements PasskeyUser
     }
 
     /**
+     * @return HasMany<LoginLink, $this>
+     */
+    public function loginLinks(): HasMany
+    {
+        return $this->hasMany(LoginLink::class);
+    }
+
+    /**
      * @return HasMany<Machine, $this>
      */
     public function machines(): HasMany
