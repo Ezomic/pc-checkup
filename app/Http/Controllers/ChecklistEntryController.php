@@ -21,7 +21,7 @@ final class ChecklistEntryController extends Controller
     ): RedirectResponse {
         $this->authorize('update', $machine);
 
-        abort_unless(in_array($item, array_column($resolver->for($machine), 'key'), true), 404);
+        abort_unless($resolver->knows($machine, $item), 404);
 
         $action->handle($machine, $item, $request->outcome(), $request->note());
 

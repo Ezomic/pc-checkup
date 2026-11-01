@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Actions\ApiTokens\CreateApiToken;
+use App\Enums\ApiAbility;
 use App\Models\User;
 use Illuminate\Foundation\Auth\User as FrameworkUser;
 use Illuminate\Support\Facades\Exceptions;
@@ -18,12 +19,12 @@ function ssoUserWithToken(string $idpId): array
     $user = User::factory()->create();
     $user->forceFill(['idp_id' => $idpId])->save();
 
-    return [$user, app(CreateApiToken::class)->handle($user, 'Script')];
+    return [$user, app(CreateApiToken::class)->handle($user, 'Script', [ApiAbility::Read])];
 }
 
 it('deletes every API token of the user when ID revokes their access', function () {
     [$user, $plain] = ssoUserWithToken('idp-1');
-    app(CreateApiToken::class)->handle($user, 'Laptop CLI');
+    app(CreateApiToken::class)->handle($user, 'Laptop CLI', [ApiAbility::Read]);
     [$someoneElse] = ssoUserWithToken('idp-2');
 
     $this->withToken($plain)->getJson('/api/user')->assertOk();

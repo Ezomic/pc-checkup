@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Actions\ApiTokens\CreateApiToken;
+use App\Enums\ApiAbility;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Testing\TestResponse;
@@ -64,7 +65,7 @@ it('refuses a request for another host', function (string $host) {
 ]);
 
 it('refuses an API request for another host', function () {
-    $plain = app(CreateApiToken::class)->handle(User::factory()->create(), 'Script');
+    $plain = app(CreateApiToken::class)->handle(User::factory()->create(), 'Script', [ApiAbility::Read]);
 
     $this->withToken($plain)->getJson('https://'.APP_HOST.'/api/user')->assertOk();
     $this->withToken($plain)->getJson('https://evil.example/api/user')->assertBadRequest();
@@ -90,7 +91,7 @@ describe('in workflow mode', function () {
     it('accepts the back-channel logout from ID on its own host only', function () {
         $user = User::factory()->create();
         $user->forceFill(['idp_id' => 'idp-1'])->save();
-        app(CreateApiToken::class)->handle($user, 'Script');
+        app(CreateApiToken::class)->handle($user, 'Script', [ApiAbility::Read]);
 
         signedIdEventTo('evil.example', $user)->assertBadRequest();
         expect($user->tokens()->count())->toBe(1);

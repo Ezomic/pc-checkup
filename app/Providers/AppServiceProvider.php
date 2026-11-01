@@ -4,13 +4,16 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Models\Machine;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 use Laravel\Sanctum\PersonalAccessToken;
@@ -32,6 +35,23 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->configureDefaults();
         $this->configureRateLimiting();
+        $this->configureApiBindings();
+    }
+
+    /**
+     * An API caller may not learn that a machine exists, so someone else's machine is as
+     * missing as one that never was. The UI answers 403 for it through the same policy.
+     * Soft deleted machines are already absent from the query.
+     */
+    protected function configureApiBindings(): void
+    {
+        Route::bind('ownedMachine', function (string $id): Machine {
+            $machine = Machine::query()->find($id);
+
+            abort_unless($machine !== null && Gate::allows('view', $machine), 404);
+
+            return $machine;
+        });
     }
 
     /**

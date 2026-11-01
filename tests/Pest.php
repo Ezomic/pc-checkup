@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Testing\TestResponse;
+use Laravel\Sanctum\Sanctum;
 use Laravel\Socialite\Contracts\Factory as Socialite;
 use Laravel\Socialite\Two\User as SocialiteUser;
 use Symfony\Component\HttpFoundation\Response;
@@ -100,4 +101,23 @@ function returnWithOnlyTheRememberCookie(string $recaller, ?string $url = null):
     Auth::forgetGuards();
 
     return test()->withCookie(Auth::guard()->getRecallerName(), $recaller)->get($url ?? route('dashboard'));
+}
+
+/**
+ * Signs in a fresh user through Sanctum with a token holding exactly these abilities.
+ *
+ * @param  list<string>  $abilities
+ */
+function apiUser(array $abilities = ['read', 'write']): User
+{
+    $user = User::factory()->create();
+
+    Sanctum::actingAs($user, $abilities);
+
+    return $user;
+}
+
+function fixtureReport(): string
+{
+    return (string) file_get_contents(__DIR__.'/Fixtures/windows-checkup-desktop.md');
 }

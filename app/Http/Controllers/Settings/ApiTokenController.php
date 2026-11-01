@@ -29,6 +29,7 @@ final class ApiTokenController extends Controller
                 ->map(fn (PersonalAccessToken $token): array => [
                     'id' => $token->getKey(),
                     'name' => $token->name,
+                    'abilities' => $token->abilities,
                     'created_at_diff' => $token->created_at?->diffForHumans(),
                     'last_used_at_diff' => $token->last_used_at?->diffForHumans(),
                     'expires_at_diff' => $token->expires_at?->diffForHumans(),
@@ -47,7 +48,7 @@ final class ApiTokenController extends Controller
         $user = $request->user();
         abort_unless($user instanceof User, 403);
 
-        $plainTextToken = $action->handle($user, $request->tokenName());
+        $plainTextToken = $action->handle($user, $request->tokenName(), $request->abilities());
 
         return to_route('api-tokens.index')->with('createdToken', $plainTextToken);
     }

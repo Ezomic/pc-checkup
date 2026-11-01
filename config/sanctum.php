@@ -39,9 +39,13 @@ return [
     | are able to authenticate the request, Sanctum will use the bearer
     | token that's present on an incoming request for authentication.
     |
+    | Empty on purpose: the API serves private data and gates it by token
+    | ability, and a session carries no ability, so only a bearer token may
+    | authenticate against it.
+    |
     */
 
-    'guard' => ['web'],
+    'guard' => [],
 
     /*
     |--------------------------------------------------------------------------

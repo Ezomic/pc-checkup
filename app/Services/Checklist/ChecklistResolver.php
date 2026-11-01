@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Checklist;
 
 use App\Models\Machine;
+use OutOfBoundsException;
 
 final class ChecklistResolver
 {
@@ -81,5 +82,38 @@ final class ChecklistResolver
         }
 
         return $items;
+    }
+
+    public function knows(Machine $machine, string $key): bool
+    {
+        return in_array($key, array_column($this->for($machine), 'key'), true);
+    }
+
+    /**
+     * Every item the machine's checklist has, with what was recorded against it.
+     *
+     * @return list<array{key: string, label: string, group: string, outcome: string|null, note: string|null}>
+     */
+    public function withEntries(Machine $machine): array
+    {
+        $entries = $machine->checklistEntries()->get()->keyBy('item_key');
+
+        return array_map(fn (array $item): array => [
+            ...$item,
+            'outcome' => $entries->get($item['key'])?->outcome->value,
+            'note' => $entries->get($item['key'])?->note,
+        ], $this->for($machine));
+    }
+
+    /**
+     * @return array{key: string, label: string, group: string, outcome: string|null, note: string|null}
+     *
+     * @throws OutOfBoundsException when the checklist has no such item, so check knows() first
+     */
+    public function item(Machine $machine, string $key): array
+    {
+        $matches = array_values(array_filter($this->withEntries($machine), fn (array $item): bool => $item['key'] === $key));
+
+        return $matches[0] ?? throw new OutOfBoundsException("No checklist item [{$key}].");
     }
 }

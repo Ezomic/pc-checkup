@@ -65,13 +65,13 @@ final class MachineController extends Controller
     {
         $this->authorize('view', $machine);
 
-        $report = $machine->reports()->latest()->latest('id')->first();
-        $entries = $machine->checklistEntries()->get()->keyBy('item_key');
+        $report = $machine->latestReport();
         $checklist = ['fail' => [], 'pass' => [], 'na' => [], 'unchecked' => []];
 
-        foreach ($resolver->for($machine) as $item) {
-            $entry = $entries->get($item['key']);
-            $checklist[$entry?->outcome->value ?? 'unchecked'][] = [...$item, 'note' => $entry?->note];
+        foreach ($resolver->withEntries($machine) as $item) {
+            $outcome = $item['outcome'] ?? 'unchecked';
+            unset($item['outcome']);
+            $checklist[$outcome][] = $item;
         }
 
         return Inertia::render('machines/Summary', [
@@ -86,8 +86,7 @@ final class MachineController extends Controller
     {
         $this->authorize('view', $machine);
 
-        $report = $machine->reports()->latest()->latest('id')->first();
-        $entries = $machine->checklistEntries()->get()->keyBy('item_key');
+        $report = $machine->latestReport();
 
         return Inertia::render('machines/Show', [
             'machine' => $machine->only(['id', 'name', 'serial', 'hardware_uuid', 'os', 'device_type', 'model', 'status']),
@@ -97,11 +96,7 @@ final class MachineController extends Controller
                 'flags' => $report->flags,
                 'markdown' => $report->markdown,
             ],
-            'checklist' => array_map(fn (array $item): array => [
-                ...$item,
-                'outcome' => $entries->get($item['key'])?->outcome->value,
-                'note' => $entries->get($item['key'])?->note,
-            ], $resolver->for($machine)),
+            'checklist' => $resolver->withEntries($machine),
             'notes' => $machine->notes()->latest()->latest('id')->get(['id', 'body', 'created_at']),
             'photos' => $machine->photos()->oldest()->oldest('id')->get()->map(fn (Photo $photo): array => [
                 'id' => $photo->id,

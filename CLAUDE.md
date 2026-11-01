@@ -67,10 +67,12 @@ The template runs in one of two modes, switched at runtime by `WORKFLOW_MODE` (`
   trip through ID that must sign the user in again after it was asked for
   (`App\Actions\Workflow\ConfirmIdentityThroughId`, WEB-28), and every local credential route
   (passkeys, two-factor, password change, the Security page) answers 404 there
-  (`BlockLocalCredentials`). `routes/api.php` ships exactly one route, `GET /api/user` behind
-  `auth:sanctum`, so the tokens authenticate against something real; an app builds its API out
-  from there. When testing the API, do **not** `actingAs()` first: `auth:sanctum` falls back to
-  the web guard, so a lingering session authenticates the request and the token is never exercised.
+  (`BlockLocalCredentials`). `routes/api.php` serves the machine JSON API (PCC-9) behind `auth:sanctum` and the
+  `abilities:read` / `abilities:write` middleware (`App\Enums\ApiAbility`; a token from before
+  abilities existed holds `*`). `sanctum.guard` is empty, so only a bearer token authenticates the
+  API and a session never does. Machines resolve through the `ownedMachine` binding, which answers
+  404 for someone else's machine; the ability check runs before binding so a weak token cannot
+  tell machines apart.
   A token expires after `CreateApiToken::LIFETIME_DAYS` (90), with `sanctum.expiration` as the
   backstop for one minted any other way, and its plaintext starts with a prefix derived from
   `APP_NAME` so secret scanners can spot a leaked one. `RevokeApiTokensOnLostAccess` deletes a
