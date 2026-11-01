@@ -8,12 +8,6 @@ import { login } from '@/routes';
 const page = usePage();
 
 const appName = computed<string>(() => page.props.name);
-
-// Registration is disabled in workflow mode, where Thijssensoftware ID
-// provisions users, so the sign-up affordance must not be offered.
-const workflowEnabled = computed<boolean>(
-    () => page.props.workflow?.enabled ?? false,
-);
 </script>
 
 <template>
@@ -40,12 +34,6 @@ const workflowEnabled = computed<boolean>(
                 <div class="flex flex-col gap-3">
                     <Button as-child>
                         <Link :href="login()">Log in</Link>
-                    </Button>
-                    <!-- Wayfinder does not generate @/routes/register in
-                         workflow mode, because the route is never registered,
-                         so this stays a literal path (WEB-7). -->
-                    <Button v-if="!workflowEnabled" variant="outline" as-child>
-                        <Link href="/register">Create an account</Link>
                     </Button>
                 </div>
             </div>
