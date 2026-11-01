@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { computed } from 'vue';
+import CheckupDownloads from '@/components/CheckupDownloads.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -41,6 +42,11 @@ function submit(): void {
 
     <div class="flex h-full flex-1 flex-col gap-4 p-4">
         <h1 class="text-xl font-semibold">Import report</h1>
+
+        <div class="flex max-w-xl flex-col gap-2 rounded-lg border p-4">
+            <p class="text-sm font-medium">Need a report first?</p>
+            <CheckupDownloads />
+        </div>
 
         <form class="flex max-w-xl flex-col gap-6" @submit.prevent="submit">
             <InputError :message="reportError" />
