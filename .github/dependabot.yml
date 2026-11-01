@@ -48,3 +48,23 @@ updates:
         update-types:
           - "minor"
           - "patch"
+
+    # A major of these is a deliberate migration ticket, not a bot PR: each one
+    # breaks lint, type-check or the build until the config is migrated by hand.
+    ignore:
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@eslint/js"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "eslint-plugin-vue"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vueuse/core"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vue-tsc"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "concurrently"
+        update-types: ["version-update:semver-major"]
