@@ -22,14 +22,14 @@ final class LoginLinkController extends Controller
      */
     public function show(Request $request, string $token): Response
     {
-        $link = LoginLink::query()->forToken($token)->usable()->with('user')->first();
+        $email = LoginLink::query()->forToken($token)->usable()->with('user')->first()?->user?->email;
 
         // The masked address lets someone who was sent a stranger's link see it is not their account.
-        $page = $link === null
+        $page = $email === null
             ? Inertia::render('auth/LoginLinkInvalid')
             : Inertia::render('auth/ConfirmLoginLink', [
                 'token' => $token,
-                'email' => Str::mask($link->user->email, '*', 1, strpos($link->user->email, '@') - 1),
+                'email' => Str::mask($email, '*', 1, Str::length(Str::before($email, '@')) - 1),
             ]);
 
         $response = $page->toResponse($request);
