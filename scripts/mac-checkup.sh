@@ -294,9 +294,11 @@ pmset -g 2>/dev/null | grep -i lowpowermode | grep -q 1 && flag "Low Power Mode 
 THERM=$(pmset -g therm 2>/dev/null | awk -F'= ' '/CPU_Speed_Limit/ {print $2}')
 [ -n "${THERM:-}" ] && [ "$THERM" -lt 100 ] 2>/dev/null && flag "CPU is thermally throttled to ${THERM}% (check vents, dust, heavy load)."
 
-BOOT=$(sysctl -n kern.boottime | sed 's/.*sec = \([0-9]*\).*/\1/')
-UPDAYS=$(( ( $(date +%s) - BOOT ) / 86400 ))
-[ "$UPDAYS" -ge 30 ] && flag "Not restarted for $UPDAYS days."
+BOOT=$(sysctl -n kern.boottime | sed -n 's/^{ sec = \([0-9][0-9]*\),.*/\1/p')
+if [ -n "${BOOT:-}" ]; then
+    UPDAYS=$(( ( $(date +%s) - BOOT ) / 86400 ))
+    [ "$UPDAYS" -ge 30 ] && flag "Not restarted for $UPDAYS days."
+fi
 
 SECURITY_TOOLS=$(ps -axco comm | grep -iE 'falcon|sophos|norton|mcafee|avast|avg|malwarebytes|jamf|kandji|crowdstrike|sentinel|defender|carbonblack|eset' | sort -u | tr '\n' ' ')
 [ -n "${SECURITY_TOOLS:-}" ] && flag "Security or management agents running (can slow a Mac): $SECURITY_TOOLS"
