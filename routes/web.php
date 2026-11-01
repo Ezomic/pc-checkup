@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\CheckupScriptController;
 use App\Http\Controllers\ChecklistEntryController;
 use App\Http\Controllers\HealthController;
 use App\Http\Controllers\LoginLinkController;
@@ -22,6 +23,8 @@ Route::get('/', fn () => Auth::check()
     : Inertia::render('Welcome'))->name('home');
 
 Route::get('health', HealthController::class)->name('health');
+
+Route::get('scripts/{script}', CheckupScriptController::class)->name('scripts.download');
 
 Route::middleware('guest')->group(function () {
     Route::post('login/link', LoginLinkRequestController::class)
