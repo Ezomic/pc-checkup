@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { Head } from '@inertiajs/vue3';
+import { Head, Link } from '@inertiajs/vue3';
+import { FileText } from '@lucide/vue';
 import { computed } from 'vue';
 import ChecklistSection from '@/components/machines/ChecklistSection.vue';
 import NotesSection from '@/components/machines/NotesSection.vue';
 import PhotosSection from '@/components/machines/PhotosSection.vue';
-import { index } from '@/routes/machines';
+import StatusBadge from '@/components/machines/StatusBadge.vue';
+import StatusSection from '@/components/machines/StatusSection.vue';
+import { Button } from '@/components/ui/button';
+import { index, summary } from '@/routes/machines';
 import type {
     ChecklistItem,
     MachineDetails,
@@ -42,13 +46,26 @@ defineOptions({
     <Head :title="title" />
 
     <div class="flex h-full flex-1 flex-col gap-8 p-4">
-        <div>
-            <h1 class="text-xl font-semibold">{{ title }}</h1>
-            <p class="text-sm text-muted-foreground">{{ details }}</p>
-            <p v-if="machine.model" class="text-sm text-muted-foreground">
-                {{ machine.model }}
-            </p>
+        <div class="flex items-start justify-between gap-4">
+            <div>
+                <div class="flex items-center gap-2">
+                    <h1 class="text-xl font-semibold">{{ title }}</h1>
+                    <StatusBadge :status="machine.status" />
+                </div>
+                <p class="text-sm text-muted-foreground">{{ details }}</p>
+                <p v-if="machine.model" class="text-sm text-muted-foreground">
+                    {{ machine.model }}
+                </p>
+            </div>
+            <Button as-child size="sm" variant="outline">
+                <Link :href="summary(machine.id)">
+                    <FileText class="size-4" />
+                    Printable summary
+                </Link>
+            </Button>
         </div>
+
+        <StatusSection :machine-id="machine.id" :status="machine.status" />
 
         <section class="flex flex-col gap-3">
             <h2 class="text-lg font-semibold">Latest report</h2>
