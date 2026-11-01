@@ -13,13 +13,9 @@ defineProps<Props>();
 </script>
 
 <!--
-    A placeholder mark, on purpose. It used to be Laravel's logo, which is how
-    three apps ended up serving their own favicon in the browser tab while the
-    sidebar still showed Laravel's.
-
-    Replace the paths below with the app's own mark, drawn from the same shape as
-    its favicon so the tab and the sidebar agree. Every caller passes
-    `fill-current`, so it must be a filled mark rather than a stroked one.
+    A monitor with a check, the same shape as public/favicon.svg so the tab and
+    the sidebar agree. Every caller passes `fill-current`, so it must be a filled
+    mark rather than a stroked one.
 -->
 <template>
     <svg
@@ -32,8 +28,7 @@ defineProps<Props>();
             fill="currentColor"
             fill-rule="evenodd"
             clip-rule="evenodd"
-            d="M6 2h12a4 4 0 0 1 4 4v12a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V6a4 4 0 0 1 4-4Zm0 2.5A1.5 1.5 0 0 0 4.5 6v12A1.5 1.5 0 0 0 6 19.5h12a1.5 1.5 0 0 0 1.5-1.5V6A1.5 1.5 0 0 0 18 4.5H6Z"
+            d="M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm0 2v10h16V5H4Zm3 5.4 1.3-1.3 2.2 2.2 5.2-5.2L17 7.4l-6.5 6.5L7 10.4ZM11 17h2v2h-2v-2Zm-3 2h8a1 1 0 0 1 0 2H8a1 1 0 0 1 0-2Z"
         />
-        <path fill="currentColor" d="M12 9a3 3 0 1 1 0 6 3 3 0 0 1 0-6Z" />
     </svg>
 </template>
