@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { Head, Link } from '@inertiajs/vue3';
-import { Plus, Upload } from '@lucide/vue';
+import { Head, Link, router } from '@inertiajs/vue3';
+import { Plus, ScanLine, Upload } from '@lucide/vue';
 import StatusBadge from '@/components/machines/StatusBadge.vue';
 import Paginator from '@/components/Paginator.vue';
 import { Button } from '@/components/ui/button';
 import { create } from '@/routes/imports';
 import { create as createMachine, index, show } from '@/routes/machines';
+import { store as startScan } from '@/routes/scans';
 import type { Machine, Paginated } from '@/types';
 
 defineProps<{
@@ -36,13 +37,21 @@ function details(machine: Machine): string {
         <div class="flex items-center justify-between">
             <h1 class="text-xl font-semibold">Machines</h1>
             <div class="flex items-center gap-2">
+                <Button
+                    size="sm"
+                    data-test="start-scan"
+                    @click="router.post(startScan().url)"
+                >
+                    <ScanLine class="size-4" />
+                    Start a scan
+                </Button>
                 <Button as-child size="sm" variant="outline">
                     <Link :href="createMachine()">
                         <Plus class="size-4" />
                         Add machine
                     </Link>
                 </Button>
-                <Button as-child size="sm">
+                <Button as-child size="sm" variant="outline">
                     <Link :href="create()">
                         <Upload class="size-4" />
                         Import report
@@ -55,7 +64,8 @@ function details(machine: Machine): string {
             v-if="machines.data.length === 0"
             class="rounded-xl border border-dashed border-sidebar-border/70 p-8 text-center text-sm text-muted-foreground"
         >
-            No machines yet. Import a checkup report or add a machine by hand.
+            No machines yet. Start a scan, import a checkup report or add a
+            machine by hand.
         </p>
 
         <ul v-else class="flex flex-col gap-2">

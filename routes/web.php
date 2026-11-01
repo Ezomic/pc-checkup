@@ -13,6 +13,7 @@ use App\Http\Controllers\MachineStatusController;
 use App\Http\Controllers\NoteController;
 use App\Http\Controllers\PhotoController;
 use App\Http\Controllers\ReportImportController;
+use App\Http\Controllers\ScanController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -54,6 +55,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('machines/{machine}/photos/{photo}', [PhotoController::class, 'show'])->name('machines.photos.show');
         Route::delete('machines/{machine}/photos/{photo}', [PhotoController::class, 'destroy'])->name('machines.photos.destroy');
     });
+    Route::get('scans/current', [ScanController::class, 'show'])->name('scans.show');
+    Route::get('scans/status', [ScanController::class, 'status'])->name('scans.status');
+    Route::post('scans', [ScanController::class, 'store'])->name('scans.store');
     Route::get('imports/create', [ReportImportController::class, 'create'])->name('imports.create');
     Route::post('imports', [ReportImportController::class, 'store'])->name('imports.store');
 });

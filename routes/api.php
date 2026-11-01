@@ -7,8 +7,11 @@ use App\Http\Controllers\Api\MachineController;
 use App\Http\Controllers\Api\MachineNoteController;
 use App\Http\Controllers\Api\MachineStatusController;
 use App\Http\Controllers\Api\ReportController;
+use App\Http\Controllers\Api\ScanReportController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+
+Route::post('scans', [ScanReportController::class, 'store'])->name('api.scans.store');
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('user', function (Request $request) {
