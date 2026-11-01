@@ -1,5 +1,6 @@
 export * from './api-token';
 export * from './auth';
+export * from './machine';
 export * from './navigation';
 export * from './note';
 export * from './pagination';

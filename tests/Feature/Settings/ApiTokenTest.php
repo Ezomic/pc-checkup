@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Actions\ApiTokens\CreateApiToken;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 
@@ -198,8 +199,10 @@ it('refuses a token minted without an expiry once it is 90 days old', function (
     $this->withToken($plain)->getJson('/api/user')->assertUnauthorized();
 });
 
+// Pinned rather than frozen at "now": 29 days reads "4 weeks" or "1 month" depending on the
+// calendar month the suite happens to run in.
 it('shows when each token expires, and that it has', function () {
-    $this->freezeSecond();
+    $this->travelTo(CarbonImmutable::parse('2026-01-15 12:00:00'));
     $user = tokenUser();
     app(CreateApiToken::class)->handle($user, 'Old');
     $this->travel(30)->days();
