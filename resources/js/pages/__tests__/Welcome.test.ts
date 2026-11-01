@@ -29,25 +29,12 @@ describe('Welcome', () => {
         expect(wrapper.text()).not.toContain('Laravel');
     });
 
-    it('offers registration in base mode', () => {
+    // Users are created by hand, so no sign-up route exists to advertise.
+    it('only offers logging in', () => {
         const wrapper = mount(Welcome);
 
         const hrefs = wrapper.findAll('a').map((a) => a.attributes('href'));
 
-        expect(hrefs).toContain('/login');
-        expect(hrefs).toContain('/register');
-    });
-
-    // ID provisions users in workflow mode, so a local sign-up route does not
-    // exist and must not be advertised.
-    it('hides registration in workflow mode', () => {
-        state.workflowEnabled = true;
-
-        const wrapper = mount(Welcome);
-
-        const hrefs = wrapper.findAll('a').map((a) => a.attributes('href'));
-
-        expect(hrefs).toContain('/login');
-        expect(hrefs).not.toContain('/register');
+        expect(hrefs).toEqual(['/login']);
     });
 });
