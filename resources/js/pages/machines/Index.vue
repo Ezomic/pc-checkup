@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
-import { Upload } from '@lucide/vue';
+import { Plus, Upload } from '@lucide/vue';
 import StatusBadge from '@/components/machines/StatusBadge.vue';
 import Paginator from '@/components/Paginator.vue';
 import { Button } from '@/components/ui/button';
 import { create } from '@/routes/imports';
-import { index, show } from '@/routes/machines';
+import { create as createMachine, index, show } from '@/routes/machines';
 import type { Machine, Paginated } from '@/types';
 
 defineProps<{
@@ -35,19 +35,27 @@ function details(machine: Machine): string {
     <div class="flex h-full flex-1 flex-col gap-4 p-4">
         <div class="flex items-center justify-between">
             <h1 class="text-xl font-semibold">Machines</h1>
-            <Button as-child size="sm">
-                <Link :href="create()">
-                    <Upload class="size-4" />
-                    Import report
-                </Link>
-            </Button>
+            <div class="flex items-center gap-2">
+                <Button as-child size="sm" variant="outline">
+                    <Link :href="createMachine()">
+                        <Plus class="size-4" />
+                        Add machine
+                    </Link>
+                </Button>
+                <Button as-child size="sm">
+                    <Link :href="create()">
+                        <Upload class="size-4" />
+                        Import report
+                    </Link>
+                </Button>
+            </div>
         </div>
 
         <p
             v-if="machines.data.length === 0"
             class="rounded-xl border border-dashed border-sidebar-border/70 p-8 text-center text-sm text-muted-foreground"
         >
-            No machines yet. Import a checkup report to add the first one.
+            No machines yet. Import a checkup report or add a machine by hand.
         </p>
 
         <ul v-else class="flex flex-col gap-2">

@@ -27,6 +27,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::resource('notes', NoteController::class)->except('show');
 
     Route::get('machines', [MachineController::class, 'index'])->name('machines.index');
+    Route::get('machines/create', [MachineController::class, 'create'])->name('machines.create');
+    Route::post('machines', [MachineController::class, 'store'])->name('machines.store');
     Route::get('machines/{machine}', [MachineController::class, 'show'])->name('machines.show');
     Route::get('machines/{machine}/summary', [MachineController::class, 'summary'])->name('machines.summary');
     Route::put('machines/{machine}/status', [MachineStatusController::class, 'update'])->name('machines.status.update');
