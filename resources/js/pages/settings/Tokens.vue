@@ -6,9 +6,11 @@ import Heading from '@/components/Heading.vue';
 import InputError from '@/components/InputError.vue';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
+import { abilityOptions, describeAbilities } from '@/lib/abilities';
 import { destroy, index, store } from '@/routes/api-tokens';
 import type { ApiToken } from '@/types';
 
@@ -81,10 +83,10 @@ function revoke(id: number): void {
         <Form
             v-bind="store.form()"
             reset-on-success
-            class="flex items-end gap-2"
+            class="space-y-4"
             #default="{ errors, processing }"
         >
-            <div class="grid flex-1 gap-2">
+            <div class="grid gap-2">
                 <Label for="name">Token name</Label>
                 <Input
                     id="name"
@@ -94,6 +96,33 @@ function revoke(id: number): void {
                 />
                 <InputError :message="errors.name" />
             </div>
+
+            <fieldset class="grid gap-3">
+                <legend class="mb-1 text-sm leading-none font-medium">
+                    Abilities
+                </legend>
+                <Label
+                    v-for="option in abilityOptions"
+                    :key="option.value"
+                    :for="`ability-${option.value}`"
+                    class="items-start gap-3 font-normal"
+                >
+                    <Checkbox
+                        :id="`ability-${option.value}`"
+                        name="abilities[]"
+                        :value="option.value"
+                        :default-value="option.value === 'read'"
+                    />
+                    <span>
+                        <span class="font-medium">{{ option.label }}</span>
+                        <span class="block text-sm text-muted-foreground">
+                            {{ option.hint }}
+                        </span>
+                    </span>
+                </Label>
+                <InputError :message="errors.abilities" />
+            </fieldset>
+
             <Button type="submit" :disabled="processing">
                 <Spinner v-if="processing" />
                 Create token
@@ -116,6 +145,12 @@ function revoke(id: number): void {
             >
                 <div class="min-w-0">
                     <p class="truncate font-medium">{{ token.name }}</p>
+                    <p
+                        class="text-sm text-muted-foreground"
+                        data-testid="token-abilities"
+                    >
+                        {{ describeAbilities(token.abilities) }}
+                    </p>
                     <p class="text-sm text-muted-foreground">
                         Created {{ token.created_at_diff }} &middot;
                         {{

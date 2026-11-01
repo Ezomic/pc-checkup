@@ -10,7 +10,9 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Middleware\SubstituteBindings;
 use Inertia\Inertia;
+use Laravel\Sanctum\Http\Middleware\CheckAbilities;
 use Symfony\Component\HttpFoundation\Response;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -32,6 +34,12 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
 
         $middleware->throttleApi();
+
+        $middleware->alias(['abilities' => CheckAbilities::class]);
+
+        // Before route binding, so a token without the ability gets the same 403 for a machine
+        // that exists, one that does not, and one that is someone else's.
+        $middleware->prependToPriorityList(before: SubstituteBindings::class, prepend: CheckAbilities::class);
 
         $middleware->web(append: [
             BlockLocalCredentials::class,

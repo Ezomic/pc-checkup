@@ -24,6 +24,8 @@ use Illuminate\Support\Carbon;
  * @property string|null $device_type
  * @property string|null $model
  * @property MachineStatus $status
+ * @property int|null $reports_count
+ * @property string|null $last_report_at
  * @property Carbon|null $deleted_at
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
@@ -60,6 +62,11 @@ class Machine extends Model
     public function reports(): HasMany
     {
         return $this->hasMany(Report::class);
+    }
+
+    public function latestReport(): ?Report
+    {
+        return $this->reports()->latest()->latest('id')->first();
     }
 
     /**

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Actions\ApiTokens\CreateApiToken;
+use App\Enums\ApiAbility;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Str;
@@ -51,7 +52,7 @@ it('lists the acting user’s tokens and nobody else’s', function () {
 it('creates a token and reveals the plaintext exactly once', function () {
     tokenUser();
 
-    $this->post('/settings/api-tokens', ['name' => 'Laptop CLI'])
+    $this->post('/settings/api-tokens', ['name' => 'Laptop CLI', 'abilities' => ['read']])
         ->assertRedirect('/settings/api-tokens');
 
     assertDatabaseHas('personal_access_tokens', ['name' => 'Laptop CLI']);
@@ -76,7 +77,7 @@ it('creates a token and reveals the plaintext exactly once', function () {
 it('never stores the plaintext token', function () {
     $user = tokenUser();
 
-    $this->post('/settings/api-tokens', ['name' => 'Laptop CLI']);
+    $this->post('/settings/api-tokens', ['name' => 'Laptop CLI', 'abilities' => ['read']]);
 
     $plain = (string) session('createdToken');
     $stored = (string) $user->tokens()->sole()->token;
@@ -89,8 +90,8 @@ it('never stores the plaintext token', function () {
 it('validates the token name', function () {
     tokenUser();
 
-    $this->post('/settings/api-tokens', ['name' => ''])->assertSessionHasErrors('name');
-    $this->post('/settings/api-tokens', ['name' => str_repeat('a', 256)])->assertSessionHasErrors('name');
+    $this->post('/settings/api-tokens', ['name' => '', 'abilities' => ['read']])->assertSessionHasErrors('name');
+    $this->post('/settings/api-tokens', ['name' => str_repeat('a', 256), 'abilities' => ['read']])->assertSessionHasErrors('name');
 });
 
 it('revokes a token the user owns', function () {
@@ -171,13 +172,13 @@ it('expires a token 90 days after it is minted', function () {
     $this->freezeSecond();
     $user = tokenUser();
 
-    $this->post('/settings/api-tokens', ['name' => 'Laptop CLI'])->assertRedirect('/settings/api-tokens');
+    $this->post('/settings/api-tokens', ['name' => 'Laptop CLI', 'abilities' => ['read']])->assertRedirect('/settings/api-tokens');
 
     expect($user->tokens()->sole()->expires_at?->getTimestamp())->toBe(now()->addDays(90)->getTimestamp());
 });
 
 it('refuses a token once it has expired', function () {
-    $plain = app(CreateApiToken::class)->handle(User::factory()->create(), 'Laptop CLI');
+    $plain = app(CreateApiToken::class)->handle(User::factory()->create(), 'Laptop CLI', [ApiAbility::Read]);
 
     $this->travel(90)->days();
     $this->travel(-1)->minutes();
@@ -204,9 +205,9 @@ it('refuses a token minted without an expiry once it is 90 days old', function (
 it('shows when each token expires, and that it has', function () {
     $this->travelTo(CarbonImmutable::parse('2026-01-15 12:00:00'));
     $user = tokenUser();
-    app(CreateApiToken::class)->handle($user, 'Old');
+    app(CreateApiToken::class)->handle($user, 'Old', [ApiAbility::Read]);
     $this->travel(30)->days();
-    app(CreateApiToken::class)->handle($user, 'New');
+    app(CreateApiToken::class)->handle($user, 'New', [ApiAbility::Read]);
     $this->travel(61)->days();
     session()->put('auth.password_confirmed_at', now()->getTimestamp());
 
@@ -222,7 +223,7 @@ it('shows when each token expires, and that it has', function () {
 
 // Secret scanners find a leaked token by its prefix, and the app's name tells whose it is.
 it('prefixes the plaintext with the app name', function () {
-    $plain = app(CreateApiToken::class)->handle(User::factory()->create(), 'Laptop CLI');
+    $plain = app(CreateApiToken::class)->handle(User::factory()->create(), 'Laptop CLI', [ApiAbility::Read]);
     [, $secret] = explode('|', $plain, 2);
 
     expect(config('sanctum.token_prefix'))->toBe(Str::slug((string) config('app.name'), '_').'_')
@@ -242,4 +243,61 @@ it('throttles each token on its own', function () {
 
     $this->app['auth']->forgetGuards();
     $this->withToken($laptop)->getJson('/api/user')->assertOk();
+});
+
+describe('abilities', function () {
+    it('stores exactly the abilities that were ticked', function (array $ticked) {
+        $user = tokenUser();
+
+        $this->post('/settings/api-tokens', ['name' => 'CLI', 'abilities' => $ticked])->assertRedirect('/settings/api-tokens');
+
+        expect($user->tokens()->sole()->abilities)->toBe($ticked);
+    })->with([
+        'read only' => [['read']],
+        'write only' => [['write']],
+        'both' => [['read', 'write']],
+    ]);
+
+    it('requires at least one ability', function (mixed $abilities) {
+        tokenUser();
+
+        $this->post('/settings/api-tokens', ['name' => 'CLI', 'abilities' => $abilities])->assertSessionHasErrors('abilities');
+        $this->post('/settings/api-tokens', ['name' => 'CLI'])->assertSessionHasErrors('abilities');
+
+        assertDatabaseMissing('personal_access_tokens', ['name' => 'CLI']);
+    })->with([
+        'empty list' => [[]],
+        'null' => [null],
+    ]);
+
+    it('rejects an ability that does not exist, including the wildcard', function (string $ability) {
+        tokenUser();
+
+        $this->post('/settings/api-tokens', ['name' => 'CLI', 'abilities' => ['read', $ability]])
+            ->assertSessionHasErrors('abilities.1');
+
+        assertDatabaseMissing('personal_access_tokens', ['name' => 'CLI']);
+    })->with(['*', 'admin', 'READ', '']);
+
+    it('rejects the same ability twice', function () {
+        tokenUser();
+
+        $this->post('/settings/api-tokens', ['name' => 'CLI', 'abilities' => ['read', 'read']])
+            ->assertSessionHasErrors('abilities.0');
+    });
+
+    it('lists each token’s abilities, with tokens from before abilities existing as full access', function () {
+        $user = tokenUser();
+        $user->createToken('Old');
+        $this->travel(1)->minutes();
+        app(CreateApiToken::class)->handle($user, 'Reader', [ApiAbility::Read]);
+        session()->put('auth.password_confirmed_at', now()->getTimestamp());
+
+        $this->get('/settings/api-tokens')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('tokens.0.name', 'Reader')
+                ->where('tokens.0.abilities', ['read'])
+                ->where('tokens.1.name', 'Old')
+                ->where('tokens.1.abilities', ['*']));
+    });
 });

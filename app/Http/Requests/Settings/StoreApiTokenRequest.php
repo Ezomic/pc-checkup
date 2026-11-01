@@ -4,18 +4,23 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Settings;
 
+use App\Enums\ApiAbility;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Enum;
 
 final class StoreApiTokenRequest extends FormRequest
 {
     /**
-     * @return array<string, ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|Enum|array<mixed>|string>
      */
     public function rules(): array
     {
         return [
             'name' => ['required', 'string', 'max:255'],
+            'abilities' => ['required', 'array', 'min:1'],
+            'abilities.*' => ['required', 'string', 'distinct', Rule::enum(ApiAbility::class)],
         ];
     }
 
@@ -27,5 +32,18 @@ final class StoreApiTokenRequest extends FormRequest
     public function tokenName(): string
     {
         return $this->string('name')->toString();
+    }
+
+    /**
+     * @return list<ApiAbility>
+     */
+    public function abilities(): array
+    {
+        return array_values(
+            $this->collect('abilities')
+                ->map(fn (mixed $ability): ?ApiAbility => is_string($ability) ? ApiAbility::tryFrom($ability) : null)
+                ->filter()
+                ->all(),
+        );
     }
 }

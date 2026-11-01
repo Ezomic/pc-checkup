@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Actions\ApiTokens;
 
+use App\Enums\ApiAbility;
 use App\Models\User;
 use Illuminate\Support\Facades\Date;
 
@@ -21,9 +22,15 @@ final class CreateApiToken
      * Returns the plaintext token. It is the only time it exists in readable
      * form: only a hash is stored, so a caller that does not show it to the
      * user here has lost it.
+     *
+     * @param  list<ApiAbility>  $abilities
      */
-    public function handle(User $user, string $name): string
+    public function handle(User $user, string $name, array $abilities): string
     {
-        return $user->createToken($name, expiresAt: Date::now()->addDays(self::LIFETIME_DAYS))->plainTextToken;
+        return $user->createToken(
+            $name,
+            array_map(fn (ApiAbility $ability): string => $ability->value, $abilities),
+            Date::now()->addDays(self::LIFETIME_DAYS),
+        )->plainTextToken;
     }
 }
