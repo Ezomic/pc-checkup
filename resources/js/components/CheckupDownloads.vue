@@ -24,11 +24,7 @@ const platform = ref<Platform>('windows');
                     <Download />
                 </a>
             </Button>
-            <Button
-                as-child
-                variant="outline"
-                @click="platform = 'mac'"
-            >
+            <Button as-child variant="outline" @click="platform = 'mac'">
                 <a :href="download('mac').url" data-test="download-mac">
                     <Laptop />
                     Mac

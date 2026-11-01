@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
-use App\Http\Controllers\CheckupScriptController;
 use App\Http\Controllers\ChecklistEntryController;
+use App\Http\Controllers\CheckupScriptController;
 use App\Http\Controllers\HealthController;
 use App\Http\Controllers\LoginLinkController;
 use App\Http\Controllers\LoginLinkRequestController;
