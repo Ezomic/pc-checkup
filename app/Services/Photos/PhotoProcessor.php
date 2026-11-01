@@ -12,7 +12,9 @@ final class PhotoProcessor
 {
     private const MAX_EDGE = 1600;
 
-    private const MAX_PIXELS = 40_000_000;
+    // GD holds about 4 bytes per pixel, and rotating keeps a second copy, so this stays
+    // decodable inside PHP's default 128M memory limit. A 12 MP phone photo fits.
+    private const MAX_PIXELS = 16_000_000;
 
     private const QUALITY = 82;
 

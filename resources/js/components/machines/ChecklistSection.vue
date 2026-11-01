@@ -64,7 +64,20 @@ function save(item: ChecklistItem, outcome: ChecklistOutcome | null): void {
 }
 
 function choose(item: ChecklistItem, outcome: ChecklistOutcome): void {
-    save(item, item.outcome === outcome ? null : outcome);
+    if (item.outcome === outcome) {
+        notes[item.key] = '';
+        save(item, null);
+
+        return;
+    }
+
+    save(item, outcome);
+}
+
+function saveNote(item: ChecklistItem): void {
+    if ((notes[item.key] || null) !== item.note) {
+        save(item, item.outcome);
+    }
 }
 </script>
 
@@ -119,7 +132,7 @@ function choose(item: ChecklistItem, outcome: ChecklistOutcome): void {
                         placeholder="Note (optional)"
                         :aria-label="`Note for ${item.label}`"
                         class="rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                        @blur="save(item, item.outcome)"
+                        @blur="saveNote(item)"
                     />
                 </li>
             </ul>

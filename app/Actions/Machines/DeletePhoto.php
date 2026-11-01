@@ -11,8 +11,8 @@ final class DeletePhoto
 {
     public function handle(Photo $photo): void
     {
-        Storage::disk('photos')->delete($photo->path);
-
         $photo->delete();
+
+        Storage::disk('photos')->delete($photo->path);
     }
 }
