@@ -4,11 +4,12 @@ import { computed } from 'vue';
 import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import CheckupDownloads from '@/components/CheckupDownloads.vue';
 import { Button } from '@/components/ui/button';
-import { login } from '@/routes';
+import { dashboard, login } from '@/routes';
 
 const page = usePage();
 
 const appName = computed<string>(() => page.props.name);
+const signedIn = computed<boolean>(() => page.props.auth.user !== null);
 
 const sample = [
     { label: 'Battery', value: 'OK', tone: 'ok' },
@@ -40,7 +41,8 @@ const tones = {
                 <span class="font-medium">{{ appName }}</span>
             </div>
             <Button as-child variant="outline" size="sm">
-                <Link :href="login()">Log in</Link>
+                <Link v-if="signedIn" :href="dashboard()">Open app</Link>
+                <Link v-else :href="login()">Log in</Link>
             </Button>
         </header>
 
