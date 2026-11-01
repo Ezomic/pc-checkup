@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\MachineStatus;
 use Database\Factories\MachineFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -22,6 +23,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $os
  * @property string|null $device_type
  * @property string|null $model
+ * @property MachineStatus $status
  * @property Carbon|null $deleted_at
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
@@ -30,6 +32,19 @@ class Machine extends Model
 {
     /** @use HasFactory<MachineFactory> */
     use HasFactory, SoftDeletes;
+
+    /** @var array<string, string> */
+    protected $attributes = ['status' => 'checking'];
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'status' => MachineStatus::class,
+        ];
+    }
 
     /**
      * @return BelongsTo<User, $this>

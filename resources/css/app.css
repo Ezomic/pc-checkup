@@ -184,3 +184,18 @@
         @apply bg-background text-foreground;
     }
 }
+
+@media print {
+    [data-slot='sidebar'] {
+        display: none;
+    }
+
+    :root,
+    .dark {
+        color-scheme: light;
+        --background: hsl(0 0% 100%);
+        --foreground: hsl(0 0% 0%);
+        --muted-foreground: hsl(0 0% 30%);
+        --border: hsl(0 0% 80%);
+    }
+}

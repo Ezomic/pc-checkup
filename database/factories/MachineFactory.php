@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Factories;
 
+use App\Enums\MachineStatus;
 use App\Models\Machine;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -31,6 +32,7 @@ class MachineFactory extends Factory
             'os' => 'macOS',
             'device_type' => 'laptop',
             'model' => 'MacBook Pro (MacBookPro18,3)',
+            'status' => MachineStatus::Checking,
         ];
     }
 }

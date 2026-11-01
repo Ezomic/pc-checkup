@@ -1,5 +1,8 @@
+export type MachineStatus = 'checking' | 'ready' | 'needs_work';
+
 export type Machine = {
     id: number;
+    status: MachineStatus;
     serial: string | null;
     hardware_uuid: string | null;
     name: string | null;
@@ -13,7 +16,23 @@ export type Machine = {
 
 export type MachineDetails = Pick<
     Machine,
-    'id' | 'name' | 'serial' | 'hardware_uuid' | 'os' | 'device_type' | 'model'
+    | 'id'
+    | 'name'
+    | 'serial'
+    | 'hardware_uuid'
+    | 'os'
+    | 'device_type'
+    | 'model'
+    | 'status'
+>;
+
+export type SummaryReport = Pick<ReportSummary, 'created_at' | 'flags'>;
+
+export type SummaryChecklistItem = Omit<ChecklistItem, 'outcome'>;
+
+export type SummaryChecklist = Record<
+    ChecklistOutcome | 'unchecked',
+    SummaryChecklistItem[]
 >;
 
 export type ReportSummary = {
