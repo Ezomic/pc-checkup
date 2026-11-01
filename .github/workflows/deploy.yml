@@ -1,0 +1,37 @@
+name: Deploy to production
+
+# The deploy itself runs on the server. DEPLOY_SSH_KEY is pinned to app-deploy on the
+# production box, so the only thing a leaked secret can do is redeploy this app's main
+# branch: no shell, no other app. app-deploy builds the release beside the live one,
+# switches a symlink and switches back if /up fails afterwards, so there is no
+# maintenance window. It lives in Ezomic/infra.
+#
+# A new app must exist in that repo's ansible/group_vars/all/apps.yml before this can
+# work: that entry is what creates its Linux user, php-fpm master, vhost, workers and
+# CI key. See infra/docs/provisioning.md.
+on:
+  workflow_dispatch:
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy -o BatchMode=yes "$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST" deploy
