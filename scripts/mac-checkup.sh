@@ -1,8 +1,150 @@
 #!/bin/bash
 # Read-only Mac checkup. Writes a Markdown report to the Desktop.
-# Usage: bash mac-checkup.sh
+# Usage: bash mac-checkup.sh [--token TOKEN] [--url URL]
+#
+# Optional upload: with a token the finished report is also sent to PC Checkup. The token is
+# read from, in this order: --token, the PC_CHECKUP_TOKEN environment variable, or a file
+# named pc-checkup.token next to this script. The site defaults to PC_DEFAULT_URL below;
+# --url or PC_CHECKUP_URL override it (https only, plus http://localhost for testing).
+# The token is never written to the report or printed. Bash 3.2 (stock macOS) compatible.
 
 set -u
+
+PCC_DEFAULT_URL="https://pc-checkup.thijssensoftware.nl"
+PCC_SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)
+PCC_TOKEN=""
+PCC_TOKEN_SOURCE=""
+
+# ---------- Upload helpers ----------
+pcc_clean() { printf '%s' "$1" | tr -d '\r' | head -n 1 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+
+pcc_oneline() { printf '%s' "$1" | tr '\r\n\t' '   ' | tr -d '\000-\037\177'; }
+
+# Sets PCC_TOKEN and PCC_TOKEN_SOURCE (option, environment or file); both stay empty without one.
+pcc_find_token() {
+  local value
+  PCC_TOKEN=""
+  PCC_TOKEN_SOURCE=""
+  value=$(pcc_clean "${1:-}")
+  if [ -n "$value" ]; then PCC_TOKEN=$value; PCC_TOKEN_SOURCE=option; return 0; fi
+  value=$(pcc_clean "${PC_CHECKUP_TOKEN:-}")
+  if [ -n "$value" ]; then PCC_TOKEN=$value; PCC_TOKEN_SOURCE=environment; return 0; fi
+  if [ -n "${BASH_SOURCE[0]:-}" ] && [ -r "$PCC_SCRIPT_DIR/pc-checkup.token" ]; then
+    value=$(pcc_clean "$(head -n 1 "$PCC_SCRIPT_DIR/pc-checkup.token")")
+    if [ -n "$value" ]; then PCC_TOKEN=$value; PCC_TOKEN_SOURCE="file"; return 0; fi
+  fi
+  return 0
+}
+
+pcc_valid_token() { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9|_.~+/=-]{1,255}$'; }
+
+pcc_valid_url() {
+  printf '%s' "$1" | grep -Eiq '^(https://[A-Za-z0-9.-]+|http://(localhost|127\.0\.0\.1))(:[0-9]+)?(/[^[:space:]\\?#]*)?$'
+}
+
+# Prints {"markdown":"<file>"} with quotes, backslashes, control characters and non-ASCII
+# text escaped. Perl is always on a Mac; invalid UTF-8 becomes U+FFFD.
+pcc_json_body() {
+  /usr/bin/perl -MEncode -0777 -e '
+    my $s = decode("UTF-8", scalar(<STDIN>) // "");
+    $s =~ s/([\\"])/\\$1/g;
+    $s =~ s/\n/\\n/g;
+    $s =~ s/\r/\\r/g;
+    $s =~ s/\t/\\t/g;
+    $s =~ s/([\x00-\x1f])/sprintf("\\u%04x", ord($1))/ge;
+    print encode("UTF-8", "{\"markdown\":\"" . $s . "\"}");
+  ' < "$1"
+}
+
+# Prints machine_id=, message= and error= lines for the JSON file given.
+pcc_response_fields() {
+  /usr/bin/perl -MJSON::PP -0777 -e '
+    my $d = eval { decode_json(scalar(<STDIN>) // "") };
+    exit 0 unless ref $d eq "HASH";
+    binmode(STDOUT, ":utf8");
+    for my $k (qw(machine_id message)) { print "$k=$d->{$k}\n" if defined $d->{$k} && !ref $d->{$k}; }
+    if (ref $d->{errors} eq "HASH") {
+      for my $k (sort keys %{$d->{errors}}) {
+        my $v = $d->{errors}{$k};
+        print "error=$_\n" for grep { !ref $_ } (ref $v eq "ARRAY" ? @$v : ($v));
+      }
+    }
+  ' < "$1"
+}
+
+# Sends the report file ($1) to the site ($2) with the token ($3) and prints one line saying
+# what happened. The token only travels on curl's stdin config, never in its arguments.
+pcc_upload() {
+  local file=$1 base=$2 token=$3 json resp err status rc line machine="" message="" errors=""
+  json=$(mktemp)
+  resp=$(mktemp)
+  err=$(mktemp)
+  pcc_json_body "$file" > "$json"
+  status=$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -sS -K - --max-time 30 -X POST \
+    -H 'Content-Type: application/json; charset=utf-8' -H 'Accept: application/json' \
+    --data-binary @"$json" -o "$resp" -w '%{http_code}' "$base/api/reports" 2>"$err")
+  rc=$?
+
+  if [ "$rc" -ne 0 ]; then
+    echo "Upload failed: could not reach $base (curl exit $rc: $(pcc_oneline "$(head -n 1 "$err")"))."
+  else
+    while IFS= read -r line; do
+      case $line in
+        machine_id=*) machine=$(pcc_oneline "${line#machine_id=}") ;;
+        message=*) message=$(pcc_oneline "${line#message=}") ;;
+        error=*) errors="${errors:+$errors; }$(pcc_oneline "${line#error=}")" ;;
+      esac
+    done <<< "$(pcc_response_fields "$resp")"
+    case $machine in '' | *[!0-9]*) machine="" ;; esac
+    [ "$errors" = "$message" ] && errors=""
+    case $status in
+      201) echo "Uploaded as a new report: machine $machine, $base/machines/$machine" ;;
+      200) echo "Already uploaded: this identical report is already in PC Checkup (machine $machine, $base/machines/$machine)." ;;
+      401) echo "Upload failed: the token was not accepted (invalid, expired or revoked). Create a new one in the app under Settings, API tokens." ;;
+      403) echo "Upload failed: the token does not have the Write ability. Create a new token with the Write ability." ;;
+      422) echo "The server rejected the report: ${message:-no reason given}${errors:+ ($errors)}" ;;
+      429) echo "Upload skipped: the server is rate limiting this token, try again in a minute." ;;
+      *) echo "Upload failed: the server answered HTTP $status." ;;
+    esac
+  fi
+  rm -f "$json" "$resp" "$err"
+}
+
+# Called once the report is saved: works out the token and site, uploads, or explains how to.
+pcc_upload_report() {
+  local file=$1 base
+  if [ -z "$PCC_TOKEN" ]; then
+    echo "To upload this report: create a token with only the Write ability in the app (Settings, API tokens), then run again with PC_CHECKUP_TOKEN set or a pc-checkup.token file next to this script."
+    return 0
+  fi
+  base=$(pcc_clean "${PCC_CLI_URL:-${PC_CHECKUP_URL:-$PCC_DEFAULT_URL}}")
+  base=${base%/}
+  if ! pcc_valid_url "$base"; then
+    echo "Upload skipped: the site address must start with https:// (http://localhost is allowed for testing)."
+  elif ! pcc_valid_token "$PCC_TOKEN"; then
+    echo "Upload skipped: the token contains characters a token never has. Check the $PCC_TOKEN_SOURCE it came from."
+  else
+    pcc_upload "$file" "$base" "$PCC_TOKEN"
+  fi
+  echo "Token safety: use a token with only the Write ability and a short lifetime, and delete the token from any machine that is not yours."
+}
+
+# Sourcing this file (for tests) stops here instead of running the checkup.
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
+
+PCC_CLI_TOKEN=""
+PCC_CLI_URL=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    --token) [ $# -ge 2 ] || { echo "--token needs a value."; exit 2; }; PCC_CLI_TOKEN=$2; shift 2 ;;
+    --token=*) PCC_CLI_TOKEN=${1#--token=}; shift ;;
+    --url) [ $# -ge 2 ] || { echo "--url needs a value."; exit 2; }; PCC_CLI_URL=$2; shift 2 ;;
+    --url=*) PCC_CLI_URL=${1#--url=}; shift ;;
+    *) echo "Unknown option: $1. Usage: bash mac-checkup.sh [--token TOKEN] [--url URL]"; exit 2 ;;
+  esac
+done
+pcc_find_token "$PCC_CLI_TOKEN"
+PCC_CLI_TOKEN=""
 
 STAMP=$(date +%Y%m%d-%H%M%S)
 HOST=$(scutil --get ComputerName 2>/dev/null || hostname)
@@ -219,5 +361,7 @@ rm -f "$BODY" "$FLAGS"
 echo
 echo "Done. Report saved to:"
 echo "  $OUT"
+echo
+pcc_upload_report "$OUT" || true
 echo
 echo "Optional: for sections that need admin rights (firmware password, some logs), re-run with: sudo bash mac-checkup.sh"
