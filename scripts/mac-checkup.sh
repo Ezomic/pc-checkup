@@ -1,5 +1,8 @@
 #!/bin/bash
 # Read-only Mac checkup. Writes a Markdown report to the Desktop.
+# The scan runs once, only reads information, and installs and changes nothing: it sets no
+# preference, starts no service, schedules nothing and leaves nothing running afterwards.
+# The one exception is the opt-in --fix mode, which asks y/N before each change.
 # Usage: bash mac-checkup.sh [--token TOKEN] [--code CODE] [--url URL] [--fix] [--benchmark]
 #
 # --fix walks the findings it can fix, shows the exact command for each and asks y/N (No by
@@ -577,6 +580,128 @@ pcc_run_benchmark() {
   trap - EXIT INT TERM
 }
 
+# ---------- Risk checks ----------
+# Each check only reads. It prints facts for the report, plus "FLAG: text" lines for the
+# things to look at, and says "could not check" instead of flagging when the data is missing
+# or needs admin rights.
+PCC_INSTALL_HISTORY="${PCC_INSTALL_HISTORY:-/Library/Receipts/InstallHistory.plist}"
+PCC_BACKUP_MAX_DAYS=30
+PCC_UPDATE_MAX_DAYS=60
+PCC_ADMIN_FLAG_AT=3
+
+# Whole days from a YYYY-MM-DD date (UTC) to today; prints nothing for anything else.
+pcc_days_since() {
+  printf '%s' "$1" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' || return 0
+  /usr/bin/perl -MTime::Local -e '
+    my ($y, $m, $d) = split /-/, $ARGV[0];
+    my $then = timegm(0, 0, 0, $d, $m - 1, $y);
+    printf "%d\n", (time - time % 86400 - $then) / 86400;
+  ' "$1"
+}
+
+# Prints the newest Time Machine backup date (YYYY-MM-DD), or nothing when it cannot be read.
+pcc_tm_last_date() {
+  local when
+  when=$(defaults read /Library/Preferences/com.apple.TimeMachine 2>/dev/null | awk '/SnapshotDates/ {on = 1} on && /\)/ {on = 0} on' | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | sort | tail -n 1)
+  if [ -z "$when" ]; then
+    when=$(tmutil latestbackup 2>/dev/null | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}' | tail -n 1 | cut -c1-10)
+  fi
+  printf '%s' "$when"
+}
+
+pcc_backup_check() {
+  local info last days
+  if ! info=$(tmutil destinationinfo 2>/dev/null); then
+    echo "Time Machine: could not check (tmutil did not answer)"
+    return 0
+  fi
+  case $info in
+    *"No destinations configured"*)
+      echo "Time Machine: not set up"
+      echo "FLAG: No backup was found (Time Machine is not set up)."
+      return 0 ;;
+    *Name*) echo "Time Machine: set up" ;;
+    *)
+      echo "Time Machine: could not check (unexpected answer from tmutil)"
+      return 0 ;;
+  esac
+  last=$(pcc_tm_last_date)
+  days=$(pcc_days_since "$last")
+  if [ -z "$days" ]; then
+    echo "Last backup: could not check (the date is unreadable or needs Full Disk Access for Terminal)"
+    return 0
+  fi
+  echo "Last backup: $last ($days days ago)"
+  if [ "$days" -gt "$PCC_BACKUP_MAX_DAYS" ]; then echo "FLAG: The last backup was $days days ago (Time Machine)."; fi
+}
+
+# Something listening on a port is how Remote Login and Screen Sharing show up without admin rights.
+pcc_remote_check() {
+  local listening autologin
+  if listening=$(netstat -an -p tcp 2>/dev/null); then
+    if printf '%s\n' "$listening" | grep -Eq '[.:]22[[:space:]].*LISTEN'; then
+      echo "Remote Login (SSH): on (something is listening on port 22)"
+      echo "FLAG: Remote Login (SSH) is on, so other computers can try to sign in to this Mac."
+    else
+      echo "Remote Login (SSH): off"
+    fi
+    if printf '%s\n' "$listening" | grep -Eq '[.:]5900[[:space:]].*LISTEN'; then
+      echo "Screen Sharing: on (something is listening on port 5900)"
+      echo "FLAG: Screen Sharing is on, so other people on the network can ask to see or control this Mac."
+    else
+      echo "Screen Sharing: off"
+    fi
+  else
+    echo "Remote Login (SSH): could not check (netstat did not answer)"
+    echo "Screen Sharing: could not check (netstat did not answer)"
+  fi
+  autologin=$(defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser 2>/dev/null)
+  if [ -n "$autologin" ]; then
+    echo "Automatic login: on (the account name is not recorded)"
+    echo "FLAG: Automatic sign-in is on, so anyone who starts this computer gets in without a password."
+  else
+    echo "Automatic login: off"
+  fi
+}
+
+# Newest macOS update from the install history. Background data updates (XProtect and the
+# like) and App Store apps are left out, so they cannot hide an old system.
+pcc_updates_check() {
+  local newest days
+  newest=$(plutil -convert xml1 -o - "$PCC_INSTALL_HISTORY" 2>/dev/null | awk '
+    /<key>date<\/key>/ { getline; d = $0; gsub(/.*<date>|<\/date>.*/, "", d) }
+    /<key>displayName<\/key>/ { getline; n = $0; gsub(/.*<string>|<\/string>.*/, "", n) }
+    /<key>processName<\/key>/ {
+      getline; p = $0; gsub(/.*<string>|<\/string>.*/, "", p)
+      if (p == "softwareupdated" && n ~ /^(macOS|Security Update|Safari|Rapid Security|Command Line Tools)/ && substr(d, 1, 10) > best) best = substr(d, 1, 10)
+    }
+    END { print best }')
+  days=$(pcc_days_since "$newest")
+  if [ -z "$days" ]; then
+    echo "Newest installed macOS update: could not check (no readable update history)"
+    return 0
+  fi
+  echo "Newest installed macOS update: $newest ($days days ago)"
+  if [ "$days" -gt "$PCC_UPDATE_MAX_DAYS" ]; then echo "FLAG: No macOS update has been installed for $days days (newest: $newest)."; fi
+}
+
+pcc_admins_check() {
+  local members member count=0
+  if ! members=$(dscl . -read /Groups/admin GroupMembership 2>/dev/null); then
+    echo "Administrator accounts: could not check (dscl did not answer)"
+    return 0
+  fi
+  for member in ${members#GroupMembership:}; do
+    [ "$member" = root ] || count=$((count + 1))
+  done
+  echo "Administrator accounts: $count (not counting root)"
+  if [ "$count" -ge "$PCC_ADMIN_FLAG_AT" ]; then echo "FLAG: $count accounts have administrator rights (see Administrator accounts section)."; fi
+}
+
+pcc_check_flags() { printf '%s\n' "$1" | sed -n 's/^FLAG: /- /p'; }
+
+pcc_check_facts() { printf '%s\n' "$1" | grep -v '^FLAG: '; }
+
 # Sourcing this file (for tests) stops here instead of running the checkup.
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
 
@@ -701,6 +826,17 @@ SECURITY_TOOLS=$(ps -axco comm | grep -iE 'falcon|sophos|norton|mcafee|avast|avg
 
 ps -axco comm,pcpu | awk '$1 ~ /^(mds_stores|mds|mdworker_shared|photoanalysisd|backupd|softwareupdated)$/ && $2 > 20 {print $1}' | sort -u | tr '\n' ' ' | grep -q . && flag "Background indexing/backup process is using heavy CPU (Spotlight, Photos or Time Machine)."
 
+CHECK_BACKUP=$(pcc_backup_check)
+CHECK_REMOTE=$(pcc_remote_check)
+CHECK_UPDATES=$(pcc_updates_check)
+CHECK_ADMINS=$(pcc_admins_check)
+{
+  pcc_check_flags "$CHECK_BACKUP"
+  pcc_check_flags "$CHECK_REMOTE"
+  pcc_check_flags "$CHECK_UPDATES"
+  pcc_check_flags "$CHECK_ADMINS"
+} >> "$FLAGS"
+
 # ---------- Sections ----------
 section "Hardware overview" system_profiler SPHardwareDataType
 sh_section "macOS version" "sw_vers; uname -a; uptime"
@@ -737,6 +873,10 @@ sh_section "MDM and enrolment" "profiles status -type enrollment; echo; profiles
 sh_section "Firmware password (Intel only)" "firmwarepasswd -check 2>&1 | head -5"
 sh_section "Sharing and remote access" "systemsetup -getremotelogin 2>&1; systemsetup -getremoteappleevents 2>&1; launchctl print-disabled system 2>/dev/null | grep -iE 'ssh|screensharing|remotemanagement'"
 
+section "Backup status" pcc_check_facts "$CHECK_BACKUP"
+section "Remote exposure" pcc_check_facts "$CHECK_REMOTE"
+section "Software update age" pcc_check_facts "$CHECK_UPDATES"
+section "Administrator accounts" pcc_check_facts "$CHECK_ADMINS"
 sh_section "User accounts" "dscl . list /Users | grep -v '^_'; echo; echo 'Admin group members:'; dscl . -read /Groups/admin GroupMembership 2>/dev/null; echo; echo 'Console user:'; stat -f%Su /dev/console"
 sh_section "Logged in users and recent logins" "who; echo; last -10"
 
@@ -780,6 +920,8 @@ if [ "$PCC_CLI_FIX" = 1 ]; then pcc_fix_run; fi
 # ---------- Assemble ----------
 {
   echo "# Mac checkup: $HOST"
+  echo
+  echo "This report comes from one scan that ran once, only read information, and installed and changed nothing on this Mac. Changes happen only in the optional --fix mode, one y/N question at a time, and are listed under Fix log."
   echo
   echo "- Format: 1"
   echo "- OS: macOS"

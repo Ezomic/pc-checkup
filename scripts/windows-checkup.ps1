@@ -1,4 +1,6 @@
 # Read-only Windows checkup. Writes a Markdown report to the Desktop.
+# The scan runs once, only reads information, and installs and changes nothing: it changes no
+# setting, starts no service, schedules nothing and leaves nothing running afterwards.
 # Usage: powershell -ExecutionPolicy Bypass -File windows-checkup.ps1 [-Token <token>] [-Code <code>] [-Url <url>]
 # Works on Windows PowerShell 5.1 and PowerShell 7. Needs no admin rights; sections that
 # do need them say "unavailable (needs admin)". Keep this file ASCII only: 5.1 reads a
@@ -544,8 +546,10 @@ if ($rebootReasons.Count -gt 0) { Add-Flag "A restart is pending ($($rebootReaso
 $hotfixes = Try-Run { @(Get-HotFix | Where-Object { $_.InstalledOn } | Sort-Object InstalledOn -Descending) }
 $lastInstall = $null
 if ($hotfixes.Value -and @($hotfixes.Value).Count -gt 0) { $lastInstall = @($hotfixes.Value)[0].InstalledOn }
+$installAge = $null
 if ($lastInstall) {
     $installAge = [int][math]::Floor(((Get-Date) - $lastInstall).TotalDays)
+    if ($installAge -gt 60) { Add-Flag "No Windows update has been installed for $installAge days (newest: $($lastInstall.ToString('yyyy-MM-dd')))." }
 }
 
 $pendingUpdates = Try-Run {
@@ -577,6 +581,126 @@ if ($unexpected -eq 0) { $unexpected = @($crashEvents.Value | Where-Object { $_.
 if ($unexpected -gt 0) { Add-Flag "$unexpected unexpected shutdown(s) in the last 30 days (crash, power loss or forced power off)." }
 $diskEvents = Try-Run { @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'disk'; Id = 7, 11; StartTime = $since } -ErrorAction SilentlyContinue) }
 if (@($diskEvents.Value).Count -gt 0) { Add-Flag "$(@($diskEvents.Value).Count) disk error event(s) in the last 30 days (bad blocks or controller errors)." }
+
+# ---------- Backup, remote exposure, accounts, firmware ----------
+# These only read. A fact that cannot be read says so in its section and raises no flag.
+$backupFacts = New-Object System.Collections.Generic.List[string]
+$fileHistoryDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\FileHistory\Configuration'
+$fileHistory = Try-Run { @(Get-ChildItem -LiteralPath $fileHistoryDir -Filter 'Config*.xml' -ErrorAction SilentlyContinue) }
+$fileHistoryOn = $false
+$backupAge = $null
+if ($fileHistory.Note) {
+    $backupFacts.Add("File History: $($fileHistory.Note)")
+} elseif (@($fileHistory.Value).Count -eq 0) {
+    $backupFacts.Add('File History: not set up')
+} else {
+    $fileHistoryOn = $true
+    $backupFacts.Add('File History: set up')
+    $lastBackup = Try-Run {
+        $dates = foreach ($config in @($fileHistory.Value)) {
+            $xml = Get-Content -LiteralPath $config.FullName -Raw
+            foreach ($match in [regex]::Matches($xml, '<[A-Za-z]*(?:Backup|Protect|Success)[A-Za-z]*(?:Time|Date)[A-Za-z]*>([^<]+)<')) {
+                $parsed = [datetime]::MinValue
+                if ([datetime]::TryParse($match.Groups[1].Value, [ref]$parsed) -and $parsed.Year -gt 2000 -and $parsed -le (Get-Date)) { $parsed }
+            }
+        }
+        $dates | Sort-Object -Descending | Select-Object -First 1
+    }
+    if ($lastBackup.Note) {
+        $backupFacts.Add("Last File History backup: $($lastBackup.Note)")
+    } elseif ($lastBackup.Value) {
+        $backupAge = [int][math]::Floor(((Get-Date) - $lastBackup.Value).TotalDays)
+        $backupFacts.Add("Last File History backup: $($lastBackup.Value.ToString('yyyy-MM-dd')) ($backupAge days ago)")
+    } else {
+        $backupFacts.Add('Last File History backup: unknown (no backup date found in its settings)')
+    }
+}
+
+# Windows Backup and OneDrive folder backup both work by moving the folders into OneDrive.
+$oneDriveRoots = @($env:OneDrive, $env:OneDriveConsumer, $env:OneDriveCommercial | Where-Object { $_ })
+$oneDriveSaved = New-Object System.Collections.Generic.List[string]
+foreach ($known in @(@{ Name = 'Desktop'; Id = 'Desktop' }, @{ Name = 'Documents'; Id = 'MyDocuments' }, @{ Name = 'Pictures'; Id = 'MyPictures' })) {
+    $path = [Environment]::GetFolderPath($known.Id)
+    foreach ($root in $oneDriveRoots) {
+        if ($path -and ($path -eq $root -or $path.StartsWith("$root\", [StringComparison]::OrdinalIgnoreCase))) { $oneDriveSaved.Add($known.Name); break }
+    }
+}
+$oneDriveOn = $oneDriveSaved.Count -gt 0
+$backupFacts.Add("OneDrive signed in: $(if ($oneDriveRoots.Count -gt 0) { 'yes' } else { 'no' })")
+$backupFacts.Add("Folders saved to OneDrive (Windows Backup): $(if ($oneDriveOn) { $oneDriveSaved -join ', ' } else { 'none' })")
+$backupFacts.Add('OneDrive keeps these folders in sync, so it has no backup date. Other backup software cannot be detected by this scan.')
+
+if (-not $fileHistory.Note -and -not $fileHistoryOn -and -not $oneDriveOn) {
+    Add-Flag "No backup was found (File History is off and Desktop, Documents and Pictures are not saved to OneDrive)."
+} elseif ($fileHistoryOn -and -not $oneDriveOn -and $null -ne $backupAge -and $backupAge -gt 30) {
+    Add-Flag "The last backup was $backupAge days ago (File History)."
+}
+
+$remoteFacts = New-Object System.Collections.Generic.List[string]
+$rdp = Try-Run { Get-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' 'fDenyTSConnections' }
+if ($rdp.Note) {
+    $remoteFacts.Add("Remote Desktop (RDP): $($rdp.Note)")
+} elseif ($rdp.Value -eq 0) {
+    $nla = Try-Run { Get-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' 'UserAuthentication' }
+    $nlaText = if ($nla.Note) { $nla.Note } elseif ($nla.Value -eq 1) { 'yes' } else { 'no' }
+    $remoteFacts.Add("Remote Desktop (RDP): ENABLED (network level authentication required: $nlaText)")
+    Add-Flag 'Remote Desktop (RDP) is enabled, so people on the network can try to sign in to this PC.'
+} else {
+    $remoteFacts.Add('Remote Desktop (RDP): off')
+}
+
+$lanmanKey = 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters'
+$smb1 = if ($IsAdmin) {
+    Try-Run { [int][bool](Get-SmbServerConfiguration).EnableSMB1Protocol }
+} else {
+    Try-Run {
+        $value = (Get-ItemProperty -LiteralPath $lanmanKey -ErrorAction Stop).SMB1
+        if ($null -eq $value) { throw 'administrator rights are needed to see whether SMBv1 is on' }
+        $value
+    }
+}
+if ($smb1.Note) {
+    $remoteFacts.Add("SMBv1: $($smb1.Note)")
+} elseif ($smb1.Value -eq 1) {
+    $remoteFacts.Add('SMBv1: ENABLED')
+    Add-Flag 'SMBv1 is enabled (an outdated file sharing protocol that ransomware has abused).'
+} else {
+    $remoteFacts.Add('SMBv1: off')
+}
+
+$autoLogon = Try-Run { (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -ErrorAction Stop).AutoAdminLogon }
+if ($autoLogon.Note) {
+    $remoteFacts.Add("Automatic sign-in: $($autoLogon.Note)")
+} elseif ("$($autoLogon.Value)" -eq '1') {
+    $remoteFacts.Add('Automatic sign-in: ON (the stored password is not read)')
+    Add-Flag 'Automatic sign-in is on, so anyone who starts this computer gets in without a password.'
+} else {
+    $remoteFacts.Add('Automatic sign-in: off')
+}
+
+$adminFacts = New-Object System.Collections.Generic.List[string]
+$localUsers = Try-Run { @(Get-LocalUser) }
+$adminGroup = Try-Run { @(Get-LocalGroupMember -SID 'S-1-5-32-544') }
+if ($adminGroup.Note -or $localUsers.Note) {
+    $adminFacts.Add("Members of the Administrators group: $(if ($adminGroup.Note) { $adminGroup.Note } else { $localUsers.Note })")
+} else {
+    $disabledSids = @($localUsers.Value | Where-Object { $_.Enabled -eq $false } | ForEach-Object { $_.SID.Value })
+    $adminCount = @($adminGroup.Value | Where-Object { $disabledSids -notcontains $_.SID.Value }).Count
+    $adminFacts.Add("Members of the Administrators group (not counting disabled accounts): $adminCount")
+    if ($adminCount -ge 3) { Add-Flag "$adminCount accounts have administrator rights (see Administrator accounts section)." }
+    $noPassword = @($localUsers.Value | Where-Object { $_.Enabled -and $_.PasswordRequired -eq $false })
+    $adminFacts.Add("Enabled local accounts that do not need a password: $($noPassword.Count)")
+    if ($noPassword.Count -gt 0) { Add-Flag "$($noPassword.Count) enabled account(s) can sign in without a password (see Administrator accounts section)." }
+}
+
+$biosFacts = New-Object System.Collections.Generic.List[string]
+if ($bios.ReleaseDate) {
+    $biosYears = [int][math]::Floor(((Get-Date) - $bios.ReleaseDate).TotalDays / 365.25)
+    $biosFacts.Add("BIOS release date: $($bios.ReleaseDate.ToString('yyyy-MM-dd')) (about $biosYears full years ago)")
+    if ($biosYears -ge 5) { Add-Flag "The BIOS (firmware) is $biosYears years old (released $($bios.ReleaseDate.ToString('yyyy-MM-dd')))." }
+} else {
+    $biosFacts.Add('BIOS release date: could not check (the firmware did not report one)')
+}
 
 # ---------- Sections ----------
 Add-Section 'Hardware overview' {
@@ -685,8 +809,13 @@ Add-Section 'User accounts' {
     Get-LocalGroupMember -Group 'Administrators' | Select-Object Name, ObjectClass | Format-Table -AutoSize
 }
 
+Add-Section 'Backup status' { $backupFacts }
+Add-Section 'Remote exposure' { $remoteFacts }
+Add-Section 'Administrator accounts' { $adminFacts }
+Add-Section 'BIOS and firmware age' { $biosFacts }
+
 Add-Section 'Windows Update' {
-    "Newest installed update: $(if ($lastInstall) { $lastInstall.ToString('yyyy-MM-dd') } else { 'unknown' })"
+    "Newest installed update: $(if ($lastInstall) { "$($lastInstall.ToString('yyyy-MM-dd')) ($installAge days ago)" } else { 'unknown (no install date could be read)' })"
     "Restart pending: $(if ($rebootReasons.Count -gt 0) { $rebootReasons -join '; ' } else { 'no' })"
     "Pending file rename operations (often harmless): $(if ($renames.Value) { 'yes' } else { 'no' })"
     ''
@@ -742,6 +871,8 @@ $freeText = if ($null -ne $freePct) { "$freePct%" } else { 'n/a' }
 
 $lines = New-Object System.Collections.Generic.List[string]
 $lines.Add("# Windows checkup: $HostName")
+$lines.Add('')
+$lines.Add('This report comes from one scan that ran once, only read information, and installed and changed nothing on this PC.')
 $lines.Add('')
 $lines.Add('- Format: 1')
 $lines.Add('- OS: Windows')
