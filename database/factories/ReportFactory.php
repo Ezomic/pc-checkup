@@ -27,6 +27,7 @@ class ReportFactory extends Factory
             'markdown' => $markdown,
             'checksum' => hash('sha256', $markdown),
             'format_version' => 1,
+            'kind' => 'audit',
             'flags' => [],
         ];
     }
