@@ -3,6 +3,8 @@ import { Head, Link } from '@inertiajs/vue3';
 import { FileText } from '@lucide/vue';
 import { computed } from 'vue';
 import AdviceList from '@/components/machines/AdviceList.vue';
+import AfterFixSection from '@/components/machines/AfterFixSection.vue';
+import BenchmarkSection from '@/components/machines/BenchmarkSection.vue';
 import ChecklistSection from '@/components/machines/ChecklistSection.vue';
 import NotesSection from '@/components/machines/NotesSection.vue';
 import PhotosSection from '@/components/machines/PhotosSection.vue';
@@ -12,8 +14,10 @@ import { Button } from '@/components/ui/button';
 import { scannedAgo } from '@/lib/scannedAgo';
 import { index, summary } from '@/routes/machines';
 import type {
+    AfterFixReport,
     ChecklistItem,
     LatestReport,
+    MachineBenchmark,
     MachineDetails,
     MachineNote,
     MachinePhoto,
@@ -22,6 +26,8 @@ import type {
 const props = defineProps<{
     machine: MachineDetails;
     report: LatestReport | null;
+    afterFix: AfterFixReport | null;
+    benchmark: MachineBenchmark | null;
     checklist: ChecklistItem[];
     notes: MachineNote[];
     photos: MachinePhoto[];
@@ -134,6 +140,9 @@ defineOptions({
                 class="mt-3 max-h-96 overflow-auto text-xs whitespace-pre-wrap"
                 >{{ report.markdown }}</pre>
         </details>
+
+        <AfterFixSection v-if="afterFix" :after-fix="afterFix" />
+        <BenchmarkSection v-if="benchmark" :benchmark="benchmark" />
 
         <ChecklistSection :machine-id="machine.id" :items="checklist" />
         <NotesSection :machine-id="machine.id" :notes="notes" />

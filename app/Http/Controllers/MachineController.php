@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Actions\Machines\BuildReportInsights;
 use App\Actions\Machines\CreateManualMachine;
 use App\Http\Requests\Machines\StoreMachineRequest;
 use App\Models\Machine;
@@ -95,7 +96,7 @@ final class MachineController extends Controller
         ]);
     }
 
-    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts): Response
+    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts, BuildReportInsights $insights): Response
     {
         $this->authorize('view', $machine);
 
@@ -111,6 +112,7 @@ final class MachineController extends Controller
                 'markdown' => $report->markdown,
             ],
             'checklist' => $resolver->withEntries($machine),
+            ...$insights->handle($machine),
             'notes' => $machine->notes()->latest()->latest('id')->get(['id', 'body', 'created_at']),
             'photos' => $machine->photos()->oldest()->oldest('id')->get()->map(fn (Photo $photo): array => [
                 'id' => $photo->id,
