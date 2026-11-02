@@ -9,6 +9,7 @@ import ChecklistSection from '@/components/machines/ChecklistSection.vue';
 import ClientSection from '@/components/machines/ClientSection.vue';
 import NotesSection from '@/components/machines/NotesSection.vue';
 import PhotosSection from '@/components/machines/PhotosSection.vue';
+import RemoteSupportSection from '@/components/machines/RemoteSupportSection.vue';
 import StatusBadge from '@/components/machines/StatusBadge.vue';
 import StatusSection from '@/components/machines/StatusSection.vue';
 import { Button } from '@/components/ui/button';
@@ -20,13 +21,13 @@ import type {
     ClientOption,
     LatestReport,
     MachineBenchmark,
-    MachineDetails,
     MachineNote,
     MachinePhoto,
+    OwnerMachineDetails,
 } from '@/types';
 
 const props = defineProps<{
-    machine: MachineDetails;
+    machine: OwnerMachineDetails;
     client: ClientOption | null;
     clients: ClientOption[];
     report: LatestReport | null;
@@ -137,6 +138,10 @@ defineOptions({
         </section>
 
         <StatusSection :machine-id="machine.id" :status="machine.status" />
+        <RemoteSupportSection
+            :machine-id="machine.id"
+            :rustdesk-id="machine.rustdesk_id"
+        />
         <ClientSection
             :machine-id="machine.id"
             :client="client"

@@ -703,6 +703,21 @@ pcc_check_flags() { printf '%s\n' "$1" | sed -n 's/^FLAG: /- /p'; }
 
 pcc_check_facts() { printf '%s\n' "$1" | grep -v '^FLAG: '; }
 
+PCC_RUSTDESK_CONFIG="${PCC_RUSTDESK_CONFIG:-$HOME/Library/Preferences/com.carriez.RustDesk/RustDesk.toml}"
+
+# RustDesk is never started or asked: only its id line is read, and no other line is kept or printed.
+pcc_rustdesk_check() {
+  local id=""
+  if [ -r "$PCC_RUSTDESK_CONFIG" ]; then
+    id=$(tr -d '\r' < "$PCC_RUSTDESK_CONFIG" | awk '/^\[/ {exit} {print}' | grep -E "^id[[:space:]]*=[[:space:]]*['\"][A-Za-z0-9_-]{4,64}['\"][[:space:]]*\$" | head -n 1 | sed -E "s/^id[[:space:]]*=[[:space:]]*['\"]([^'\"]*)['\"].*/\1/")
+  fi
+  if [ -n "$id" ]; then
+    echo "RustDesk ID: $id"
+  else
+    echo "RustDesk ID: not found (RustDesk is not installed, or its settings file holds no readable ID)"
+  fi
+}
+
 # Sourcing this file (for tests) stops here instead of running the checkup.
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
 
@@ -936,6 +951,7 @@ if [ "$PCC_CLI_FIX" = 1 ]; then pcc_fix_run; fi
   echo "- macOS: $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
   echo "- Battery: ${CYCLES:-n/a} cycles, condition ${COND:-n/a}, max capacity ${MAXCAP:-n/a}"
   echo "- Free disk: ${FREE_PCT:-n/a}%"
+  echo "- $(pcc_rustdesk_check)"
   echo "- Warranty and coverage lookup: https://checkcoverage.apple.com (serial above)"
   echo
   echo "## Things to look at"

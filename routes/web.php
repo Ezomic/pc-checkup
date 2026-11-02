@@ -12,6 +12,7 @@ use App\Http\Controllers\LoginLinkRequestController;
 use App\Http\Controllers\MachineClientController;
 use App\Http\Controllers\MachineController;
 use App\Http\Controllers\MachineNoteController;
+use App\Http\Controllers\MachineRustDeskController;
 use App\Http\Controllers\MachineStatusController;
 use App\Http\Controllers\NoteController;
 use App\Http\Controllers\PhotoController;
@@ -66,6 +67,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('machines/{machine}', [MachineController::class, 'show'])->name('machines.show');
     Route::get('machines/{machine}/summary', [MachineController::class, 'summary'])->name('machines.summary');
     Route::put('machines/{machine}/client', [MachineClientController::class, 'update'])->name('machines.client.update');
+    Route::put('machines/{machine}/rustdesk', [MachineRustDeskController::class, 'update'])->name('machines.rustdesk.update');
     Route::put('machines/{machine}/status', [MachineStatusController::class, 'update'])->name('machines.status.update');
     Route::put('machines/{machine}/checklist/{item}', [ChecklistEntryController::class, 'update'])
         ->where('item', '[a-z0-9_]+')->name('machines.checklist.update');

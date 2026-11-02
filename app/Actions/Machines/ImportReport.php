@@ -102,6 +102,7 @@ final class ImportReport
             'os' => $parsed->os ?? $machine->os,
             'device_type' => $parsed->deviceType ?? $machine->device_type,
             'model' => $parsed->model ?? $machine->model,
+            'rustdesk_id' => $parsed->rustdeskId ?? $machine->rustdesk_id,
             'deleted_at' => null,
         ])->save();
 

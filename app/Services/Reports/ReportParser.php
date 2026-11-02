@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Reports;
 
 use App\Enums\ReportKind;
+use App\Services\RustDesk\RustDeskId;
 
 final class ReportParser
 {
@@ -46,6 +47,7 @@ final class ReportParser
             beforeChecksum: $this->checksum($header['before checksum'] ?? null),
             fixes: $this->fixes($lines),
             benchmark: $this->benchmark($lines),
+            rustdeskId: RustDeskId::orNull($header['rustdesk id'] ?? null),
         );
     }
 
