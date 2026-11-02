@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Actions\Machines;
 
+use App\Enums\ReportKind;
 use App\Models\Machine;
 use App\Models\Report;
 use App\Models\User;
@@ -70,8 +71,26 @@ final class ImportReport
             'markdown' => $markdown,
             'checksum' => $checksum,
             'format_version' => $parsed->formatVersion,
+            'kind' => $parsed->kind,
+            'before_report_id' => $this->beforeReportId($machine, $parsed),
             'flags' => $parsed->flags,
+            'fixes' => $parsed->fixes,
+            'benchmark' => $parsed->benchmark,
         ]);
+    }
+
+    private function beforeReportId(Machine $machine, ParsedReport $parsed): ?int
+    {
+        if ($parsed->kind !== ReportKind::AfterFix || $parsed->beforeChecksum === null) {
+            return null;
+        }
+
+        $before = $machine->reports()
+            ->where('checksum', $parsed->beforeChecksum)
+            ->where('kind', ReportKind::Audit)
+            ->first();
+
+        return $before?->id;
     }
 
     private function saveMachine(Machine $machine, ParsedReport $parsed): Machine
