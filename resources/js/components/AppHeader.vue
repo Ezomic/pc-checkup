@@ -14,6 +14,7 @@ import UserMenuContent from '@/components/UserMenuContent.vue';
 import { useCurrentUrl } from '@/composables/useCurrentUrl';
 import { getInitials } from '@/composables/useInitials';
 import { cn } from '@/lib/utils';
+import { index as clientsIndex } from '@/routes/clients';
 import { index as machinesIndex } from '@/routes/machines';
 import { index as notesIndex } from '@/routes/notes';
 import { index as toolsIndex } from '@/routes/tools';
@@ -33,6 +34,7 @@ const { isCurrentUrl } = useCurrentUrl();
 
 const mainNavItems: NavItem[] = [
     { title: 'Machines', href: machinesIndex() },
+    { title: 'Clients', href: clientsIndex() },
     { title: 'Notes', href: notesIndex() },
     { title: 'Tools', href: toolsIndex() },
 ];
