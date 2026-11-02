@@ -49,7 +49,7 @@ it('shares portal apps for an authenticated user in workflow mode', function () 
 
     $user = User::factory()->create(['email_verified_at' => now()]);
 
-    actingAs($user)->get('/dashboard')->assertInertia(fn (Assert $page) => $page
+    actingAs($user)->get('/machines')->assertInertia(fn (Assert $page) => $page
         ->where('workflow.enabled', true)
         ->has('portalApps', 1)
         ->where('portalApps.0.slug', 'billr'));

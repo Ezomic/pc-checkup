@@ -35,7 +35,7 @@ Route::middleware('guest')->group(function () {
 });
 
 Route::middleware(['auth', 'verified'])->group(function () {
-    Route::get('dashboard', fn () => Inertia::render('Dashboard'))->name('dashboard');
+    Route::redirect('dashboard', '/machines')->name('dashboard');
 
     Route::resource('notes', NoteController::class)->except('show');
 
