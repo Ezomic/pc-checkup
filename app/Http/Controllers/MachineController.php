@@ -10,7 +10,9 @@ use App\Models\Machine;
 use App\Models\Photo;
 use App\Models\User;
 use App\Services\Checklist\ChecklistResolver;
+use App\Services\Flags\FlagAdvice;
 use App\Services\Flags\FlagAdvisor;
+use App\Services\Reports\ReportFacts;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;
@@ -93,7 +95,7 @@ final class MachineController extends Controller
         ]);
     }
 
-    public function show(Machine $machine, ChecklistResolver $resolver): Response
+    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts): Response
     {
         $this->authorize('view', $machine);
 
@@ -104,7 +106,8 @@ final class MachineController extends Controller
             'report' => $report === null ? null : [
                 'id' => $report->id,
                 'created_at' => $report->created_at,
-                'flags' => $report->flags,
+                'advice' => array_map(fn (FlagAdvice $advice): array => $advice->toArray(), $advisor->adviseAll($report->flags)),
+                'facts' => $facts->from($report->markdown),
                 'markdown' => $report->markdown,
             ],
             'checklist' => $resolver->withEntries($machine),

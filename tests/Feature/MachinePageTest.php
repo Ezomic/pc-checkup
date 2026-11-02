@@ -27,8 +27,33 @@ it('shows the machine with its latest report', function () {
             ->where('machine.name', 'Demo')
             ->where('machine.os', 'macOS')
             ->where('report.id', $latest->id)
-            ->where('report.flags', ['FileVault is OFF.'])
+            ->where('report.advice.0.headline', 'Disk encryption is off')
+            ->where('report.advice.0.raw', 'FileVault is OFF.')
             ->where('report.markdown', "# new\n"));
+});
+
+it('reads the key numbers from the report header', function () {
+    $user = User::factory()->create();
+    $machine = Machine::factory()->for($user)->create();
+    Report::factory()->for($machine)->create([
+        'markdown' => "# Windows checkup: PC\n\n- Format: 1\n- Chip/CPU: Ryzen 5\n- Memory: 32 GB\n- Free disk: 5%\n\n## Things to look at\n\n- Memory: not this one\n",
+        'flags' => [],
+    ]);
+
+    actingAs($user)->get("/machines/{$machine->id}")
+        ->assertInertia(fn ($page) => $page
+            ->where('report.facts', ['free_disk' => '5%', 'memory' => '32 GB', 'cpu' => 'Ryzen 5'])
+            ->where('report.advice', []));
+});
+
+it('leaves a key number out when the report does not have it', function () {
+    $user = User::factory()->create();
+    $machine = Machine::factory()->for($user)->create();
+    Report::factory()->for($machine)->create(['markdown' => "# Report\n", 'flags' => []]);
+
+    actingAs($user)->get("/machines/{$machine->id}")
+        ->assertInertia(fn ($page) => $page
+            ->where('report.facts', ['free_disk' => null, 'memory' => null, 'cpu' => null]));
 });
 
 it('shows no report for a machine without one', function () {
