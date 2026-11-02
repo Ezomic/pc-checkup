@@ -183,7 +183,7 @@ pcc_upload_report() {
     else
       echo "Upload skipped: the token contains characters a token never has. Check the $PCC_TOKEN_SOURCE it came from."
     fi
-    echo "Token safety: use a token with only the Write ability and a short lifetime, and delete the token from any machine that is not yours."
+    [ -n "${2:-}" ] || echo "Token safety: use a token with only the Write ability and a short lifetime, and delete the token from any machine that is not yours."
   elif pcc_valid_code "$PCC_CODE"; then
     pcc_upload "$file" "$base" "" "$PCC_CODE"
   else
@@ -366,6 +366,49 @@ pcc_fix_finish() {
   PCC_FIX_LOG=""
   echo "Change log saved to:"
   echo "  $2"
+}
+
+# ---------- After-fix report (--fix) ----------
+PCC_REPORT_KIND=audit
+PCC_REPORT_BEFORE=""
+PCC_AFTER_OUT=""
+
+pcc_sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
+
+pcc_fix_applied() { [ -n "$PCC_FIX_LOG" ] && grep -Eq '^- [a-z0-9-]+ \| applied \| ' "$PCC_FIX_LOG"; }
+
+# When a fix was applied, audits again and writes the after-fix report next to the audit report
+# ($1), linked to it by the sha256 of that exact file. Does nothing otherwise. Needs
+# pcc_audit_pass and pcc_assemble_report from the main script.
+pcc_after_fix() {
+  local audit=$1 sum
+  PCC_AFTER_OUT=""
+  pcc_fix_applied || return 0
+  sum=$(pcc_sha256 "$audit")
+  echo
+  echo "A fix was applied, so the checkup runs again for the after-fix report..."
+  pcc_audit_pass
+  if [ "$PCC_BENCHMARK" = 1 ]; then pcc_run_benchmark "$BENCH"; fi
+  PCC_AFTER_OUT="${audit%.md}-after-fix.md"
+  PCC_REPORT_KIND=after-fix
+  PCC_REPORT_BEFORE=$sum
+  pcc_assemble_report "$PCC_AFTER_OUT"
+  PCC_REPORT_KIND=audit
+  PCC_REPORT_BEFORE=""
+  echo "After-fix report saved to:"
+  echo "  $PCC_AFTER_OUT"
+}
+
+# A scan code is claimed by the first upload, so only a token can send the second report.
+pcc_upload_after_fix() {
+  [ -n "$PCC_AFTER_OUT" ] || return 0
+  if [ -n "$PCC_TOKEN" ]; then
+    echo "Uploading the after-fix report, linked to the audit report:"
+    pcc_upload_report "$PCC_AFTER_OUT" quiet
+  elif [ -n "$PCC_CODE" ]; then
+    echo "The after-fix report was not uploaded: a scan code works once, so it was kept on the Desktop. Use a token to upload both reports."
+  fi
+  return 0
 }
 
 # ---------- Benchmark helpers (opt-in with --benchmark) ----------
@@ -628,6 +671,9 @@ sh_section() { section "$1" bash -c "$2"; }
 
 echo "Running checkup, this can take a minute or two..."
 
+pcc_audit_pass() {
+: > "$BODY"
+: > "$FLAGS"
 # ---------- Flags ----------
 SP_HW=$(system_profiler SPHardwareDataType 2>/dev/null)
 SP_PWR=$(system_profiler SPPowerDataType 2>/dev/null)
@@ -770,6 +816,8 @@ sh_section "Reboot history and boot time" "last reboot | head -8; sysctl kern.bo
 sh_section "Fans and temperatures (needs sudo)" "if [ \"\$(id -u)\" = 0 ]; then powermetrics -n 1 -i 1000 --samplers thermal 2>&1 | head -20; powermetrics -n 1 -i 1000 --samplers smc 2>&1 | grep -iE 'fan|temp' | head -10; else echo 'Run with sudo to include this section.'; fi"
 sh_section "Locale and time" "date; systemsetup -gettimezone 2>&1; defaults read NSGlobalDomain AppleLanguages 2>/dev/null"
 sh_section "Developer tools" "xcode-select -p 2>&1; git --version 2>&1; python3 --version 2>&1"
+}
+pcc_audit_pass
 
 BENCH=$(mktemp)
 if [ "$PCC_BENCHMARK" = 1 ]; then pcc_run_benchmark "$BENCH"; fi
@@ -778,10 +826,14 @@ if [ "$PCC_BENCHMARK" = 1 ]; then pcc_run_benchmark "$BENCH"; fi
 if [ "$PCC_CLI_FIX" = 1 ]; then pcc_fix_run; fi
 
 # ---------- Assemble ----------
-{
+pcc_assemble_report() {
   echo "# Mac checkup: $HOST"
   echo
-  echo "- Format: 1"
+  echo "- Format: 2"
+  if [ "$PCC_REPORT_KIND" = after-fix ]; then
+    echo "- Kind: after-fix"
+    echo "- Before checksum: $PCC_REPORT_BEFORE"
+  fi
   echo "- OS: macOS"
   echo "- Device type: $(echo "$SP_HW" | grep -q 'Model Name: MacBook' && echo laptop || echo desktop)"
   echo "- Generated: $(date)"
@@ -799,7 +851,7 @@ if [ "$PCC_CLI_FIX" = 1 ]; then pcc_fix_run; fi
   echo
   if [ -s "$FLAGS" ]; then cat "$FLAGS"; else echo "- Nothing flagged automatically."; fi
   cat "$BODY"
-  if [ -n "$PCC_FIX_LOG" ] && [ -s "$PCC_FIX_LOG" ]; then
+  if [ "$PCC_REPORT_KIND" = audit ] && [ -n "$PCC_FIX_LOG" ] && [ -s "$PCC_FIX_LOG" ]; then
     echo
     echo "## Fix log"
     echo
@@ -827,8 +879,9 @@ Handover and cleanup
 - [ ] Paid apps tied to the previous owner (Office, Adobe) are reassigned.
 - [ ] For a clean start: sign out of iCloud, then System Settings > General > Transfer or Reset > Erase All Content and Settings.
 EOF
-} > "$OUT"
-
+} > "$1"
+pcc_assemble_report "$OUT"
+pcc_after_fix "$OUT"
 rm -f "$BODY" "$FLAGS" "$BENCH"
 pcc_fix_finish "$OUT" "${OUT%.md}-changes.txt"
 
@@ -837,5 +890,6 @@ echo "Done. Report saved to:"
 echo "  $OUT"
 echo
 pcc_upload_report "$OUT" || true
+pcc_upload_after_fix
 echo
 echo "Optional: for sections that need admin rights (firmware password, some logs), re-run with: sudo bash mac-checkup.sh"
