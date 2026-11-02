@@ -122,6 +122,25 @@ function Get-RegValue([string]$Path, [string]$Name) {
     return (Get-ItemProperty -LiteralPath $Path -Name $Name).$Name
 }
 
+# RustDesk is never started or asked: only its id line is read, and no other line is kept or printed.
+# The service copy needs admin rights, so it is only tried with them.
+function Get-RustDeskId {
+    $paths = @("$env:APPDATA\RustDesk\config\RustDesk.toml")
+    if ($IsAdmin) { $paths += 'C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config\RustDesk.toml' }
+    foreach ($path in $paths) {
+        try {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+            foreach ($line in @(Get-Content -LiteralPath $path -ErrorAction Stop)) {
+                if ($line -match '^\[') { break }
+                if ($line -cmatch "^id\s*=\s*['""]([A-Za-z0-9_-]{4,64})['""]\s*$") { return $Matches[1] }
+            }
+        } catch {
+            continue
+        }
+    }
+    return $null
+}
+
 # ---------- Upload helpers ----------
 # Returns the token and where it came from, or $null: parameter, environment, then a file.
 function Get-UploadToken([string]$Given, [string]$Folder) {
@@ -869,6 +888,8 @@ $batteryLine = if ($batteries.Count -eq 0) { 'none' } else {
     "$cyclesText cycles, $healthText"
 }
 $freeText = if ($null -ne $freePct) { "$freePct%" } else { 'n/a' }
+$rustDeskId = Get-RustDeskId
+$rustDeskText = if ($rustDeskId) { $rustDeskId } else { 'not found (RustDesk is not installed, or its settings file holds no readable ID)' }
 
 $lines = New-Object System.Collections.Generic.List[string]
 $lines.Add("# Windows checkup: $HostName")
@@ -887,6 +908,7 @@ $lines.Add("- Memory: $ramGb GB")
 $lines.Add("- Windows: $osLine")
 $lines.Add("- Battery: $batteryLine")
 $lines.Add("- Free disk: $freeText")
+$lines.Add("- RustDesk ID: $rustDeskText")
 $lines.Add("- Secure Boot: $secureBoot")
 $lines.Add("- BitLocker: $bitLocker")
 $lines.Add("- Run as administrator: $(if ($IsAdmin) { 'yes' } else { 'no, some sections say unavailable' })")

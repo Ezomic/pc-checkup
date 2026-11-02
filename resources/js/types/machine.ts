@@ -54,6 +54,10 @@ export type MachineDetails = Pick<
     | 'status'
 >;
 
+export type OwnerMachineDetails = MachineDetails & {
+    rustdesk_id: string | null;
+};
+
 export type SummaryReport = Pick<ReportSummary, 'created_at' | 'flags'>;
 
 export type SummaryChecklistItem = Omit<ChecklistItem, 'outcome'>;

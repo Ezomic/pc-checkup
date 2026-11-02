@@ -104,7 +104,7 @@ final class MachineController extends Controller
         $report = $machine->latestReport();
 
         return Inertia::render('machines/Show', [
-            'machine' => $machine->only(['id', 'name', 'serial', 'hardware_uuid', 'os', 'device_type', 'model', 'status']),
+            'machine' => $machine->only(['id', 'name', 'serial', 'hardware_uuid', 'os', 'device_type', 'model', 'rustdesk_id', 'status']),
             'report' => $report === null ? null : [
                 'id' => $report->id,
                 'created_at' => $report->created_at,

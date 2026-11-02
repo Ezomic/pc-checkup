@@ -27,6 +27,7 @@ final readonly class ParsedReport
         public ?string $beforeChecksum = null,
         public ?array $fixes = null,
         public ?array $benchmark = null,
+        public ?string $rustdeskId = null,
     ) {}
 
     public function usableSerial(): ?string

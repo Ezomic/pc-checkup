@@ -25,6 +25,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $os
  * @property string|null $device_type
  * @property string|null $model
+ * @property string|null $rustdesk_id
  * @property MachineStatus $status
  * @property int|null $reports_count
  * @property string|null $last_report_at
