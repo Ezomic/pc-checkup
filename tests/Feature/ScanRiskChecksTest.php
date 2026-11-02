@@ -131,6 +131,12 @@ EOF',
 
 describe('Mac remote exposure check', function () {
     it('flags Remote Login, Screen Sharing and automatic login', function () {
+        $loopback = fakeMacBin([
+            'netstat' => 'printf "tcp4  0  0  127.0.0.1.22   *.*  LISTEN\ntcp6  0  0  ::1.5900   *.*  LISTEN\n"',
+            'defaults' => 'exit 1',
+        ]);
+        expect(runMacCheck($loopback, 'pcc_remote_check')['flags'])->toBe([]);
+
         $bin = fakeMacBin([
             'netstat' => 'printf "tcp4  0  0  *.22   *.*  LISTEN\ntcp4  0  0  *.5900   *.*  LISTEN\ntcp4  0  0  *.8022   *.*  LISTEN\n"',
             'defaults' => 'echo alice',
@@ -291,7 +297,7 @@ EOF',
         ['Add-Flag \'SMBv1 is enabled (an outdated file sharing protocol that ransomware has abused).\'', 'SMBv1 is enabled (an outdated file sharing protocol that ransomware has abused).'],
         ['Add-Flag \'Automatic sign-in is on, so anyone who starts this computer gets in without a password.\'', 'Automatic sign-in is on, so anyone who starts this computer gets in without a password.'],
         ['Add-Flag "No Windows update has been installed for $installAge days (newest: $($lastInstall.ToString(\'yyyy-MM-dd\')))."', 'No Windows update has been installed for 75 days (newest: 2026-08-19).'],
-        ['Add-Flag "$($noPassword.Count) enabled account(s) can sign in without a password (see Administrator accounts section)."', '1 enabled account(s) can sign in without a password (see Administrator accounts section).'],
+        ['Add-Flag "$($noPassword.Count) enabled account(s) are not required to have a password (see Administrator accounts section)."', '1 enabled account(s) are not required to have a password (see Administrator accounts section).'],
         ['Add-Flag "$adminCount accounts have administrator rights (see Administrator accounts section)."', '3 accounts have administrator rights (see Administrator accounts section).'],
         ['Add-Flag "The BIOS (firmware) is $biosYears years old (released $($bios.ReleaseDate.ToString(\'yyyy-MM-dd\')))."', 'The BIOS (firmware) is 6 years old (released 2020-01-02).'],
     ]);

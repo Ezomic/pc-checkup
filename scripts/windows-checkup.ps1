@@ -585,8 +585,7 @@ if (@($diskEvents.Value).Count -gt 0) { Add-Flag "$(@($diskEvents.Value).Count) 
 # ---------- Backup, remote exposure, accounts, firmware ----------
 # These only read. A fact that cannot be read says so in its section and raises no flag.
 $backupFacts = New-Object System.Collections.Generic.List[string]
-$fileHistoryDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\FileHistory\Configuration'
-$fileHistory = Try-Run { @(Get-ChildItem -LiteralPath $fileHistoryDir -Filter 'Config*.xml' -ErrorAction SilentlyContinue) }
+$fileHistory = Try-Run { @(Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\FileHistory\Configuration') -Filter 'Config*.xml' -ErrorAction SilentlyContinue) }
 $fileHistoryOn = $false
 $backupAge = $null
 if ($fileHistory.Note) {
@@ -690,11 +689,13 @@ if ($adminGroup.Note -or $localUsers.Note) {
     if ($adminCount -ge 3) { Add-Flag "$adminCount accounts have administrator rights (see Administrator accounts section)." }
     $noPassword = @($localUsers.Value | Where-Object { $_.Enabled -and $_.PasswordRequired -eq $false })
     $adminFacts.Add("Enabled local accounts that do not need a password: $($noPassword.Count)")
-    if ($noPassword.Count -gt 0) { Add-Flag "$($noPassword.Count) enabled account(s) can sign in without a password (see Administrator accounts section)." }
+    if ($noPassword.Count -gt 0) { Add-Flag "$($noPassword.Count) enabled account(s) are not required to have a password (see Administrator accounts section)." }
 }
 
 $biosFacts = New-Object System.Collections.Generic.List[string]
-if ($bios.ReleaseDate) {
+if ("$($cs.Manufacturer) $($cs.Model)" -match 'virtual|vmware|hyper-v|qemu|kvm|xen|parallels') {
+    $biosFacts.Add('BIOS age: not checked (this is a virtual machine)')
+} elseif ($bios.ReleaseDate) {
     $biosYears = [int][math]::Floor(((Get-Date) - $bios.ReleaseDate).TotalDays / 365.25)
     $biosFacts.Add("BIOS release date: $($bios.ReleaseDate.ToString('yyyy-MM-dd')) (about $biosYears full years ago)")
     if ($biosYears -ge 5) { Add-Flag "The BIOS (firmware) is $biosYears years old (released $($bios.ReleaseDate.ToString('yyyy-MM-dd')))." }

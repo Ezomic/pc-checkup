@@ -33,7 +33,7 @@ final class FlagAdvisor
         ['/Gatekeeper is DISABLED/', FlagSeverity::High, 'macOS is not checking apps before they run', 'Turn Gatekeeper back on in Privacy and Security.'],
         ['/^SMBv1 is enabled/', FlagSeverity::High, 'An outdated file sharing feature is on', 'SMBv1 is decades old and ransomware has used it to spread. Turn it off in Windows Features unless an old device needs it.'],
         ['/^Remote Desktop \(RDP\) is enabled/', FlagSeverity::High, 'Remote Desktop is turned on', 'It lets people sign in to this PC over the network. Turn it off in Settings under System, Remote Desktop, unless you use it.'],
-        ['/^(\d+) enabled account\(s\) can sign in without a password/', FlagSeverity::High, 'Some accounts have no password', 'Anyone who reaches the sign-in screen can use them. Give every account a password.'],
+        ['/^(\d+) enabled account\(s\) are not required to have a password/', FlagSeverity::Medium, 'Some accounts need no password', 'These accounts are allowed to have an empty password. Make sure each one has a password.'],
         ['/^Windows is not activated/', FlagSeverity::Medium, 'Windows is not activated', 'Activate it with a valid licence to get every feature and update.'],
         ['/^BitLocker is (?:not protecting|OFF)/', FlagSeverity::Medium, 'Disk encryption is off', self::ENCRYPTION],
         ['/^FileVault is OFF/', FlagSeverity::Medium, 'Disk encryption is off', self::ENCRYPTION],

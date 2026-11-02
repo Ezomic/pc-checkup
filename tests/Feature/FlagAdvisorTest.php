@@ -52,7 +52,7 @@ dataset('flags', [
     ['CPU is thermally throttled to 70% (check vents, dust, heavy load).', FlagSeverity::Low, 'It is running slowly right now'],
     ['SMBv1 is enabled (an outdated file sharing protocol that ransomware has abused).', FlagSeverity::High, 'An outdated file sharing feature is on'],
     ['Remote Desktop (RDP) is enabled, so people on the network can try to sign in to this PC.', FlagSeverity::High, 'Remote Desktop is turned on'],
-    ['2 enabled account(s) can sign in without a password (see Administrator accounts section).', FlagSeverity::High, 'Some accounts have no password'],
+    ['2 enabled account(s) are not required to have a password (see Administrator accounts section).', FlagSeverity::Medium, 'Some accounts need no password'],
     ['Remote Login (SSH) is on, so other computers can try to sign in to this Mac.', FlagSeverity::Medium, 'Remote Login is turned on'],
     ['Screen Sharing is on, so other people on the network can ask to see or control this Mac.', FlagSeverity::Medium, 'Screen Sharing is turned on'],
     ['Automatic sign-in is on, so anyone who starts this computer gets in without a password.', FlagSeverity::Medium, 'The computer signs in by itself'],

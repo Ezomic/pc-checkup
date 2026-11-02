@@ -611,7 +611,7 @@ pcc_tm_last_date() {
 
 pcc_backup_check() {
   local info last days
-  if ! info=$(tmutil destinationinfo 2>/dev/null); then
+  if ! info=$(tmutil destinationinfo 2>&1); then
     echo "Time Machine: could not check (tmutil did not answer)"
     return 0
   fi
@@ -639,6 +639,7 @@ pcc_backup_check() {
 pcc_remote_check() {
   local listening autologin
   if listening=$(netstat -an -p tcp 2>/dev/null); then
+    listening=$(printf '%s\n' "$listening" | grep -v '127\.0\.0\.1\.' | grep -v '::1\.')
     if printf '%s\n' "$listening" | grep -Eq '[.:]22[[:space:]].*LISTEN'; then
       echo "Remote Login (SSH): on (something is listening on port 22)"
       echo "FLAG: Remote Login (SSH) is on, so other computers can try to sign in to this Mac."
