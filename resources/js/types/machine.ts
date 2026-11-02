@@ -28,6 +28,20 @@ export type MachineCard = Machine & {
     issue_count: number;
 };
 
+export type ReportFacts = {
+    free_disk: string | null;
+    memory: string | null;
+    cpu: string | null;
+};
+
+export type LatestReport = {
+    id: number;
+    created_at: string;
+    advice: FlagAdvice[];
+    facts: ReportFacts;
+    markdown: string;
+};
+
 export type MachineDetails = Pick<
     Machine,
     | 'id'

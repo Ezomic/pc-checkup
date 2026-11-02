@@ -2,24 +2,26 @@
 import { Head, Link } from '@inertiajs/vue3';
 import { FileText } from '@lucide/vue';
 import { computed } from 'vue';
+import AdviceList from '@/components/machines/AdviceList.vue';
 import ChecklistSection from '@/components/machines/ChecklistSection.vue';
 import NotesSection from '@/components/machines/NotesSection.vue';
 import PhotosSection from '@/components/machines/PhotosSection.vue';
 import StatusBadge from '@/components/machines/StatusBadge.vue';
 import StatusSection from '@/components/machines/StatusSection.vue';
 import { Button } from '@/components/ui/button';
+import { scannedAgo } from '@/lib/scannedAgo';
 import { index, summary } from '@/routes/machines';
 import type {
     ChecklistItem,
+    LatestReport,
     MachineDetails,
     MachineNote,
     MachinePhoto,
-    ReportSummary,
 } from '@/types';
 
 const props = defineProps<{
     machine: MachineDetails;
-    report: ReportSummary | null;
+    report: LatestReport | null;
     checklist: ChecklistItem[];
     notes: MachineNote[];
     photos: MachinePhoto[];
@@ -30,10 +32,34 @@ const title = computed(
 );
 
 const details = computed(() =>
-    [props.machine.os, props.machine.device_type, props.machine.serial]
+    [props.machine.os, props.machine.device_type, props.machine.model]
         .filter((part): part is string => part !== null)
         .join(' · '),
 );
+
+const verdict = computed(() => {
+    if (props.report === null) {
+        return 'No scan yet';
+    }
+
+    return (
+        props.report.advice[0]?.headline ?? 'Nothing flagged in the latest scan'
+    );
+});
+
+const tiles = computed(() => {
+    if (props.report === null) {
+        return [];
+    }
+
+    const { free_disk, memory } = props.report.facts;
+
+    return [
+        { label: 'Free space', value: free_disk },
+        { label: 'Memory', value: memory },
+        { label: 'To look at', value: String(props.report.advice.length) },
+    ].filter((tile) => tile.value !== null);
+});
 
 defineOptions({
     layout: {
@@ -45,16 +71,16 @@ defineOptions({
 <template>
     <Head :title="title" />
 
-    <div class="flex h-full flex-1 flex-col gap-8 p-4">
-        <div class="flex items-start justify-between gap-4">
-            <div>
-                <div class="flex items-center gap-2">
-                    <h1 class="text-xl font-semibold">{{ title }}</h1>
-                    <StatusBadge :status="machine.status" />
-                </div>
-                <p class="text-sm text-muted-foreground">{{ details }}</p>
-                <p v-if="machine.model" class="text-sm text-muted-foreground">
-                    {{ machine.model }}
+    <div class="flex h-full flex-1 flex-col gap-8 p-4 pt-8">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+            <div class="flex flex-col gap-2">
+                <StatusBadge :status="machine.status" class="self-start" />
+                <h1 class="text-2xl font-semibold">{{ title }}</h1>
+                <p class="text-sm text-muted-foreground">
+                    {{ details }}
+                    <template v-if="report">
+                        · Scanned {{ scannedAgo(report.created_at) }}
+                    </template>
                 </p>
             </div>
             <Button as-child size="sm" variant="outline">
@@ -65,40 +91,49 @@ defineOptions({
             </Button>
         </div>
 
-        <StatusSection :machine-id="machine.id" :status="machine.status" />
-
-        <section class="flex flex-col gap-3">
-            <h2 class="text-lg font-semibold">Latest report</h2>
-
+        <section class="flex flex-col gap-4">
+            <p class="text-3xl font-semibold" data-test="verdict">
+                {{ verdict }}
+            </p>
             <p v-if="report === null" class="text-sm text-muted-foreground">
-                No report imported for this machine.
+                Start a scan or import a report to see how this machine is
+                doing.
             </p>
 
-            <template v-else>
-                <p class="text-sm text-muted-foreground">
-                    Imported {{ report.created_at.slice(0, 10) }}
-                </p>
-                <ul
-                    v-if="report.flags.length > 0"
-                    class="flex flex-col gap-1 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-sm"
+            <div
+                v-if="tiles.length > 0"
+                class="grid gap-3 sm:grid-cols-3"
+                data-test="tiles"
+            >
+                <div
+                    v-for="tile in tiles"
+                    :key="tile.label"
+                    class="rounded-lg bg-muted p-4"
                 >
-                    <li v-for="flag in report.flags" :key="flag">
-                        {{ flag }}
-                    </li>
-                </ul>
-                <p v-else class="text-sm text-muted-foreground">
-                    Nothing was flagged automatically.
-                </p>
-                <details class="rounded-xl border border-sidebar-border/70 p-3">
-                    <summary class="cursor-pointer text-sm">
-                        Full report
-                    </summary>
-                    <pre
-                        class="mt-3 max-h-96 overflow-auto text-xs whitespace-pre-wrap"
-                        >{{ report.markdown }}</pre>
-                </details>
-            </template>
+                    <p class="text-sm text-muted-foreground">
+                        {{ tile.label }}
+                    </p>
+                    <p class="text-2xl font-semibold">{{ tile.value }}</p>
+                </div>
+            </div>
         </section>
+
+        <section
+            v-if="report && report.advice.length > 0"
+            class="flex flex-col gap-3"
+        >
+            <h2 class="text-lg font-semibold">What to do first</h2>
+            <AdviceList :advice="report.advice" />
+        </section>
+
+        <StatusSection :machine-id="machine.id" :status="machine.status" />
+
+        <details v-if="report" class="rounded-xl border border-border p-3">
+            <summary class="cursor-pointer text-sm">Full report</summary>
+            <pre
+                class="mt-3 max-h-96 overflow-auto text-xs whitespace-pre-wrap"
+                >{{ report.markdown }}</pre>
+        </details>
 
         <ChecklistSection :machine-id="machine.id" :items="checklist" />
         <NotesSection :machine-id="machine.id" :notes="notes" />
