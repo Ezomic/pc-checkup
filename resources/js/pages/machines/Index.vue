@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
 import { Plus, ScanLine, Upload } from '@lucide/vue';
+import StaleNote from '@/components/machines/StaleNote.vue';
 import StatusBadge from '@/components/machines/StatusBadge.vue';
 import Paginator from '@/components/Paginator.vue';
 import { Button } from '@/components/ui/button';
@@ -110,9 +111,12 @@ function headline(machine: MachineCard): string {
                     </p>
                     <p
                         v-if="machine.last_report_at"
-                        class="mt-auto pt-2 text-xs text-muted-foreground"
+                        class="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 pt-2 text-xs text-muted-foreground"
                     >
-                        Scanned {{ scannedAgo(machine.last_report_at) }}
+                        <span>
+                            Scanned {{ scannedAgo(machine.last_report_at) }}
+                        </span>
+                        <StaleNote v-if="machine.stale" />
                     </p>
                 </Link>
             </li>

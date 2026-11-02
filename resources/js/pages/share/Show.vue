@@ -81,7 +81,7 @@ function headline(machine: SharedMachineCard): string {
                     v-if="machine.scanned_at"
                     class="mt-auto pt-2 text-xs text-muted-foreground"
                 >
-                    Checked {{ scannedAgo(machine.scanned_at) }}
+                    Last checked {{ scannedAgo(machine.scanned_at) }}
                 </p>
             </Link>
         </li>

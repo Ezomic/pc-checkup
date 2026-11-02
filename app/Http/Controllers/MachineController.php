@@ -15,6 +15,7 @@ use App\Services\Checklist\ChecklistResolver;
 use App\Services\Flags\FlagAdvice;
 use App\Services\Flags\FlagAdvisor;
 use App\Services\Reports\ReportFacts;
+use App\Services\Reports\ReportFreshness;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;
@@ -23,7 +24,7 @@ use Inertia\Response;
 
 final class MachineController extends Controller
 {
-    public function index(Request $request, FlagAdvisor $advisor): Response
+    public function index(Request $request, FlagAdvisor $advisor, ReportFreshness $freshness): Response
     {
         $user = $request->user();
         abort_unless($user instanceof User, 403);
@@ -36,13 +37,14 @@ final class MachineController extends Controller
                 ->latest()
                 ->latest('id')
                 ->paginate(Config::integer('pagination.per_page'))
-                ->through(function (Machine $machine) use ($advisor): array {
+                ->through(function (Machine $machine) use ($advisor, $freshness): array {
                     $advice = $advisor->adviseAll($machine->newestReport->flags ?? []);
 
                     return [
                         ...$machine->withoutRelations()->toArray(),
                         'top_issue' => ($advice[0] ?? null)?->toArray(),
                         'issue_count' => count($advice),
+                        'stale' => $freshness->isStale($machine->newestReport),
                     ];
                 })
                 ->withQueryString(),
@@ -97,7 +99,7 @@ final class MachineController extends Controller
         ]);
     }
 
-    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts, BuildReportInsights $insights): Response
+    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts, BuildReportInsights $insights, ReportFreshness $freshness): Response
     {
         $this->authorize('view', $machine);
 
@@ -108,6 +110,7 @@ final class MachineController extends Controller
             'report' => $report === null ? null : [
                 'id' => $report->id,
                 'created_at' => $report->created_at,
+                'stale' => $freshness->isStale($report),
                 'advice' => array_map(fn (FlagAdvice $advice): array => $advice->toArray(), $advisor->adviseAll($report->flags)),
                 'facts' => $facts->from($report->markdown),
                 'markdown' => $report->markdown,

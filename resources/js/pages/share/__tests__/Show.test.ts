@@ -89,6 +89,21 @@ describe('share/Show', () => {
         expect(wrapper.text()).toContain('Unnamed machine');
     });
 
+    it('says when it was last checked, with no warning however old the check is', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-11-02T12:00:00Z'));
+
+        const wrapper = render([
+            card({ scanned_at: '2026-08-04T12:00:00.000000Z' }),
+        ]);
+        const text = wrapper.text().toLowerCase();
+
+        vi.useRealTimers();
+
+        expect(text).toContain('last checked 90 days ago');
+        expect(text).not.toMatch(/stale|outdated|not checked recently|overdue/);
+    });
+
     it('says when a client has no machines', () => {
         expect(render([]).text()).toContain('No computers to show yet.');
     });

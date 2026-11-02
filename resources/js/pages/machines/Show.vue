@@ -10,6 +10,7 @@ import ClientSection from '@/components/machines/ClientSection.vue';
 import NotesSection from '@/components/machines/NotesSection.vue';
 import PhotosSection from '@/components/machines/PhotosSection.vue';
 import RemoteSupportSection from '@/components/machines/RemoteSupportSection.vue';
+import StaleNote from '@/components/machines/StaleNote.vue';
 import StatusBadge from '@/components/machines/StatusBadge.vue';
 import StatusSection from '@/components/machines/StatusSection.vue';
 import { Button } from '@/components/ui/button';
@@ -93,6 +94,15 @@ defineOptions({
                         · Scanned {{ scannedAgo(report.created_at) }}
                     </template>
                 </p>
+                <template v-if="report?.stale">
+                    <StaleNote class="text-sm" />
+                    <p
+                        class="text-sm text-muted-foreground"
+                        data-test="stale-hint"
+                    >
+                        Run the check again to refresh this report.
+                    </p>
+                </template>
             </div>
             <Button as-child size="sm" variant="outline">
                 <Link :href="summary(machine.id)">

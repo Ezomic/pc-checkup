@@ -73,7 +73,7 @@ const tiles = computed(() => {
         <p class="text-sm text-muted-foreground">
             {{ details }}
             <template v-if="report && report.scanned_at">
-                · Checked {{ scannedAgo(report.scanned_at) }}
+                · Last checked {{ scannedAgo(report.scanned_at) }}
             </template>
         </p>
     </div>
