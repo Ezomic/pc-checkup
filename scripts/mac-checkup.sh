@@ -1,6 +1,9 @@
 #!/bin/bash
 # Read-only Mac checkup. Writes a Markdown report to the Desktop.
-# Usage: bash mac-checkup.sh [--token TOKEN] [--code CODE] [--url URL]
+# Usage: bash mac-checkup.sh [--token TOKEN] [--code CODE] [--url URL] [--fix]
+#
+# --fix walks the findings it can fix, shows the exact command for each and asks y/N (No by
+# default). Everything it does is logged in the report ("Fix log") and in a text file next to it.
 #
 # Optional upload: with a token the finished report is also sent to PC Checkup. The token is
 # read from, in this order: --token, the PC_CHECKUP_TOKEN environment variable, or a file
@@ -184,12 +187,190 @@ pcc_upload_report() {
   fi
 }
 
+# ---------- Fix mode helpers (--fix) ----------
+PCC_FIX_IDS="firewall-off gatekeeper-off low-power-mode updates-pending caches-large filevault-off sip-disabled mdm-enrolled activation-lock battery-wear disk-smart"
+PCC_FW_BIN="${PCC_FW_BIN:-/usr/libexec/ApplicationFirewall/socketfilterfw}"
+PCC_CACHE_DIR="${PCC_CACHE_DIR:-${HOME:-}/Library/Caches}"
+PCC_CACHE_MIN_MB="${PCC_CACHE_MIN_MB:-2048}"
+PCC_FIX_LOG=""
+PCC_CACHE_KB=0
+
+pcc_fix_sudo() { if [ "$(id -u)" = 0 ]; then return 0; fi; printf 'sudo '; }
+
+pcc_fix_kind() {
+  case $1 in
+    firewall-off | gatekeeper-off | low-power-mode | updates-pending | caches-large) echo fix ;;
+    *) echo advice ;;
+  esac
+}
+
+pcc_fix_title() {
+  case $1 in
+    firewall-off) echo "Application firewall is off" ;;
+    gatekeeper-off) echo "Gatekeeper is disabled" ;;
+    low-power-mode) echo "Low Power Mode is on" ;;
+    updates-pending) echo "Software updates are pending" ;;
+    caches-large) echo "User caches are large" ;;
+    filevault-off) echo "FileVault is off" ;;
+    sip-disabled) echo "System Integrity Protection is disabled" ;;
+    mdm-enrolled) echo "Enrolled in MDM" ;;
+    activation-lock) echo "Activation Lock is enabled" ;;
+    battery-wear) echo "Battery is worn" ;;
+    disk-smart) echo "Disk SMART status is not healthy" ;;
+  esac
+}
+
+pcc_fix_command() {
+  local s
+  s=$(pcc_fix_sudo)
+  case $1 in
+    firewall-off) echo "${s}$PCC_FW_BIN --setglobalstate on" ;;
+    gatekeeper-off) echo "${s}spctl --master-enable" ;;
+    low-power-mode) echo "${s}pmset -a lowpowermode 0" ;;
+    updates-pending) echo "${s}softwareupdate --install --all" ;;
+    caches-large) echo "find \"$PCC_CACHE_DIR\" -mindepth 1 -maxdepth 1 -exec rm -rf {} +" ;;
+  esac
+}
+
+pcc_fix_undo() {
+  local s
+  s=$(pcc_fix_sudo)
+  case $1 in
+    firewall-off) echo "${s}$PCC_FW_BIN --setglobalstate off" ;;
+    gatekeeper-off) echo "${s}spctl --master-disable" ;;
+    low-power-mode) echo "${s}pmset -a lowpowermode 1" ;;
+    updates-pending) echo "none" ;;
+    caches-large) echo "none" ;;
+  esac
+}
+
+pcc_fix_advice() {
+  case $1 in
+    filevault-off) echo "Turn it on in System Settings > Privacy & Security > FileVault. This script never changes FileVault." ;;
+    sip-disabled) echo "Re-enable it from Recovery with: csrutil enable. This script never touches SIP." ;;
+    mdm-enrolled) echo "Only the organisation that manages this Mac can remove the enrolment. Ask them." ;;
+    activation-lock) echo "Normal on your own Mac. On a Mac you are taking over, the previous owner has to remove it from their Apple ID (iCloud, Find My)." ;;
+    battery-wear) echo "Battery wear cannot be fixed in software. Plan a battery replacement." ;;
+    disk-smart) echo "Back up now. A failing disk cannot be repaired by a script; plan a replacement." ;;
+  esac
+}
+
+pcc_fix_du_kb() { perl -e 'alarm shift; exec @ARGV' 30 du -sk "$1" 2>/dev/null | awk 'NR==1 {print $1}'; }
+
+pcc_fix_present() {
+  local value
+  case $1 in
+    firewall-off) "$PCC_FW_BIN" --getglobalstate 2>/dev/null | grep -qi "disabled" ;;
+    gatekeeper-off) spctl --status 2>/dev/null | grep -q "disabled" ;;
+    low-power-mode) pmset -g 2>/dev/null | grep -i lowpowermode | grep -q 1 ;;
+    updates-pending)
+      if [ -z "${UPDATES+x}" ]; then UPDATES=$(softwareupdate -l 2>&1); fi
+      printf '%s\n' "$UPDATES" | grep -q "^\* Label" ;;
+    caches-large)
+      [ -d "$PCC_CACHE_DIR" ] || return 1
+      value=$(pcc_fix_du_kb "$PCC_CACHE_DIR")
+      PCC_CACHE_KB=${value:-0}
+      [ "$PCC_CACHE_KB" -ge $((PCC_CACHE_MIN_MB * 1024)) ] 2>/dev/null ;;
+    filevault-off) fdesetup status 2>/dev/null | grep -q "Off" ;;
+    sip-disabled) csrutil status 2>/dev/null | grep -q "disabled" ;;
+    mdm-enrolled) profiles status -type enrollment 2>/dev/null | grep -qi "MDM enrollment: Yes" ;;
+    activation-lock) system_profiler SPHardwareDataType 2>/dev/null | grep -i "Activation Lock Status" | grep -qi "Enabled" ;;
+    battery-wear)
+      value=$(system_profiler SPPowerDataType 2>/dev/null)
+      printf '%s\n' "$value" | awk -F': ' '
+        /Cycle Count/ && $2 + 0 >= 800 {bad = 1}
+        /Condition/ && $2 != "Normal" {bad = 1}
+        /Maximum Capacity/ {c = $2; sub(/%/, "", c); if (c + 0 < 80) bad = 1}
+        END {exit !bad}' ;;
+    disk-smart)
+      value=$(diskutil info / 2>/dev/null | awk -F': +' '/SMART Status/ {print $2; exit}')
+      [ -n "$value" ] && [ "$value" != "Verified" ] && [ "$value" != "Not Supported" ] ;;
+    *) return 1 ;;
+  esac
+}
+
+# stdin is closed for the fix itself so it can never swallow the answers meant for later prompts
+pcc_fix_exec() { bash -c "$1" < /dev/null; }
+
+pcc_fix_ask() {
+  local answer=""
+  printf 'Apply this fix? [y/N] '
+  IFS= read -r answer || answer=""
+  printf '\n'
+  case $answer in y | Y | yes | YES | Yes) return 0 ;; *) return 1 ;; esac
+}
+
+pcc_fix_record() { printf -- '- %s | %s | %s | undo: %s\n' "$1" "$2" "$(pcc_oneline "$3")" "$(pcc_oneline "$4")" >> "$PCC_FIX_LOG"; }
+
+pcc_fix_preview_caches() {
+  echo "  Size preview: $((PCC_CACHE_KB / 1024)) MB in $PCC_CACHE_DIR. Largest folders:"
+  perl -e 'alarm shift; exec @ARGV' 30 du -sk "$PCC_CACHE_DIR"/* 2>/dev/null | sort -rn | head -5 | awk '{printf "    %d MB  %s\n", $1 / 1024, $2}'
+  echo "  Only the contents of that cache folder are removed; apps rebuild them. No documents or other user files are touched."
+}
+
+pcc_fix_one() {
+  local id=$1 command undo
+  command=$(pcc_fix_command "$id")
+  undo=$(pcc_fix_undo "$id")
+  echo "  Can fix here. Command: $command"
+  [ "$id" = caches-large ] && pcc_fix_preview_caches
+  case $command in sudo\ *) echo "  This needs administrator rights; sudo will ask for your password itself." ;; esac
+  echo "  Undo: $undo"
+  if ! pcc_fix_ask; then
+    pcc_fix_record "$id" skipped "$command" "$undo"
+    echo "  Skipped."
+  elif pcc_fix_exec "$command"; then
+    pcc_fix_record "$id" applied "$command" "$undo"
+    echo "  Applied."
+  else
+    pcc_fix_record "$id" failed "$command" "$undo"
+    echo "  Failed. Nothing more was changed for this finding."
+  fi
+}
+
+pcc_fix_run() {
+  local id found=0
+  PCC_FIX_LOG=$(mktemp)
+  echo
+  echo "Fix mode: each fix shows its exact command and waits for y. Anything but y skips it."
+  for id in $PCC_FIX_IDS; do
+    pcc_fix_present "$id" || continue
+    found=1
+    echo
+    if [ "$(pcc_fix_kind "$id")" = fix ]; then
+      echo "[can fix here] $(pcc_fix_title "$id") ($id)"
+      pcc_fix_one "$id"
+    else
+      echo "[needs you] $(pcc_fix_title "$id") ($id)"
+      echo "  $(pcc_fix_advice "$id")"
+    fi
+  done
+  [ "$found" = 1 ] || echo "Nothing to fix."
+  return 0
+}
+
+pcc_fix_finish() {
+  [ -n "$PCC_FIX_LOG" ] || return 0
+  {
+    echo "PC Checkup change log"
+    echo "Report: $1"
+    echo "Date: $(date)"
+    echo
+    if [ -s "$PCC_FIX_LOG" ]; then cat "$PCC_FIX_LOG"; else echo "No changes were made."; fi
+  } > "$2"
+  rm -f "$PCC_FIX_LOG"
+  PCC_FIX_LOG=""
+  echo "Change log saved to:"
+  echo "  $2"
+}
+
 # Sourcing this file (for tests) stops here instead of running the checkup.
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
 
 PCC_CLI_TOKEN=""
 PCC_CLI_URL=""
 PCC_CLI_CODE=""
+PCC_CLI_FIX=0
 while [ $# -gt 0 ]; do
   case $1 in
     --code) [ $# -ge 2 ] || { echo "--code needs a value."; exit 2; }; PCC_CLI_CODE=$2; shift 2 ;;
@@ -198,7 +379,8 @@ while [ $# -gt 0 ]; do
     --token=*) PCC_CLI_TOKEN=${1#--token=}; shift ;;
     --url) [ $# -ge 2 ] || { echo "--url needs a value."; exit 2; }; PCC_CLI_URL=$2; shift 2 ;;
     --url=*) PCC_CLI_URL=${1#--url=}; shift ;;
-    *) echo "Unknown option: $1. Usage: bash mac-checkup.sh [--token TOKEN] [--code CODE] [--url URL]"; exit 2 ;;
+    --fix) PCC_CLI_FIX=1; shift ;;
+    *) echo "Unknown option: $1. Usage: bash mac-checkup.sh [--token TOKEN] [--code CODE] [--url URL] [--fix]"; exit 2 ;;
   esac
 done
 pcc_find_token "$PCC_CLI_TOKEN"
@@ -351,7 +533,7 @@ sh_section "Homebrew" "command -v brew >/dev/null && brew list --versions 2>/dev
 sh_section "Configuration profiles and kernel/system extensions" "systemextensionsctl list 2>&1 | head -40; echo; kextstat 2>/dev/null | grep -v com.apple | head -40"
 sh_section "Startup items: LaunchAgents and LaunchDaemons" "ls -1 /Library/LaunchAgents /Library/LaunchDaemons \"\$HOME/Library/LaunchAgents\" 2>/dev/null"
 sh_section "Login items" "osascript -e 'tell application \"System Events\" to get the name of every login item' 2>&1"
-sh_section "Background items (macOS 13+)" "sfltool dumpbtm 2>&1 | grep -E 'Name:|Developer Name:|Type:|Disposition:' | head -150"
+sh_section "Background items (macOS 13+)" "perl -e 'alarm 30; exec @ARGV' sfltool dumpbtm 2>&1 | grep -E 'Name:|Developer Name:|Type:|Disposition:' | head -150; echo; echo '(capped at 30 seconds; if nothing is listed above, the command timed out or needs admin rights)'"
 sh_section "Cron jobs" "crontab -l 2>&1"
 
 sh_section "Listening network ports" "lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | head -40"
@@ -375,6 +557,9 @@ sh_section "Fans and temperatures (needs sudo)" "if [ \"\$(id -u)\" = 0 ]; then 
 sh_section "Locale and time" "date; systemsetup -gettimezone 2>&1; defaults read NSGlobalDomain AppleLanguages 2>/dev/null"
 sh_section "Developer tools" "xcode-select -p 2>&1; git --version 2>&1; python3 --version 2>&1"
 
+# ---------- Fix mode ----------
+if [ "$PCC_CLI_FIX" = 1 ]; then pcc_fix_run; fi
+
 # ---------- Assemble ----------
 {
   echo "# Mac checkup: $HOST"
@@ -397,6 +582,12 @@ sh_section "Developer tools" "xcode-select -p 2>&1; git --version 2>&1; python3 
   echo
   if [ -s "$FLAGS" ]; then cat "$FLAGS"; else echo "- Nothing flagged automatically."; fi
   cat "$BODY"
+  if [ -n "$PCC_FIX_LOG" ] && [ -s "$PCC_FIX_LOG" ]; then
+    echo
+    echo "## Fix log"
+    echo
+    cat "$PCC_FIX_LOG"
+  fi
   cat <<'EOF'
 
 ## Manual checklist (cannot be done by script)
@@ -421,6 +612,7 @@ EOF
 } > "$OUT"
 
 rm -f "$BODY" "$FLAGS"
+pcc_fix_finish "$OUT" "${OUT%.md}-changes.txt"
 
 echo
 echo "Done. Report saved to:"
