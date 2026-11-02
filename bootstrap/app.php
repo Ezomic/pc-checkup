@@ -71,7 +71,10 @@ return Application::configure(basePath: dirname(__DIR__))
                 return $response;
             }
 
-            return Inertia::render('Error', ['status' => $response->getStatusCode()])
+            // A share link is opened by someone with no account, so its errors must not point at the owner app.
+            $component = $request->is('c/*') ? 'share/Unavailable' : 'Error';
+
+            return Inertia::render($component, ['status' => $response->getStatusCode()])
                 ->toResponse($request)
                 ->setStatusCode($response->getStatusCode());
         });

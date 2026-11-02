@@ -67,7 +67,7 @@ final class ClientController extends Controller
             'client' => [
                 'id' => $client->id,
                 'name' => $client->name,
-                'share_url' => $client->share_token === null ? null : url('/c/'.$client->share_token),
+                'share_url' => $client->share_token === null ? null : route('share.show', $client->share_token),
                 'last_viewed_at' => $client->last_viewed_at,
                 'created_at' => $client->created_at,
             ],

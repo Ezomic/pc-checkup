@@ -6,5 +6,6 @@ export * from './navigation';
 export * from './note';
 export * from './pagination';
 export * from './portal';
+export * from './share';
 export * from './tool';
 export * from './ui';
