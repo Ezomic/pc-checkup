@@ -167,6 +167,20 @@ describe('the owner machines list', function () {
         expectIndexStale($user, false);
     });
 
+    it('flags each machine in the list on its own', function () {
+        $user = User::factory()->create();
+        $old = Machine::factory()->for($user)->create(['name' => 'Old']);
+        $fresh = Machine::factory()->for($user)->create(['name' => 'Fresh']);
+        Machine::factory()->for($user)->create(['name' => 'Manual']);
+        reportAged($old, '-90 days');
+        reportAged($fresh, '-1 day');
+
+        $stale = collect(actingAs($user)->get('/machines')->viewData('page')['props']['machines']['data'])
+            ->pluck('stale', 'name')->all();
+
+        expect($stale)->toEqual(['Manual' => false, 'Fresh' => false, 'Old' => true]);
+    });
+
     it('keeps the status and issue count untouched on a stale machine', function () {
         [$user, $machine] = ownerMachine();
         $machine->forceFill(['status' => 'ok'])->save();
