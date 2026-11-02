@@ -6,6 +6,7 @@ import AdviceList from '@/components/machines/AdviceList.vue';
 import AfterFixSection from '@/components/machines/AfterFixSection.vue';
 import BenchmarkSection from '@/components/machines/BenchmarkSection.vue';
 import ChecklistSection from '@/components/machines/ChecklistSection.vue';
+import ClientSection from '@/components/machines/ClientSection.vue';
 import NotesSection from '@/components/machines/NotesSection.vue';
 import PhotosSection from '@/components/machines/PhotosSection.vue';
 import StatusBadge from '@/components/machines/StatusBadge.vue';
@@ -16,6 +17,7 @@ import { index, summary } from '@/routes/machines';
 import type {
     AfterFixReport,
     ChecklistItem,
+    ClientOption,
     LatestReport,
     MachineBenchmark,
     MachineDetails,
@@ -25,6 +27,8 @@ import type {
 
 const props = defineProps<{
     machine: MachineDetails;
+    client: ClientOption | null;
+    clients: ClientOption[];
     report: LatestReport | null;
     afterFix: AfterFixReport | null;
     benchmark: MachineBenchmark | null;
@@ -133,6 +137,11 @@ defineOptions({
         </section>
 
         <StatusSection :machine-id="machine.id" :status="machine.status" />
+        <ClientSection
+            :machine-id="machine.id"
+            :client="client"
+            :clients="clients"
+        />
 
         <details v-if="report" class="rounded-xl border border-border p-3">
             <summary class="cursor-pointer text-sm">Full report</summary>

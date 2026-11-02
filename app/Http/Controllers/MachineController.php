@@ -7,6 +7,7 @@ namespace App\Http\Controllers;
 use App\Actions\Machines\BuildReportInsights;
 use App\Actions\Machines\CreateManualMachine;
 use App\Http\Requests\Machines\StoreMachineRequest;
+use App\Models\Client;
 use App\Models\Machine;
 use App\Models\Photo;
 use App\Models\User;
@@ -111,6 +112,8 @@ final class MachineController extends Controller
                 'facts' => $facts->from($report->markdown),
                 'markdown' => $report->markdown,
             ],
+            'client' => $machine->client?->only(['id', 'name']),
+            'clients' => Client::query()->where('user_id', $machine->user_id)->orderBy('name')->orderBy('id')->get(['id', 'name']),
             'checklist' => $resolver->withEntries($machine),
             ...$insights->handle($machine),
             'notes' => $machine->notes()->latest()->latest('id')->get(['id', 'body', 'created_at']),
