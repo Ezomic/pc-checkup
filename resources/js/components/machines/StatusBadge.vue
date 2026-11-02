@@ -8,7 +8,7 @@ const props = defineProps<{
 }>();
 
 const labels: Record<MachineStatus, string> = {
-    ok: 'OK',
+    ok: 'Looking good',
     needs_work: 'Needs work',
     reject: 'Reject',
 };

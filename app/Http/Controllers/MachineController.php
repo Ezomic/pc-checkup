@@ -10,6 +10,7 @@ use App\Models\Machine;
 use App\Models\Photo;
 use App\Models\User;
 use App\Services\Checklist\ChecklistResolver;
+use App\Services\Flags\FlagAdvisor;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;
@@ -18,18 +19,28 @@ use Inertia\Response;
 
 final class MachineController extends Controller
 {
-    public function index(Request $request): Response
+    public function index(Request $request, FlagAdvisor $advisor): Response
     {
         $user = $request->user();
         abort_unless($user instanceof User, 403);
 
         return Inertia::render('machines/Index', [
             'machines' => $user->machines()
+                ->with('newestReport')
                 ->withCount('reports')
                 ->withMax('reports as last_report_at', 'created_at')
                 ->latest()
                 ->latest('id')
                 ->paginate(Config::integer('pagination.per_page'))
+                ->through(function (Machine $machine) use ($advisor): array {
+                    $advice = $advisor->adviseAll($machine->newestReport->flags ?? []);
+
+                    return [
+                        ...$machine->withoutRelations()->toArray(),
+                        'top_issue' => ($advice[0] ?? null)?->toArray(),
+                        'issue_count' => count($advice),
+                    ];
+                })
                 ->withQueryString(),
         ]);
     }

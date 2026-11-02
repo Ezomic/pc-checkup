@@ -14,6 +14,20 @@ export type Machine = {
     created_at: string;
 };
 
+export type FlagSeverity = 'high' | 'medium' | 'low';
+
+export type FlagAdvice = {
+    severity: FlagSeverity;
+    headline: string;
+    advice: string | null;
+    raw: string;
+};
+
+export type MachineCard = Machine & {
+    top_issue: FlagAdvice | null;
+    issue_count: number;
+};
+
 export type MachineDetails = Pick<
     Machine,
     | 'id'
