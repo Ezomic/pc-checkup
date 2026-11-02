@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 
@@ -62,6 +63,14 @@ class Machine extends Model
     public function reports(): HasMany
     {
         return $this->hasMany(Report::class);
+    }
+
+    /**
+     * @return HasOne<Report, $this>
+     */
+    public function newestReport(): HasOne
+    {
+        return $this->hasOne(Report::class)->ofMany(['created_at' => 'max', 'id' => 'max']);
     }
 
     public function latestReport(): ?Report

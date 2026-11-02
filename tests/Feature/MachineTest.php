@@ -54,6 +54,36 @@ it('does not count another machine’s reports', function () {
         ->assertInertia(fn ($page) => $page->where('machines.data.0.id', $machine->id)->where('machines.data.0.reports_count', 0));
 });
 
+it('leads with the worst problem of the newest report', function () {
+    $user = User::factory()->create();
+    $machine = Machine::factory()->for($user)->create();
+    Report::factory()->for($machine)->create([
+        'created_at' => '2026-10-01 10:00:00',
+        'flags' => ['Secure Boot is OFF.'],
+    ]);
+    Report::factory()->for($machine)->create([
+        'created_at' => '2026-10-05 10:00:00',
+        'flags' => ['17 programs start with Windows (slows boot).', 'Only about 5% of drive C: is free.'],
+    ]);
+
+    actingAs($user)->get('/machines')
+        ->assertInertia(fn ($page) => $page
+            ->where('machines.data.0.issue_count', 2)
+            ->where('machines.data.0.top_issue.severity', 'high')
+            ->where('machines.data.0.top_issue.headline', 'Drive C: is almost full, only 5% left')
+            ->missing('machines.data.0.newest_report'));
+});
+
+it('has no top issue for a machine without a report', function () {
+    $user = User::factory()->create();
+    Machine::factory()->for($user)->create();
+
+    actingAs($user)->get('/machines')
+        ->assertInertia(fn ($page) => $page
+            ->where('machines.data.0.issue_count', 0)
+            ->where('machines.data.0.top_issue', null));
+});
+
 it('paginates at the configured page size', function () {
     config()->set('pagination.per_page', 5);
 
