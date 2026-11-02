@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Http\Middleware\AuthenticateBenchmarkClient;
 use App\Models\Machine;
 use App\Models\User;
 use Carbon\CarbonImmutable;
@@ -70,6 +71,17 @@ class AppServiceProvider extends ServiceProvider
                 $token instanceof PersonalAccessToken => "token:{$token->id}",
                 $user instanceof User => "user:{$user->id}",
                 default => 'ip:'.$request->ip(),
+            });
+        });
+
+        RateLimiter::for('bench', function (Request $request): Limit {
+            $token = $request->user()?->currentAccessToken();
+            $scanCodeId = $request->attributes->get(AuthenticateBenchmarkClient::SCAN_CODE_ATTRIBUTE);
+
+            return Limit::perMinute(6)->by(match (true) {
+                $token instanceof PersonalAccessToken => "bench:token:{$token->id}",
+                is_int($scanCodeId) => "bench:code:{$scanCodeId}",
+                default => 'bench:ip:'.$request->ip(),
             });
         });
     }
