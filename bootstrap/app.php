@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Middleware\AuthenticateBenchmarkClient;
 use App\Http\Middleware\BlockLocalCredentials;
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
@@ -11,6 +12,7 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\SubstituteBindings;
+use Illuminate\Routing\Middleware\ThrottleRequests;
 use Inertia\Inertia;
 use Laravel\Sanctum\Http\Middleware\CheckAbilities;
 use Symfony\Component\HttpFoundation\Response;
@@ -40,6 +42,10 @@ return Application::configure(basePath: dirname(__DIR__))
         // Before route binding, so a token without the ability gets the same 403 for a machine
         // that exists, one that does not, and one that is someone else's.
         $middleware->prependToPriorityList(before: SubstituteBindings::class, prepend: CheckAbilities::class);
+
+        // Throttle sits in the framework's priority list and would otherwise run first, keying
+        // every benchmark request by address because nobody is identified yet.
+        $middleware->prependToPriorityList(before: ThrottleRequests::class, prepend: AuthenticateBenchmarkClient::class);
 
         $middleware->web(append: [
             BlockLocalCredentials::class,

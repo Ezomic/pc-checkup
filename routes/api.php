@@ -2,16 +2,23 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Api\BenchmarkController;
 use App\Http\Controllers\Api\ChecklistEntryController;
 use App\Http\Controllers\Api\MachineController;
 use App\Http\Controllers\Api\MachineNoteController;
 use App\Http\Controllers\Api\MachineStatusController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\ScanReportController;
+use App\Http\Middleware\AuthenticateBenchmarkClient;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 Route::post('scans', [ScanReportController::class, 'store'])->name('api.scans.store');
+
+Route::middleware([AuthenticateBenchmarkClient::class, 'throttle:bench'])->prefix('bench')->group(function () {
+    Route::get('download', [BenchmarkController::class, 'download'])->name('api.bench.download');
+    Route::post('upload', [BenchmarkController::class, 'upload'])->name('api.bench.upload');
+});
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('user', function (Request $request) {
