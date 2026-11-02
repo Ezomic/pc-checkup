@@ -1,9 +1,13 @@
 #!/bin/bash
 # Read-only Mac checkup. Writes a Markdown report to the Desktop.
-# Usage: bash mac-checkup.sh [--token TOKEN] [--code CODE] [--url URL] [--fix]
+# Usage: bash mac-checkup.sh [--token TOKEN] [--code CODE] [--url URL] [--fix] [--benchmark]
 #
 # --fix walks the findings it can fix, shows the exact command for each and asks y/N (No by
 # default). Everything it does is logged in the report ("Fix log") and in a text file next to it.
+#
+# --benchmark also runs short CPU, memory, disk and network speed tests (a minute or so, with a
+# 512 MB temp file that is removed afterwards) and adds a Benchmark section to the report. The
+# network tests need a token or scan code and are skipped without one.
 #
 # Optional upload: with a token the finished report is also sent to PC Checkup. The token is
 # read from, in this order: --token, the PC_CHECKUP_TOKEN environment variable, or a file
@@ -364,6 +368,215 @@ pcc_fix_finish() {
   echo "  $2"
 }
 
+# ---------- Benchmark helpers (opt-in with --benchmark) ----------
+# Fixed work sizes so numbers compare between runs; the PCC_BENCH_* defaults can be overridden
+# in the environment, which the tests use to run the real functions on tiny sizes.
+PCC_BENCHMARK=0
+: "${PCC_BENCH_CPU_ITERATIONS:=15000000}"
+: "${PCC_BENCH_MEM_MB:=64}"
+: "${PCC_BENCH_MEM_COPIES:=24}"
+: "${PCC_BENCH_DISK_MB:=512}"
+: "${PCC_BENCH_NET_BYTES:=26214400}"
+PCC_BENCH_FILE=""
+PCC_BENCH_UPFILE=""
+
+pcc_now_ms() { /usr/bin/perl -MTime::HiRes=time -e 'printf "%d\n", time() * 1000'; }
+
+# Prints "- key: value" for a whole number, nothing otherwise, so a failed test leaves no line.
+pcc_bench_line() {
+  case ${2:-} in '' | *[!0-9]*) return 0 ;; esac
+  printf -- '- %s: %s\n' "$1" "$2"
+}
+
+# Prints the "## Benchmark" block for the lines in file $1, nothing when the file is empty or missing.
+pcc_benchmark_section() {
+  [ -s "${1:-}" ] || return 0
+  printf '\n## Benchmark\n\n'
+  cat "$1"
+}
+
+pcc_bench_cleanup() {
+  [ -n "$PCC_BENCH_FILE" ] && rm -f "$PCC_BENCH_FILE"
+  [ -n "$PCC_BENCH_UPFILE" ] && rm -f "$PCC_BENCH_UPFILE"
+  PCC_BENCH_FILE=""
+  PCC_BENCH_UPFILE=""
+  return 0
+}
+
+# Runs the same fixed loop in $1 processes at once and prints the milliseconds until all finish.
+pcc_bench_cpu() {
+  local procs=$1 start end i
+  start=$(pcc_now_ms)
+  for ((i = 0; i < procs; i++)); do
+    /usr/bin/perl -e 'my $x = 0; for my $i (1 .. $ARGV[0]) { $x = ($x * 31 + $i) % 1000003 }' "$PCC_BENCH_CPU_ITERATIONS" &
+  done
+  wait
+  end=$(pcc_now_ms)
+  echo $((end - start))
+}
+
+pcc_bench_cpu_single() { pcc_bench_cpu 1; }
+
+pcc_bench_cpu_multi() {
+  local cores
+  cores=$(sysctl -n hw.ncpu 2>/dev/null)
+  case $cores in '' | *[!0-9]* | 0) cores=1 ;; esac
+  pcc_bench_cpu "$cores"
+}
+
+# Copies a buffer in memory repeatedly and prints MB per second, timed inside perl.
+pcc_bench_memory() {
+  /usr/bin/perl -MTime::HiRes=time -e '
+    my ($mb, $copies) = @ARGV;
+    my $src = "x" x ($mb * 1048576);
+    my $start = time;
+    for (1 .. $copies) { my $dst = $src; substr($dst, 0, 1) = "y"; }
+    my $secs = time - $start;
+    $secs = 0.001 if $secs < 0.001;
+    printf "%d\n", $mb * $copies / $secs;
+  ' "$PCC_BENCH_MEM_MB" "$PCC_BENCH_MEM_COPIES"
+}
+
+# Prints MB per second for $PCC_BENCH_DISK_MB megabytes moved since the start time in $1.
+pcc_bench_mb_s() {
+  local start=$1 end ms
+  end=$(pcc_now_ms)
+  ms=$((end - start))
+  [ "$ms" -ge 1 ] || ms=1
+  echo $((PCC_BENCH_DISK_MB * 1000 / ms))
+}
+
+pcc_bench_disk_write() {
+  local start
+  start=$(pcc_now_ms)
+  dd if=/dev/zero of="$1" bs=1048576 count="$PCC_BENCH_DISK_MB" 2>/dev/null || return 1
+  sync
+  pcc_bench_mb_s "$start"
+}
+
+# F_NOCACHE (macOS fcntl 48) makes the read hit the disk instead of the page cache, which
+# purge cannot empty without root.
+pcc_bench_disk_read() {
+  local start
+  start=$(pcc_now_ms)
+  /usr/bin/perl -e 'open(my $fh, "<", $ARGV[0]) or exit 1; fcntl($fh, 48, 1); my $buf; while (read($fh, $buf, 1048576)) { }' "$1" || return 1
+  pcc_bench_mb_s "$start"
+}
+
+# Prints the site address for the network tests, or nothing when it is not a usable one.
+pcc_bench_base() {
+  local base
+  base=$(pcc_clean "${PCC_CLI_URL:-${PC_CHECKUP_URL:-$PCC_DEFAULT_URL}}")
+  base=${base%/}
+  pcc_valid_url "$base" || return 1
+  printf '%s' "$base"
+}
+
+# Prints the curl config line that authenticates a benchmark request, or nothing without a
+# usable token or scan code. The secret only travels on curl's stdin, never in its arguments.
+pcc_bench_auth() {
+  if [ -n "$PCC_TOKEN" ]; then
+    pcc_valid_token "$PCC_TOKEN" || return 1
+    printf 'header = "Authorization: Bearer %s"\n' "$PCC_TOKEN"
+  elif [ -n "$PCC_CODE" ]; then
+    pcc_valid_code "$PCC_CODE" || return 1
+    printf 'header = "X-Scan-Code: %s"\n' "$PCC_CODE"
+  else
+    return 1
+  fi
+}
+
+# Asks the site for one byte. Prints why the network tests cannot run and returns 1, or returns 0.
+pcc_bench_net_check() {
+  local base=$1 auth=$2 status
+  status=$(printf '%s\n' "$auth" | curl -sS -K - --max-time 15 -o /dev/null -w '%{http_code}' "$base/api/bench/download?bytes=1" 2>/dev/null)
+  case $status in
+    200) return 0 ;;
+    401) echo "the token or scan code was not accepted" ;;
+    403) echo "the token does not have the Write ability" ;;
+    429) echo "the server is rate limiting benchmark requests, try again in a minute" ;;
+    000 | '') echo "$base could not be reached" ;;
+    *) echo "the server answered HTTP $status" ;;
+  esac
+  return 1
+}
+
+# Prints megabits per second for a transfer of $1 bytes in $2 seconds.
+pcc_bench_mbps() {
+  awk -v b="$1" -v t="$2" 'BEGIN { if (t <= 0) t = 0.001; printf "%d\n", b * 8 / t / 1000000 }'
+}
+
+pcc_bench_net_down() {
+  local base=$1 auth=$2 out code size secs
+  out=$(printf '%s\n' "$auth" | curl -sS -K - --max-time 120 -o /dev/null -w '%{http_code} %{size_download} %{time_total}' "$base/api/bench/download?bytes=$PCC_BENCH_NET_BYTES" 2>/dev/null) || return 1
+  read -r code size secs <<< "$out"
+  [ "$code" = 200 ] && [ "$size" = "$PCC_BENCH_NET_BYTES" ] || return 1
+  pcc_bench_mbps "$size" "$secs"
+}
+
+# $3 is a file of exactly $PCC_BENCH_NET_BYTES bytes to send.
+pcc_bench_net_up() {
+  local base=$1 auth=$2 file=$3 out code secs
+  out=$(printf '%s\n' "$auth" | curl -sS -K - --max-time 120 -X POST -H 'Content-Type: application/octet-stream' --data-binary @"$file" -o /dev/null -w '%{http_code} %{time_total}' "$base/api/bench/upload" 2>/dev/null) || return 1
+  read -r code secs <<< "$out"
+  [ "$code" = 200 ] || return 1
+  pcc_bench_mbps "$PCC_BENCH_NET_BYTES" "$secs"
+}
+
+# Runs one test: announces it, stores "- key: value" in file $1 when it gave a number.
+# Args: file key title seconds command...
+pcc_bench_step() {
+  local out=$1 key=$2 title=$3 secs=$4 value
+  shift 4
+  printf '  %s (about %s seconds)... ' "$title" "$secs"
+  value=$("$@")
+  case $value in
+    '' | *[!0-9]*) echo "failed, skipped." ;;
+    *) echo "$value"; pcc_bench_line "$key" "$value" >> "$out" ;;
+  esac
+}
+
+# Runs every test, writing the result lines to file $1. The temp files are removed even on Ctrl-C.
+pcc_run_benchmark() {
+  local out=$1 base auth reason upmb
+  : > "$out"
+  trap pcc_bench_cleanup EXIT
+  trap 'pcc_bench_cleanup; exit 130' INT TERM
+  echo
+  echo "Benchmark mode: each test below runs on its own, so leave the Mac alone until it finishes."
+  pcc_bench_step "$out" cpu_single_ms "CPU, one core, ms" 1 pcc_bench_cpu_single
+  pcc_bench_step "$out" cpu_multi_ms "CPU, all cores, ms" 1 pcc_bench_cpu_multi
+  pcc_bench_step "$out" memory_mb_s "Memory bandwidth, MB/s" 2 pcc_bench_memory
+  PCC_BENCH_FILE=$(mktemp "${PCC_BENCH_DIR:-$HOME}/.pcc-bench.XXXXXX") || PCC_BENCH_FILE=""
+  if [ -n "$PCC_BENCH_FILE" ]; then
+    pcc_bench_step "$out" disk_write_mb_s "Disk write of ${PCC_BENCH_DISK_MB} MB, MB/s" 1 pcc_bench_disk_write "$PCC_BENCH_FILE"
+    pcc_bench_step "$out" disk_read_mb_s "Disk read of ${PCC_BENCH_DISK_MB} MB, MB/s" 2 pcc_bench_disk_read "$PCC_BENCH_FILE"
+  else
+    echo "  Disk tests skipped: no temporary file could be created."
+  fi
+  pcc_bench_cleanup
+  base=$(pcc_bench_base) || base=""
+  auth=$(pcc_bench_auth) || auth=""
+  upmb=$((PCC_BENCH_NET_BYTES / 1048576))
+  if [ -z "$auth" ]; then
+    echo "  Network tests skipped: they need a token or a scan code (use --code or --token)."
+  elif [ -z "$base" ]; then
+    echo "  Network tests skipped: the site address must start with https:// (http://localhost is allowed for testing)."
+  elif ! reason=$(pcc_bench_net_check "$base" "$auth"); then
+    echo "  Network tests skipped: $reason."
+  else
+    pcc_bench_step "$out" net_down_mbps "Network download of $upmb MB, Mbit/s" 5 pcc_bench_net_down "$base" "$auth"
+    PCC_BENCH_UPFILE=$(mktemp "${PCC_BENCH_DIR:-$HOME}/.pcc-bench.XXXXXX") || PCC_BENCH_UPFILE=""
+    if [ -n "$PCC_BENCH_UPFILE" ] && dd if=/dev/zero of="$PCC_BENCH_UPFILE" bs=1048576 count="$upmb" 2>/dev/null; then
+      pcc_bench_step "$out" net_up_mbps "Network upload of $upmb MB, Mbit/s" 5 pcc_bench_net_up "$base" "$auth" "$PCC_BENCH_UPFILE"
+    else
+      echo "  Network upload skipped: no temporary file could be created."
+    fi
+    pcc_bench_cleanup
+  fi
+  trap - EXIT INT TERM
+}
+
 # Sourcing this file (for tests) stops here instead of running the checkup.
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
 
@@ -380,7 +593,8 @@ while [ $# -gt 0 ]; do
     --url) [ $# -ge 2 ] || { echo "--url needs a value."; exit 2; }; PCC_CLI_URL=$2; shift 2 ;;
     --url=*) PCC_CLI_URL=${1#--url=}; shift ;;
     --fix) PCC_CLI_FIX=1; shift ;;
-    *) echo "Unknown option: $1. Usage: bash mac-checkup.sh [--token TOKEN] [--code CODE] [--url URL] [--fix]"; exit 2 ;;
+    --benchmark) PCC_BENCHMARK=1; shift ;;
+    *) echo "Unknown option: $1. Usage: bash mac-checkup.sh [--token TOKEN] [--code CODE] [--url URL] [--fix] [--benchmark]"; exit 2 ;;
   esac
 done
 pcc_find_token "$PCC_CLI_TOKEN"
@@ -557,6 +771,9 @@ sh_section "Fans and temperatures (needs sudo)" "if [ \"\$(id -u)\" = 0 ]; then 
 sh_section "Locale and time" "date; systemsetup -gettimezone 2>&1; defaults read NSGlobalDomain AppleLanguages 2>/dev/null"
 sh_section "Developer tools" "xcode-select -p 2>&1; git --version 2>&1; python3 --version 2>&1"
 
+BENCH=$(mktemp)
+if [ "$PCC_BENCHMARK" = 1 ]; then pcc_run_benchmark "$BENCH"; fi
+
 # ---------- Fix mode ----------
 if [ "$PCC_CLI_FIX" = 1 ]; then pcc_fix_run; fi
 
@@ -588,6 +805,7 @@ if [ "$PCC_CLI_FIX" = 1 ]; then pcc_fix_run; fi
     echo
     cat "$PCC_FIX_LOG"
   fi
+  pcc_benchmark_section "$BENCH"
   cat <<'EOF'
 
 ## Manual checklist (cannot be done by script)
@@ -611,7 +829,7 @@ Handover and cleanup
 EOF
 } > "$OUT"
 
-rm -f "$BODY" "$FLAGS"
+rm -f "$BODY" "$FLAGS" "$BENCH"
 pcc_fix_finish "$OUT" "${OUT%.md}-changes.txt"
 
 echo
