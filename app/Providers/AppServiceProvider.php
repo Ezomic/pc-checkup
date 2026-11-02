@@ -74,6 +74,8 @@ class AppServiceProvider extends ServiceProvider
             });
         });
 
+        RateLimiter::for('share', fn (Request $request): Limit => Limit::perMinute(60)->by('share:'.$request->ip()));
+
         RateLimiter::for('bench', function (Request $request): Limit {
             $token = $request->user()?->currentAccessToken();
             $scanCodeId = $request->attributes->get(AuthenticateBenchmarkClient::SCAN_CODE_ATTRIBUTE);

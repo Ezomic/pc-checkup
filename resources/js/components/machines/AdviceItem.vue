@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { FlagAdvice, FlagSeverity } from '@/types';
+import type { FlagSeverity, SharedAdvice } from '@/types';
 
 defineProps<{
-    item: FlagAdvice;
+    item: SharedAdvice;
 }>();
 
 const dots: Record<FlagSeverity, string> = {
