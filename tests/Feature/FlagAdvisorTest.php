@@ -50,6 +50,20 @@ dataset('flags', [
     ['Joined to the domain corp.example (managed by an organisation).', FlagSeverity::Low, 'It looks managed by an organisation'],
     ['Custom admin-trusted certificates are installed (see Trusted certificates section).', FlagSeverity::Low, 'It looks managed by an organisation'],
     ['CPU is thermally throttled to 70% (check vents, dust, heavy load).', FlagSeverity::Low, 'It is running slowly right now'],
+    ['SMBv1 is enabled (an outdated file sharing protocol that ransomware has abused).', FlagSeverity::High, 'An outdated file sharing feature is on'],
+    ['Remote Desktop (RDP) is enabled, so people on the network can try to sign in to this PC.', FlagSeverity::High, 'Remote Desktop is turned on'],
+    ['2 enabled account(s) are not required to have a password (see Administrator accounts section).', FlagSeverity::Medium, 'Some accounts need no password'],
+    ['Remote Login (SSH) is on, so other computers can try to sign in to this Mac.', FlagSeverity::Medium, 'Remote Login is turned on'],
+    ['Screen Sharing is on, so other people on the network can ask to see or control this Mac.', FlagSeverity::Medium, 'Screen Sharing is turned on'],
+    ['Automatic sign-in is on, so anyone who starts this computer gets in without a password.', FlagSeverity::Medium, 'The computer signs in by itself'],
+    ['No backup was found (File History is off and Desktop, Documents and Pictures are not saved to OneDrive).', FlagSeverity::Medium, 'No backup was found'],
+    ['No backup was found (Time Machine is not set up).', FlagSeverity::Medium, 'No backup was found'],
+    ['The last backup was 45 days ago (File History).', FlagSeverity::Medium, 'The last backup was 45 days ago'],
+    ['The last backup was 61 days ago (Time Machine).', FlagSeverity::Medium, 'The last backup was 61 days ago'],
+    ['No Windows update has been installed for 75 days (newest: 2026-08-19).', FlagSeverity::Medium, 'No updates installed for 75 days'],
+    ['No macOS update has been installed for 90 days (newest: 2026-08-03).', FlagSeverity::Medium, 'No updates installed for 90 days'],
+    ['4 accounts have administrator rights (see Administrator accounts section).', FlagSeverity::Low, '4 accounts have administrator rights'],
+    ['The BIOS (firmware) is 7 years old (released 2019-05-02).', FlagSeverity::Low, 'The BIOS is 7 years old'],
 ]);
 
 it('turns a raw flag into plain advice', function (string $flag, FlagSeverity $severity, string $headline) {
