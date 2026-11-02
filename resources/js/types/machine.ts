@@ -63,6 +63,8 @@ export type SummaryChecklist = Record<
     SummaryChecklistItem[]
 >;
 
+export type ReportKind = 'audit' | 'after-fix';
+
 export type ReportSummary = {
     id: number;
     created_at: string;
@@ -92,4 +94,74 @@ export type MachinePhoto = {
     width: number;
     height: number;
     url: string;
+};
+
+export type FixStatus = 'applied' | 'skipped' | 'failed';
+
+export type FixEntry = {
+    id: string;
+    status: FixStatus;
+    command: string;
+    undo: string | null;
+};
+
+export type AfterFixReport = {
+    id: number;
+    created_at: string;
+    flags: string[];
+    fixes: FixEntry[];
+    before: { id: number; created_at: string; flags: string[] } | null;
+    resolved: string[];
+    open: string[];
+    introduced: string[];
+};
+
+export type BenchmarkRating = 'healthy' | 'fair' | 'poor';
+
+export type BenchmarkMetricRow = {
+    key: string;
+    label: string;
+    unit: string;
+    value: number;
+    rating: BenchmarkRating;
+    healthy: number;
+    poor: number;
+    higher_is_better: boolean;
+};
+
+export type BenchmarkHistoryValue = {
+    key: string;
+    label: string;
+    unit: string;
+    value: number;
+    delta: number | null;
+    improved: boolean | null;
+};
+
+export type BenchmarkHistoryRow = {
+    id: number;
+    created_at: string;
+    kind: ReportKind;
+    values: BenchmarkHistoryValue[];
+};
+
+export type BenchmarkComparisonRow = {
+    key: string;
+    label: string;
+    unit: string;
+    before: number;
+    after: number;
+    delta: number;
+    improved: boolean | null;
+};
+
+export type MachineBenchmark = {
+    latest: {
+        id: number;
+        created_at: string;
+        kind: ReportKind;
+        metrics: BenchmarkMetricRow[];
+    };
+    history: BenchmarkHistoryRow[];
+    comparison: BenchmarkComparisonRow[] | null;
 };
