@@ -127,6 +127,7 @@ describe('a machine of the client', function () {
                         ['severity' => 'high', 'headline' => 'No antivirus is protecting this PC', 'advice' => 'Turn on real-time protection in Windows Security, or install an antivirus.'],
                         ['severity' => 'low', 'headline' => 'A restart is pending', 'advice' => 'Restart to finish installing updates.'],
                     ],
+                    'fixed_count' => 1,
                 ]));
     });
 

@@ -5,6 +5,7 @@ import { computed } from 'vue';
 import AdviceList from '@/components/machines/AdviceList.vue';
 import AfterFixSection from '@/components/machines/AfterFixSection.vue';
 import BenchmarkSection from '@/components/machines/BenchmarkSection.vue';
+import ChangesSection from '@/components/machines/ChangesSection.vue';
 import ChecklistSection from '@/components/machines/ChecklistSection.vue';
 import ClientSection from '@/components/machines/ClientSection.vue';
 import NotesSection from '@/components/machines/NotesSection.vue';
@@ -25,6 +26,7 @@ import type {
     MachineNote,
     MachinePhoto,
     OwnerMachineDetails,
+    ReportChanges,
 } from '@/types';
 
 const props = defineProps<{
@@ -32,6 +34,7 @@ const props = defineProps<{
     client: ClientOption | null;
     clients: ClientOption[];
     report: LatestReport | null;
+    changes: ReportChanges | null;
     afterFix: AfterFixReport | null;
     benchmark: MachineBenchmark | null;
     checklist: ChecklistItem[];
@@ -138,6 +141,8 @@ defineOptions({
                 </div>
             </div>
         </section>
+
+        <ChangesSection v-if="changes" :changes="changes" />
 
         <section
             v-if="report && report.advice.length > 0"

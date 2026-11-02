@@ -24,4 +24,5 @@ export type SharedReport = {
     scanned_at: string | null;
     facts: ReportFacts;
     advice: SharedAdvice[];
+    fixed_count: number;
 };

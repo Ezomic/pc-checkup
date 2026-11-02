@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Share;
 
+use App\Actions\Machines\CompareLatestReports;
 use App\Enums\MachineStatus;
 use App\Models\Machine;
 use App\Services\Flags\FlagAdvice;
@@ -16,7 +17,7 @@ use App\Services\Reports\ReportFacts;
  */
 final readonly class SharedMachineView
 {
-    public function __construct(private FlagAdvisor $advisor, private ReportFacts $facts) {}
+    public function __construct(private FlagAdvisor $advisor, private ReportFacts $facts, private CompareLatestReports $compare) {}
 
     /**
      * @return array{id: int, name: string|null, os: string|null, device_type: string|null, model: string|null, status: string|null, top_issue: array{severity: string, headline: string, advice: string|null}|null, issue_count: int, scanned_at: string|null}
@@ -50,7 +51,7 @@ final readonly class SharedMachineView
     }
 
     /**
-     * @return array{scanned_at: string|null, facts: array{free_disk: string|null, memory: string|null, cpu: string|null}, advice: list<array{severity: string, headline: string, advice: string|null}>}|null
+     * @return array{scanned_at: string|null, facts: array{free_disk: string|null, memory: string|null, cpu: string|null}, advice: list<array{severity: string, headline: string, advice: string|null}>, fixed_count: int}|null
      */
     public function report(Machine $machine): ?array
     {
@@ -64,6 +65,7 @@ final readonly class SharedMachineView
             'scanned_at' => $report->created_at?->toJSON(),
             'facts' => $this->facts->from($report->markdown),
             'advice' => array_map($this->advice(...), $this->advisor->adviseAll($report->flags)),
+            'fixed_count' => count($this->compare->handle($machine)['fixed'] ?? []),
         ];
     }
 

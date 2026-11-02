@@ -108,3 +108,36 @@ it('serialises the advice for the front end', function () {
         'raw' => 'FileVault is OFF.',
     ]);
 });
+
+it('gives the same issue the same key when only a number changed', function () {
+    $advisor = new FlagAdvisor;
+
+    expect($advisor->advise('Only about 7% of drive C: is free.')->key)
+        ->toBe($advisor->advise('Only about 9% of drive C: is free.')->key)
+        ->and($advisor->advise('Only 4 GB of RAM.')->key)->toBe($advisor->advise('Only 8 GB of RAM.')->key);
+});
+
+it('keeps the drive in the key so C: and D: are different issues', function () {
+    $advisor = new FlagAdvisor;
+
+    expect($advisor->advise('Only about 7% of drive C: is free.')->key)
+        ->not->toBe($advisor->advise('Only about 7% of drive D: is free.')->key);
+});
+
+it('gives rules that share a headline the same key', function () {
+    $advisor = new FlagAdvisor;
+
+    expect($advisor->advise('FileVault is OFF.')->key)->toBe($advisor->advise('BitLocker is OFF on C:.')->key);
+});
+
+it('keys a flag no rule recognises by its text without digits', function () {
+    $advisor = new FlagAdvisor;
+
+    expect($advisor->advise('The toaster ran 5 times.')->key)
+        ->toBe($advisor->advise('The toaster ran 9 times.')->key)
+        ->not->toBe($advisor->advise('The kettle ran 5 times.')->key);
+});
+
+it('keeps the key out of the front end payload', function () {
+    expect((new FlagAdvisor)->advise('FileVault is OFF.')->toArray())->not->toHaveKey('key');
+});
