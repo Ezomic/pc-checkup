@@ -94,6 +94,21 @@ describe('share/Machine', () => {
         expect(wrapper.text()).not.toContain('What to do first');
     });
 
+    it('says when it was last checked, with no warning however old the check is', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-11-02T12:00:00Z'));
+
+        const wrapper = render({
+            report: { ...report, scanned_at: '2026-08-04T12:00:00.000000Z' },
+        });
+        const text = wrapper.text().toLowerCase();
+
+        vi.useRealTimers();
+
+        expect(text).toContain('last checked 90 days ago');
+        expect(text).not.toMatch(/stale|outdated|not checked recently|overdue/);
+    });
+
     it('says it was not checked when there is no report, and omits the status when none was sent', () => {
         const wrapper = render({
             report: null,

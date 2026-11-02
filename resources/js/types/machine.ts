@@ -26,6 +26,7 @@ export type FlagAdvice = {
 export type MachineCard = Machine & {
     top_issue: FlagAdvice | null;
     issue_count: number;
+    stale: boolean;
 };
 
 export type ReportFacts = {
@@ -37,6 +38,7 @@ export type ReportFacts = {
 export type LatestReport = {
     id: number;
     created_at: string;
+    stale: boolean;
     advice: FlagAdvice[];
     facts: ReportFacts;
     markdown: string;
