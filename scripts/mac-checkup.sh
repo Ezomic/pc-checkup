@@ -324,7 +324,7 @@ sh_section "Performance: Spotlight indexing" "mdutil -s / 2>&1; ps -axco pid,pcp
 sh_section "Performance: disk write and read speed (512 MB test)" "T=\$(mktemp \"\$HOME/.speedtest.XXXXXX\"); dd if=/dev/zero of=\"\$T\" bs=1m count=512 2>&1 | tail -1; sync; purge 2>/dev/null; dd if=\"\$T\" of=/dev/null bs=1m 2>&1 | tail -1; rm -f \"\$T\"; echo; echo 'Healthy SSD: several hundred MB/s or more. Under ~100 MB/s means a failing or full disk.'"
 sh_section "Performance: security and management agents" "ps -axco comm | grep -iE 'falcon|sophos|norton|mcafee|avast|avg|malwarebytes|jamf|kandji|crowdstrike|sentinel|defender|carbonblack|eset' | sort -u; echo; echo '(blank above means none found)'"
 sh_section "Performance: login item and startup counts" "echo LaunchAgents/Daemons:; ls /Library/LaunchAgents /Library/LaunchDaemons \"\$HOME/Library/LaunchAgents\" 2>/dev/null | grep -v '^\$' | grep -vc '^/'"
-sh_section "Performance: biggest folders in home" "du -sh \"\$HOME\"/* \"\$HOME\"/Library/Caches 2>/dev/null | sort -rh | head -12"
+sh_section "Performance: biggest folders in home" "END=\$((SECONDS+15)); for D in \"\$HOME\"/* \"\$HOME\"/Library/Caches; do R=\$((END-SECONDS)); [ \$R -gt 0 ] || break; perl -e 'alarm shift; exec @ARGV' \$R du -sh \"\$D\"; done 2>/dev/null | sort -rh | head -12; echo; echo '(capped at about 15 seconds; folders not reached in time are not listed)'"
 section "Graphics and displays" system_profiler SPDisplaysDataType
 section "Network interfaces" networksetup -listallhardwareports
 sh_section "Wi-Fi" "system_profiler SPAirPortDataType | head -40"
@@ -359,7 +359,7 @@ sh_section "DNS and proxy" "scutil --dns | head -25; scutil --proxy"
 sh_section "Hosts file (non-default lines)" "grep -vE '^\s*#|^\s*$' /etc/hosts"
 
 sh_section "Kernel panic reports" "ls -lt /Library/Logs/DiagnosticReports/*.panic 2>&1 | head -10; ls -lt /Library/Logs/DiagnosticReports 2>/dev/null | head -15"
-sh_section "Recent shutdown causes" "log show --predicate 'eventMessage contains \"Previous shutdown cause\"' --last 30d 2>/dev/null | tail -8"
+sh_section "Recent shutdown causes" "perl -e 'alarm 20; exec @ARGV' log show --predicate 'eventMessage contains \"Previous shutdown cause\"' --last 7d 2>/dev/null | tail -8; echo; echo '(last 7 days, capped at 20 seconds)'"
 sh_section "Time Machine" "tmutil destinationinfo 2>&1 | head -15; tmutil latestbackup 2>&1"
 sh_section "Privacy permissions (TCC), needs Full Disk Access for Terminal" "for DB in \"\$HOME/Library/Application Support/com.apple.TCC/TCC.db\" '/Library/Application Support/com.apple.TCC/TCC.db'; do echo \"== \$DB\"; sqlite3 \"\$DB\" \"select service, client, case auth_value when 2 then 'allowed' when 0 then 'denied' else auth_value end from access where auth_value=2 and service in ('kTCCServiceScreenCapture','kTCCServiceAccessibility','kTCCServiceSystemPolicyAllFiles','kTCCServiceCamera','kTCCServiceMicrophone','kTCCServiceListenEvent','kTCCServicePostEvent') order by service, client;\" 2>&1; done; echo; echo 'If you see an authorization error, grant Terminal Full Disk Access in System Settings > Privacy & Security and re-run.'"
 sh_section "Trusted certificates: custom trust settings" "echo '-- admin'; security dump-trust-settings -d 2>&1 | grep -E 'Cert [0-9]+:|No Trust' ; echo '-- system'; security dump-trust-settings -s 2>&1 | grep -E 'Cert [0-9]+:|No Trust'; echo '-- user'; security dump-trust-settings 2>&1 | grep -E 'Cert [0-9]+:|No Trust'"
@@ -372,7 +372,7 @@ sh_section "SSD wear (smartctl, optional)" "if command -v smartctl >/dev/null; t
 sh_section "Intel apps running under Rosetta (Apple silicon only)" "if [ \"\$(uname -m)\" = arm64 ]; then system_profiler SPApplicationsDataType 2>/dev/null | awk '/^    [^ ].*:\$/ {name=\$0} /Kind: Intel/ {print name}'; else echo 'Intel Mac, not applicable'; fi"
 sh_section "Reboot history and boot time" "last reboot | head -8; sysctl kern.boottime"
 sh_section "Fans and temperatures (needs sudo)" "if [ \"\$(id -u)\" = 0 ]; then powermetrics -n 1 -i 1000 --samplers thermal 2>&1 | head -20; powermetrics -n 1 -i 1000 --samplers smc 2>&1 | grep -iE 'fan|temp' | head -10; else echo 'Run with sudo to include this section.'; fi"
-sh_section "Locale and time""date; systemsetup -gettimezone 2>&1; defaults read NSGlobalDomain AppleLanguages 2>/dev/null"
+sh_section "Locale and time" "date; systemsetup -gettimezone 2>&1; defaults read NSGlobalDomain AppleLanguages 2>/dev/null"
 sh_section "Developer tools" "xcode-select -p 2>&1; git --version 2>&1; python3 --version 2>&1"
 
 # ---------- Assemble ----------
