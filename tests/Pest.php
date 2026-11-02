@@ -100,7 +100,7 @@ function returnWithOnlyTheRememberCookie(string $recaller, ?string $url = null):
     test()->flushSession();
     Auth::forgetGuards();
 
-    return test()->withCookie(Auth::guard()->getRecallerName(), $recaller)->get($url ?? route('dashboard'));
+    return test()->withCookie(Auth::guard()->getRecallerName(), $recaller)->get($url ?? route('machines.index'));
 }
 
 /**

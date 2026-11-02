@@ -91,7 +91,7 @@ function reload(): void {
                         <Link :href="isAuthenticated ? dashboard() : login()">
                             {{
                                 isAuthenticated
-                                    ? 'Back to dashboard'
+                                    ? 'Back to machines'
                                     : 'Go to login'
                             }}
                         </Link>

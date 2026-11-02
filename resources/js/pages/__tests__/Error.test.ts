@@ -48,13 +48,13 @@ describe('Error', () => {
         expect(wrapper.text()).toContain('Go to login');
     });
 
-    it('sends a signed-in user back to the dashboard', () => {
+    it('sends a signed-in user back to their machines', () => {
         state.user = { name: 'Robbin' };
 
         const wrapper = mount(ErrorPage, { props: { status: 404 } });
 
         expect(wrapper.get('a').attributes('href')).toBe('/dashboard');
-        expect(wrapper.text()).toContain('Back to dashboard');
+        expect(wrapper.text()).toContain('Back to machines');
     });
 
     it('offers a reload only on an expired page, since that is the one a retry fixes', () => {
