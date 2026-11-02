@@ -13,7 +13,9 @@ use App\Http\Controllers\MachineStatusController;
 use App\Http\Controllers\NoteController;
 use App\Http\Controllers\PhotoController;
 use App\Http\Controllers\ReportImportController;
+use App\Http\Controllers\RustDeskInstallerController;
 use App\Http\Controllers\ScanController;
+use App\Http\Controllers\ToolController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -22,6 +24,9 @@ Route::get('/', fn () => Inertia::render('Welcome'))->name('home');
 Route::get('health', HealthController::class)->name('health');
 
 Route::get('scripts/{script}', CheckupScriptController::class)->name('scripts.download');
+
+Route::get('tools/rustdesk/windows', RustDeskInstallerController::class)
+    ->middleware('throttle:20,1')->name('tools.rustdesk.download');
 
 Route::middleware('guest')->group(function () {
     Route::post('login/link', LoginLinkRequestController::class)
@@ -38,6 +43,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::redirect('dashboard', '/machines')->name('dashboard');
 
     Route::resource('notes', NoteController::class)->except('show');
+
+    Route::get('tools', [ToolController::class, 'index'])->name('tools.index');
 
     Route::get('machines', [MachineController::class, 'index'])->name('machines.index');
     Route::get('machines/create', [MachineController::class, 'create'])->name('machines.create');

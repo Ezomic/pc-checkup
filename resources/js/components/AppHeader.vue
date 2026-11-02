@@ -16,6 +16,7 @@ import { getInitials } from '@/composables/useInitials';
 import { cn } from '@/lib/utils';
 import { index as machinesIndex } from '@/routes/machines';
 import { index as notesIndex } from '@/routes/notes';
+import { index as toolsIndex } from '@/routes/tools';
 import type { BreadcrumbItem, NavItem } from '@/types';
 
 type Props = {
@@ -33,6 +34,7 @@ const { isCurrentUrl } = useCurrentUrl();
 const mainNavItems: NavItem[] = [
     { title: 'Machines', href: machinesIndex() },
     { title: 'Notes', href: notesIndex() },
+    { title: 'Tools', href: toolsIndex() },
 ];
 </script>
 
