@@ -48,7 +48,10 @@ const mainNavItems: NavItem[] = [
                     <AppLogo />
                 </Link>
 
-                <nav class="flex items-center gap-1 text-sm">
+                <nav
+                    class="-m-1 flex min-w-0 items-center gap-1 overflow-x-auto p-1 text-sm"
+                    data-test="main-nav"
+                >
                     <Link
                         v-for="item in mainNavItems"
                         :key="item.title"
