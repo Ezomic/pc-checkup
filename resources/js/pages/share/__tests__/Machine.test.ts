@@ -102,6 +102,12 @@ describe('share/Machine', () => {
         );
     });
 
+    it('shows nothing about progress when the count is unknown', () => {
+        const wrapper = render({ report: { ...report, fixed_count: null } });
+
+        expect(wrapper.find('[data-test="fixed-note"]').exists()).toBe(false);
+    });
+
     it('says nothing is flagged when there is no advice', () => {
         const wrapper = render({ report: { ...report, advice: [] } });
 

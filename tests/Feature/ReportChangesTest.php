@@ -17,13 +17,14 @@ function changesMachine(): array
     return [$user, Machine::factory()->for($user)->create()];
 }
 
-function changesReport(Machine $machine, string $at, array $flags = [], ?string $disk = null, ?string $memory = null): Report
+function changesReport(Machine $machine, string $at, array $flags = [], ?string $disk = null, ?string $memory = null, ?bool $admin = null): Report
 {
     $header = ($memory === null ? '' : "- Memory: {$memory}\n").($disk === null ? '' : "- Free disk: {$disk}\n");
 
     return Report::factory()->for($machine)->create([
         'markdown' => "# Windows checkup: PC\n\n{$header}\n## Things to look at\n",
         'flags' => $flags,
+        'ran_as_admin' => $admin,
         'created_at' => $at,
     ]);
 }
@@ -69,7 +70,33 @@ describe('the owner page', function () {
             'open' => 2,
             'disk' => null,
             'memory' => null,
+            'same_rights' => false,
         ]);
+    });
+
+    it('trusts the comparison only when both scans have the same known rights', function (?bool $newer, ?bool $older, bool $expected) {
+        [$user, $machine] = changesMachine();
+        changesReport($machine, '2026-10-12 10:00:00', ['FileVault is OFF.'], admin: $older);
+        changesReport($machine, '2026-10-20 10:00:00', [], admin: $newer);
+
+        expect(ownerChanges($user, $machine)['same_rights'])->toBe($expected);
+    })->with([
+        'both admin' => [true, true, true],
+        'both standard' => [false, false, true],
+        'admin after standard' => [true, false, false],
+        'standard after admin' => [false, true, false],
+        'newer unknown' => [null, true, false],
+        'older unknown' => [true, null, false],
+        'both unknown' => [null, null, false],
+    ]);
+
+    it('compares the rights of the two newest scans only', function () {
+        [$user, $machine] = changesMachine();
+        changesReport($machine, '2026-10-01 10:00:00', admin: false);
+        changesReport($machine, '2026-10-12 10:00:00', admin: true);
+        changesReport($machine, '2026-10-20 10:00:00', admin: true);
+
+        expect(ownerChanges($user, $machine)['same_rights'])->toBeTrue();
     });
 
     it('lists a new issue and a fixed issue by their plain headline', function () {
@@ -254,12 +281,12 @@ describe('the owner page', function () {
 });
 
 describe('the client share page', function () {
-    function sharedPair(array $before, array $after): array
+    function sharedPair(array $before, array $after, ?bool $olderAdmin = true, ?bool $newerAdmin = true): array
     {
         $client = Client::factory()->withShareLink()->create();
         $machine = Machine::factory()->for($client->user)->create(['client_id' => $client->id]);
-        changesReport($machine, '2026-10-12 10:00:00', $before, '40%', '8 GB');
-        changesReport($machine, '2026-10-20 10:00:00', $after, '4%', '16 GB');
+        changesReport($machine, '2026-10-12 10:00:00', $before, '40%', '8 GB', $olderAdmin);
+        changesReport($machine, '2026-10-20 10:00:00', $after, '4%', '16 GB', $newerAdmin);
 
         return [$client, $machine];
     }
@@ -292,23 +319,48 @@ describe('the client share page', function () {
             ->and($props)->not->toContain('"new"')
             ->and($props)->not->toContain('worse')
             ->and($props)->not->toContain('changes')
+            ->and($props)->not->toContain('rights')
+            ->and($props)->not->toContain('admin')
             ->and($props)->not->toContain('8 GB')
             ->and($props)->not->toContain('40%')
             ->and($props)->not->toContain('Disk encryption is off');
     });
 
-    it('carries zero when nothing was fixed or there is a single report', function () {
+    it('carries zero when nothing was fixed', function () {
         [$client, $machine] = sharedPair(['FileVault is OFF.'], ['FileVault is OFF.', 'Secure Boot is OFF.']);
 
         $this->get("/c/{$client->share_token}/machines/{$machine->id}")
             ->assertInertia(fn ($page) => $page->where('report.fixed_count', 0));
+    });
 
+    it('carries no count for a single report', function () {
+        $client = Client::factory()->withShareLink()->create();
         $lone = Machine::factory()->for($client->user)->create(['client_id' => $client->id]);
-        changesReport($lone, '2026-10-20 10:00:00', ['FileVault is OFF.']);
+        changesReport($lone, '2026-10-20 10:00:00', ['FileVault is OFF.'], admin: true);
 
         $this->get("/c/{$client->share_token}/machines/{$lone->id}")
-            ->assertInertia(fn ($page) => $page->where('report.fixed_count', 0));
+            ->assertInertia(fn ($page) => $page->where('report.fixed_count', null));
     });
+
+    it('counts fixed issues for two scans without admin rights', function () {
+        [$client, $machine] = sharedPair(['FileVault is OFF.'], [], false, false);
+
+        $this->get("/c/{$client->share_token}/machines/{$machine->id}")
+            ->assertInertia(fn ($page) => $page->where('report.fixed_count', 1));
+    });
+
+    it('carries no count when the scans had different rights', function (?bool $older, ?bool $newer) {
+        [$client, $machine] = sharedPair(['FileVault is OFF.', 'Secure Boot is OFF.'], [], $older, $newer);
+
+        $this->get("/c/{$client->share_token}/machines/{$machine->id}")
+            ->assertInertia(fn ($page) => $page->where('report.fixed_count', null)->has('report', 4));
+    })->with([
+        'admin then standard' => [true, false],
+        'standard then admin' => [false, true],
+        'older scan without a rights line' => [null, true],
+        'newer scan without a rights line' => [true, null],
+        'neither scan has a rights line' => [null, null],
+    ]);
 
     it('leaves the card list without any change information', function () {
         [$client] = sharedPair(['FileVault is OFF.'], []);

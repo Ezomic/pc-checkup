@@ -184,4 +184,5 @@ export type ReportChanges = {
     open: number;
     disk: NumberChange | null;
     memory: NumberChange | null;
+    same_rights: boolean;
 };

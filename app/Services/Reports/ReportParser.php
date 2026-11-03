@@ -48,7 +48,17 @@ final class ReportParser
             fixes: $this->fixes($lines),
             benchmark: $this->benchmark($lines),
             rustdeskId: RustDeskId::orNull($header['rustdesk id'] ?? null),
+            ranAsAdmin: $this->rights($header['run as administrator'] ?? null),
         );
+    }
+
+    private function rights(?string $value): ?bool
+    {
+        if ($value === null || preg_match('/\A(yes|no)(?:,|\z)/i', $value, $match) !== 1) {
+            return null;
+        }
+
+        return mb_strtolower($match[1]) === 'yes';
     }
 
     /**

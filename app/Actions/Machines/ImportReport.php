@@ -76,6 +76,7 @@ final class ImportReport
             'flags' => $parsed->flags,
             'fixes' => $parsed->fixes,
             'benchmark' => $parsed->benchmark,
+            'ran_as_admin' => $parsed->ranAsAdmin,
         ]);
     }
 
