@@ -1,8 +1,9 @@
 import { shallowMount } from '@vue/test-utils';
 import { describe, expect, it, vi } from 'vitest';
+import ChangesSection from '@/components/machines/ChangesSection.vue';
 import StaleNote from '@/components/machines/StaleNote.vue';
 import Show from '@/pages/machines/Show.vue';
-import type { LatestReport } from '@/types';
+import type { LatestReport, ReportChanges } from '@/types';
 
 vi.mock('@inertiajs/vue3', () => ({
     Head: { template: '<span />' },
@@ -34,7 +35,10 @@ function report(overrides: Partial<LatestReport> = {}): LatestReport {
     };
 }
 
-function render(latest: LatestReport | null) {
+function render(
+    latest: LatestReport | null,
+    changes: ReportChanges | null = null,
+) {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-11-02T12:00:00Z'));
     const wrapper = shallowMount(Show, {
@@ -53,6 +57,7 @@ function render(latest: LatestReport | null) {
             client: null,
             clients: [],
             report: latest,
+            changes,
             afterFix: null,
             benchmark: null,
             checklist: [],
@@ -100,5 +105,23 @@ describe('machines/Show', () => {
 
         expect(wrapper.findComponent(StaleNote).exists()).toBe(false);
         expect(wrapper.find('[data-test="stale-hint"]').exists()).toBe(false);
+    });
+
+    it('shows the changes section only when there is something to compare', () => {
+        const changes: ReportChanges = {
+            previous_at: '2026-10-12T10:00:00.000000Z',
+            new: [],
+            fixed: [],
+            open: 0,
+            disk: null,
+            memory: null,
+        };
+
+        expect(render(report()).findComponent(ChangesSection).exists()).toBe(
+            false,
+        );
+        expect(
+            render(report(), changes).findComponent(ChangesSection).exists(),
+        ).toBe(true);
     });
 });

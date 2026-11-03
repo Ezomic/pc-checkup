@@ -171,3 +171,17 @@ export type MachineBenchmark = {
     history: BenchmarkHistoryRow[];
     comparison: BenchmarkComparisonRow[] | null;
 };
+
+export type NumberChange = {
+    from: string;
+    to: string;
+};
+
+export type ReportChanges = {
+    previous_at: string | null;
+    new: string[];
+    fixed: string[];
+    open: number;
+    disk: NumberChange | null;
+    memory: NumberChange | null;
+};

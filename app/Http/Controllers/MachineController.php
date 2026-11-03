@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Actions\Machines\BuildReportInsights;
+use App\Actions\Machines\CompareLatestReports;
 use App\Actions\Machines\CreateManualMachine;
 use App\Http\Requests\Machines\StoreMachineRequest;
 use App\Models\Client;
@@ -99,7 +100,7 @@ final class MachineController extends Controller
         ]);
     }
 
-    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts, BuildReportInsights $insights, ReportFreshness $freshness): Response
+    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts, BuildReportInsights $insights, ReportFreshness $freshness, CompareLatestReports $changes): Response
     {
         $this->authorize('view', $machine);
 
@@ -115,6 +116,7 @@ final class MachineController extends Controller
                 'facts' => $facts->from($report->markdown),
                 'markdown' => $report->markdown,
             ],
+            'changes' => $changes->handle($machine),
             'client' => $machine->client?->only(['id', 'name']),
             'clients' => Client::query()->where('user_id', $machine->user_id)->orderBy('name')->orderBy('id')->get(['id', 'name']),
             'checklist' => $resolver->withEntries($machine),

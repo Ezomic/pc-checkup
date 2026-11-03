@@ -71,11 +71,18 @@ final class FlagAdvisor
     {
         foreach (self::RULES as [$pattern, $severity, $headline, $advice]) {
             if (preg_match($pattern, $flag, $matches) === 1) {
-                return new FlagAdvice($severity, $this->fill($headline, array_slice($matches, 1)), $advice, $flag);
+                $captures = array_slice($matches, 1);
+
+                return new FlagAdvice($severity, $this->fill($headline, $captures), $advice, $flag, $this->fill($headline, array_map($this->withoutNumbers(...), $captures)));
             }
         }
 
-        return new FlagAdvice(FlagSeverity::Low, rtrim($flag, '.'), null, $flag);
+        return new FlagAdvice(FlagSeverity::Low, rtrim($flag, '.'), null, $flag, $this->withoutNumbers(rtrim($flag, '.')));
+    }
+
+    private function withoutNumbers(string $text): string
+    {
+        return preg_replace('/\d+/', '#', $text) ?? $text;
     }
 
     /**

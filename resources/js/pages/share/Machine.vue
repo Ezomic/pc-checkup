@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
-import { ArrowLeft } from '@lucide/vue';
+import { ArrowLeft, CircleCheck } from '@lucide/vue';
 import { computed } from 'vue';
 import AdviceList from '@/components/machines/AdviceList.vue';
 import StatusBadge from '@/components/machines/StatusBadge.vue';
@@ -81,6 +81,17 @@ const tiles = computed(() => {
     <section class="flex flex-col gap-4">
         <p class="text-3xl font-semibold" data-test="verdict">
             {{ verdict }}
+        </p>
+
+        <p
+            v-if="report && report.fixed_count > 0"
+            class="flex items-center gap-2 text-sm font-medium text-green-700 dark:text-green-400"
+            data-test="fixed-note"
+        >
+            <CircleCheck class="size-4" aria-hidden="true" />
+            {{ report.fixed_count }}
+            {{ report.fixed_count === 1 ? 'thing' : 'things' }} fixed since the
+            last check
         </p>
 
         <div

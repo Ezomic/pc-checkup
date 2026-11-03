@@ -31,6 +31,7 @@ const report: SharedReport = {
             advice: 'Turn it on.',
         },
     ],
+    fixed_count: 0,
 };
 
 function render(
@@ -83,6 +84,22 @@ describe('share/Machine', () => {
             'Free space',
         );
         expect(wrapper.get('[data-test="tiles"]').text()).toContain('Memory');
+    });
+
+    it('shows nothing about progress when nothing was fixed', () => {
+        expect(render().find('[data-test="fixed-note"]').exists()).toBe(false);
+    });
+
+    it('says in one line how many things were fixed', () => {
+        const one = render({ report: { ...report, fixed_count: 1 } });
+        const two = render({ report: { ...report, fixed_count: 2 } });
+
+        expect(one.get('[data-test="fixed-note"]').text()).toBe(
+            '1 thing fixed since the last check',
+        );
+        expect(two.get('[data-test="fixed-note"]').text()).toBe(
+            '2 things fixed since the last check',
+        );
     });
 
     it('says nothing is flagged when there is no advice', () => {

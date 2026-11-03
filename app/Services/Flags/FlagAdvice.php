@@ -13,6 +13,7 @@ final readonly class FlagAdvice
         public string $headline,
         public ?string $advice,
         public string $raw,
+        public string $key,
     ) {}
 
     /**
