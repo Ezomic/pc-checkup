@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
-import { FileText } from '@lucide/vue';
+import { FileText, Printer } from '@lucide/vue';
 import { computed } from 'vue';
 import AdviceList from '@/components/machines/AdviceList.vue';
 import AfterFixSection from '@/components/machines/AfterFixSection.vue';
@@ -76,6 +76,10 @@ const tiles = computed(() => {
     ].filter((tile) => tile.value !== null);
 });
 
+function print(): void {
+    window.print();
+}
+
 defineOptions({
     layout: {
         breadcrumbs: [{ title: 'Machines', href: index() }],
@@ -107,12 +111,23 @@ defineOptions({
                     </p>
                 </template>
             </div>
-            <Button as-child size="sm" variant="outline">
-                <Link :href="summary(machine.id)">
-                    <FileText class="size-4" />
-                    Printable summary
-                </Link>
-            </Button>
+            <div class="flex flex-wrap gap-2 print:hidden">
+                <Button
+                    type="button"
+                    size="sm"
+                    data-test="print"
+                    @click="print"
+                >
+                    <Printer class="size-4" />
+                    Print / save as PDF
+                </Button>
+                <Button as-child size="sm" variant="outline">
+                    <Link :href="summary(machine.id)">
+                        <FileText class="size-4" />
+                        Printable summary
+                    </Link>
+                </Button>
+            </div>
         </div>
 
         <section class="flex flex-col gap-4">
@@ -152,29 +167,31 @@ defineOptions({
             <AdviceList :advice="report.advice" />
         </section>
 
-        <StatusSection :machine-id="machine.id" :status="machine.status" />
-        <RemoteSupportSection
-            :machine-id="machine.id"
-            :rustdesk-id="machine.rustdesk_id"
-        />
-        <ClientSection
-            :machine-id="machine.id"
-            :client="client"
-            :clients="clients"
-        />
+        <div class="contents print:hidden" data-test="owner-only">
+            <StatusSection :machine-id="machine.id" :status="machine.status" />
+            <RemoteSupportSection
+                :machine-id="machine.id"
+                :rustdesk-id="machine.rustdesk_id"
+            />
+            <ClientSection
+                :machine-id="machine.id"
+                :client="client"
+                :clients="clients"
+            />
 
-        <details v-if="report" class="rounded-xl border border-border p-3">
-            <summary class="cursor-pointer text-sm">Full report</summary>
-            <pre
-                class="mt-3 max-h-96 overflow-auto text-xs whitespace-pre-wrap"
-                >{{ report.markdown }}</pre>
-        </details>
+            <details v-if="report" class="rounded-xl border border-border p-3">
+                <summary class="cursor-pointer text-sm">Full report</summary>
+                <pre
+                    class="mt-3 max-h-96 overflow-auto text-xs whitespace-pre-wrap"
+                    >{{ report.markdown }}</pre>
+            </details>
 
-        <AfterFixSection v-if="afterFix" :after-fix="afterFix" />
-        <BenchmarkSection v-if="benchmark" :benchmark="benchmark" />
+            <AfterFixSection v-if="afterFix" :after-fix="afterFix" />
+            <BenchmarkSection v-if="benchmark" :benchmark="benchmark" />
 
-        <ChecklistSection :machine-id="machine.id" :items="checklist" />
-        <NotesSection :machine-id="machine.id" :notes="notes" />
-        <PhotosSection :machine-id="machine.id" :photos="photos" />
+            <ChecklistSection :machine-id="machine.id" :items="checklist" />
+            <NotesSection :machine-id="machine.id" :notes="notes" />
+            <PhotosSection :machine-id="machine.id" :photos="photos" />
+        </div>
     </div>
 </template>

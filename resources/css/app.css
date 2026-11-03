@@ -5,7 +5,13 @@
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark {
+    @media not print {
+        &:is(.dark *) {
+            @slot;
+        }
+    }
+}
 
 @theme inline {
     --font-sans:
@@ -196,6 +202,9 @@
         color-scheme: light;
         --background: hsl(0 0% 100%);
         --foreground: hsl(0 0% 0%);
+        --card: hsl(0 0% 100%);
+        --card-foreground: hsl(0 0% 0%);
+        --muted: hsl(0 0% 95%);
         --muted-foreground: hsl(0 0% 30%);
         --border: hsl(0 0% 80%);
     }

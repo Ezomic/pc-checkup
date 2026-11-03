@@ -13,7 +13,9 @@ const dots: Record<FlagSeverity, string> = {
 </script>
 
 <template>
-    <li class="flex gap-3 rounded-xl border border-border bg-card p-4">
+    <li
+        class="flex break-inside-avoid gap-3 rounded-xl border border-border bg-card p-4"
+    >
         <span
             class="mt-1.5 size-2.5 shrink-0 rounded-full"
             :class="dots[item.severity]"
