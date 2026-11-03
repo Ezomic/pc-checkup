@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import AdviceItem from '@/components/machines/AdviceItem.vue';
 import type { SharedAdvice } from '@/types';
 
@@ -11,6 +11,33 @@ const props = defineProps<{
 
 const first = computed(() => props.advice.slice(0, FIRST));
 const rest = computed(() => props.advice.slice(FIRST));
+const folded = ref<HTMLDetailsElement | null>(null);
+let reopen = false;
+
+function openForPrint(): void {
+    if (folded.value && !folded.value.open) {
+        folded.value.open = true;
+        reopen = true;
+    }
+}
+
+function restoreAfterPrint(): void {
+    if (folded.value && reopen) {
+        folded.value.open = false;
+    }
+
+    reopen = false;
+}
+
+onMounted(() => {
+    window.addEventListener('beforeprint', openForPrint);
+    window.addEventListener('afterprint', restoreAfterPrint);
+});
+
+onBeforeUnmount(() => {
+    window.removeEventListener('beforeprint', openForPrint);
+    window.removeEventListener('afterprint', restoreAfterPrint);
+});
 </script>
 
 <template>
@@ -23,8 +50,8 @@ const rest = computed(() => props.advice.slice(FIRST));
             />
         </ul>
 
-        <details v-if="rest.length > 0" class="text-sm">
-            <summary class="cursor-pointer text-muted-foreground">
+        <details v-if="rest.length > 0" ref="folded" class="text-sm">
+            <summary class="cursor-pointer text-muted-foreground print:hidden">
                 {{ rest.length }} more to look at
             </summary>
             <ul class="mt-2 flex flex-col gap-2">

@@ -15,7 +15,7 @@ import StaleNote from '@/components/machines/StaleNote.vue';
 import StatusBadge from '@/components/machines/StatusBadge.vue';
 import StatusSection from '@/components/machines/StatusSection.vue';
 import { Button } from '@/components/ui/button';
-import { scannedAgo } from '@/lib/scannedAgo';
+import { checkedOn, scannedAgo } from '@/lib/scannedAgo';
 import { index, summary } from '@/routes/machines';
 import type {
     AfterFixReport,
@@ -98,7 +98,12 @@ defineOptions({
                 <p class="text-sm text-muted-foreground">
                     {{ details }}
                     <template v-if="report">
-                        · Scanned {{ scannedAgo(report.created_at) }}
+                        <span class="print:hidden"
+                            >· Scanned {{ scannedAgo(report.created_at) }}</span
+                        >
+                        <span class="hidden print:inline" data-test="checked-on"
+                            >· Checked {{ checkedOn(report.created_at) }}</span
+                        >
                     </template>
                 </p>
                 <template v-if="report?.stale">

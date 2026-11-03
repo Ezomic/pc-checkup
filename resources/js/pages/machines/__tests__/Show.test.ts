@@ -84,6 +84,16 @@ describe('machines/Show', () => {
         );
     });
 
+    it('swaps the relative scanned time for the full date in print', () => {
+        const wrapper = render(report());
+        const checked = wrapper.get('[data-test="checked-on"]');
+
+        expect(checked.text()).toBe('· Checked 4 August 2026');
+        expect(checked.classes()).toEqual(['hidden', 'print:inline']);
+        expect(wrapper.get('p.text-sm').html()).toContain('print:hidden');
+        expect(wrapper.text()).toContain('Scanned 90 days ago');
+    });
+
     it('leaves the verdict and the tiles exactly as they are', () => {
         const fresh = render(report());
         const stale = render(report({ stale: true }));

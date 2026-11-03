@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { scannedAgo } from '@/lib/scannedAgo';
+import { checkedOn, scannedAgo } from '@/lib/scannedAgo';
 
 const now = new Date('2026-11-02T12:00:00Z');
 
@@ -25,5 +25,11 @@ describe('scannedAgo', () => {
 
     it('defaults to the current time', () => {
         expect(scannedAgo(new Date().toISOString())).toBe('just now');
+    });
+});
+
+describe('checkedOn', () => {
+    it('writes the full date', () => {
+        expect(checkedOn('2026-11-03 12:00:00')).toBe('3 November 2026');
     });
 });
