@@ -11,6 +11,7 @@ function changes(overrides: Partial<ReportChanges> = {}): ReportChanges {
         open: 0,
         disk: null,
         memory: null,
+        same_rights: true,
         ...overrides,
     };
 }
@@ -43,6 +44,32 @@ describe('ChangesSection', () => {
             'Nothing changed since the last check.',
         );
         expect(wrapper.find('[data-test="counts"]').exists()).toBe(false);
+    });
+
+    it('warns that fixed items may be unreliable when the rights differed', () => {
+        const wrapper = render(
+            changes({ fixed: ['Disk encryption is off'], same_rights: false }),
+        );
+
+        expect(wrapper.get('[data-test="rights-note"]').text()).toBe(
+            'Scanned with different rights, fixed items may be unreliable',
+        );
+    });
+
+    it('does not warn when the rights matched', () => {
+        const wrapper = render(
+            changes({ fixed: ['Disk encryption is off'], same_rights: true }),
+        );
+
+        expect(wrapper.find('[data-test="rights-note"]').exists()).toBe(false);
+    });
+
+    it('does not warn when nothing is listed as fixed', () => {
+        const wrapper = render(
+            changes({ new: ['Secure Boot is off'], same_rights: false }),
+        );
+
+        expect(wrapper.find('[data-test="rights-note"]').exists()).toBe(false);
     });
 
     it('counts new, fixed and still open issues in words', () => {

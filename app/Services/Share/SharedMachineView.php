@@ -51,7 +51,7 @@ final readonly class SharedMachineView
     }
 
     /**
-     * @return array{scanned_at: string|null, facts: array{free_disk: string|null, memory: string|null, cpu: string|null}, advice: list<array{severity: string, headline: string, advice: string|null}>, fixed_count: int}|null
+     * @return array{scanned_at: string|null, facts: array{free_disk: string|null, memory: string|null, cpu: string|null}, advice: list<array{severity: string, headline: string, advice: string|null}>, fixed_count: int|null}|null
      */
     public function report(Machine $machine): ?array
     {
@@ -65,8 +65,16 @@ final readonly class SharedMachineView
             'scanned_at' => $report->created_at?->toJSON(),
             'facts' => $this->facts->from($report->markdown),
             'advice' => array_map($this->advice(...), $this->advisor->adviseAll($report->flags)),
-            'fixed_count' => count($this->compare->handle($machine)['fixed'] ?? []),
+            'fixed_count' => $this->fixedCount($machine),
         ];
+    }
+
+    // Admin-only flags vanish from a scan run without admin rights and would read as fixed, so unequal or unknown rights give no count.
+    private function fixedCount(Machine $machine): ?int
+    {
+        $changes = $this->compare->handle($machine);
+
+        return $changes !== null && $changes['same_rights'] ? count($changes['fixed']) : null;
     }
 
     /**

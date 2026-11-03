@@ -99,10 +99,11 @@ describe('a machine of the client', function () {
     it('shows the verdict, key numbers and what to do first', function () {
         $client = sharedClient();
         $machine = assignedMachine($client, ['name' => 'Front-desk', 'status' => MachineStatus::NeedsWork]);
-        Report::factory()->for($machine)->create(['flags' => ['old'], 'created_at' => '2026-10-01 10:00:00']);
+        Report::factory()->for($machine)->create(['flags' => ['old'], 'ran_as_admin' => false, 'created_at' => '2026-10-01 10:00:00']);
         $latest = Report::factory()->for($machine)->create([
             'markdown' => "# Windows checkup: PC\n\n- Chip/CPU: Ryzen 5\n- Memory: 32 GB\n- Free disk: 5%\n\n## Things to look at\n",
             'flags' => ['A restart is pending.', 'Defender real-time protection is OFF.'],
+            'ran_as_admin' => false,
             'created_at' => '2026-10-05 10:00:00',
         ]);
 

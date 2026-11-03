@@ -718,6 +718,15 @@ pcc_rustdesk_check() {
   fi
 }
 
+# Only reads who is running the scan: the sections that need sudo say so when it is not root.
+pcc_admin_check() {
+  if [ "$(id -u)" = 0 ]; then
+    echo "Run as administrator: yes"
+  else
+    echo "Run as administrator: no, sections that need sudo say so"
+  fi
+}
+
 # Sourcing this file (for tests) stops here instead of running the checkup.
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
 
@@ -952,6 +961,7 @@ if [ "$PCC_CLI_FIX" = 1 ]; then pcc_fix_run; fi
   echo "- Battery: ${CYCLES:-n/a} cycles, condition ${COND:-n/a}, max capacity ${MAXCAP:-n/a}"
   echo "- Free disk: ${FREE_PCT:-n/a}%"
   echo "- $(pcc_rustdesk_check)"
+  echo "- $(pcc_admin_check)"
   echo "- Warranty and coverage lookup: https://checkcoverage.apple.com (serial above)"
   echo
   echo "## Things to look at"

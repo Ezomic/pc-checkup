@@ -24,11 +24,12 @@ use Illuminate\Support\Carbon;
  * @property list<string> $flags
  * @property list<array{id: string, status: string, command: string, undo: string|null}>|null $fixes
  * @property array<string, int|float>|null $benchmark
+ * @property bool|null $ran_as_admin
  * @property Carbon|null $deleted_at
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['markdown', 'checksum', 'format_version', 'kind', 'before_report_id', 'flags', 'fixes', 'benchmark'])]
+#[Fillable(['markdown', 'checksum', 'format_version', 'kind', 'before_report_id', 'flags', 'fixes', 'benchmark', 'ran_as_admin'])]
 class Report extends Model
 {
     /** @use HasFactory<ReportFactory> */
@@ -60,6 +61,7 @@ class Report extends Model
             'flags' => 'array',
             'fixes' => 'array',
             'benchmark' => 'array',
+            'ran_as_admin' => 'boolean',
         ];
     }
 }

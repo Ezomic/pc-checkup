@@ -94,6 +94,13 @@ const numbers = computed(() =>
 
             <div v-if="changes.fixed.length > 0" data-test="fixed-list">
                 <h3 class="text-sm font-medium">Fixed</h3>
+                <p
+                    v-if="!changes.same_rights"
+                    class="mt-1 text-sm text-muted-foreground"
+                    data-test="rights-note"
+                >
+                    Scanned with different rights, fixed items may be unreliable
+                </p>
                 <ul class="mt-1 flex flex-col gap-1 text-sm">
                     <li
                         v-for="headline in changes.fixed"

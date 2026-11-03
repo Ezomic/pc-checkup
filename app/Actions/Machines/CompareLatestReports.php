@@ -14,7 +14,7 @@ final readonly class CompareLatestReports
     public function __construct(private FlagAdvisor $advisor, private ReportFacts $facts) {}
 
     /**
-     * @return array{previous_at: string|null, new: list<string>, fixed: list<string>, open: int, disk: array{from: string, to: string}|null, memory: array{from: string, to: string}|null}|null
+     * @return array{previous_at: string|null, new: list<string>, fixed: list<string>, open: int, disk: array{from: string, to: string}|null, memory: array{from: string, to: string}|null, same_rights: bool}|null
      */
     public function handle(Machine $machine): ?array
     {
@@ -35,6 +35,7 @@ final readonly class CompareLatestReports
             'open' => count(array_intersect_key($now, $before)),
             'disk' => $this->change($current, $previous, 'free_disk', '/\A(\d+)%\z/'),
             'memory' => $this->change($current, $previous, 'memory', '/\A(\d+(?:\.\d+)?)\s*GB\z/i'),
+            'same_rights' => $current->ran_as_admin !== null && $current->ran_as_admin === $previous->ran_as_admin,
         ];
     }
 

@@ -84,7 +84,9 @@ const tiles = computed(() => {
         </p>
 
         <p
-            v-if="report && report.fixed_count > 0"
+            v-if="
+                report && report.fixed_count !== null && report.fixed_count > 0
+            "
             class="flex items-center gap-2 text-sm font-medium text-green-700 dark:text-green-400"
             data-test="fixed-note"
         >

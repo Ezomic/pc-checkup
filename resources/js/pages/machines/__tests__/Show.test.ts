@@ -115,6 +115,7 @@ describe('machines/Show', () => {
             open: 0,
             disk: null,
             memory: null,
+            same_rights: true,
         };
 
         expect(render(report()).findComponent(ChangesSection).exists()).toBe(
