@@ -41,7 +41,7 @@ const mainNavItems: NavItem[] = [
 </script>
 
 <template>
-    <div>
+    <div class="print:hidden">
         <div class="border-b border-border">
             <div class="mx-auto flex h-16 items-center gap-6 px-4 md:max-w-7xl">
                 <Link :href="machinesIndex()" class="flex items-center gap-x-2">

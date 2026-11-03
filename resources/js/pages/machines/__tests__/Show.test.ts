@@ -1,6 +1,9 @@
 import { shallowMount } from '@vue/test-utils';
 import { describe, expect, it, vi } from 'vitest';
+import AdviceList from '@/components/machines/AdviceList.vue';
 import ChangesSection from '@/components/machines/ChangesSection.vue';
+import ClientSection from '@/components/machines/ClientSection.vue';
+import RemoteSupportSection from '@/components/machines/RemoteSupportSection.vue';
 import StaleNote from '@/components/machines/StaleNote.vue';
 import Show from '@/pages/machines/Show.vue';
 import type { LatestReport, ReportChanges } from '@/types';
@@ -81,6 +84,16 @@ describe('machines/Show', () => {
         );
     });
 
+    it('swaps the relative scanned time for the full date in print', () => {
+        const wrapper = render(report());
+        const checked = wrapper.get('[data-test="checked-on"]');
+
+        expect(checked.text()).toBe('· Checked 4 August 2026');
+        expect(checked.classes()).toEqual(['hidden', 'print:inline']);
+        expect(wrapper.get('p.text-sm').html()).toContain('print:hidden');
+        expect(wrapper.text()).toContain('Scanned 90 days ago');
+    });
+
     it('leaves the verdict and the tiles exactly as they are', () => {
         const fresh = render(report());
         const stale = render(report({ stale: true }));
@@ -124,5 +137,44 @@ describe('machines/Show', () => {
         expect(
             render(report(), changes).findComponent(ChangesSection).exists(),
         ).toBe(true);
+    });
+
+    it('prints through the browser dialog from a button hidden in print', () => {
+        const print = vi.spyOn(window, 'print').mockImplementation(() => {});
+        const wrapper = render(report());
+        const button = wrapper.get('[data-test="print"]');
+
+        button.trigger('click');
+
+        expect(print).toHaveBeenCalledOnce();
+        expect(button.element.parentElement?.classList).toContain(
+            'print:hidden',
+        );
+    });
+
+    it('keeps the owner-only blocks out of the printed page', () => {
+        const wrapper = render(report());
+        const ownerOnly = wrapper.get('[data-test="owner-only"]');
+
+        expect(ownerOnly.classes()).toContain('print:hidden');
+        expect(ownerOnly.findComponent(RemoteSupportSection).exists()).toBe(
+            true,
+        );
+        expect(ownerOnly.findComponent(ClientSection).exists()).toBe(true);
+    });
+
+    it('leaves the verdict, tiles and advice outside the hidden block', () => {
+        const wrapper = render(report());
+        const ownerOnly = wrapper.get('[data-test="owner-only"]').element;
+
+        expect(
+            ownerOnly.contains(wrapper.get('[data-test="verdict"]').element),
+        ).toBe(false);
+        expect(
+            ownerOnly.contains(wrapper.get('[data-test="tiles"]').element),
+        ).toBe(false);
+        expect(
+            ownerOnly.contains(wrapper.getComponent(AdviceList).element),
+        ).toBe(false);
     });
 });

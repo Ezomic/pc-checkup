@@ -50,4 +50,49 @@ describe('AdviceList', () => {
         expect(dots[0].classes()).toContain('bg-red-500');
         expect(dots[1].classes()).toContain('bg-slate-400');
     });
+
+    it('opens the folded items for printing and closes them again after', () => {
+        const wrapper = mount(AdviceList, {
+            props: { advice: advice(5) },
+            attachTo: document.body,
+        });
+        const folded = wrapper.get('details').element;
+
+        window.dispatchEvent(new Event('beforeprint'));
+        expect(folded.open).toBe(true);
+
+        window.dispatchEvent(new Event('afterprint'));
+        expect(folded.open).toBe(false);
+
+        wrapper.unmount();
+    });
+
+    it('leaves a details the reader already opened open after printing', () => {
+        const wrapper = mount(AdviceList, {
+            props: { advice: advice(5) },
+            attachTo: document.body,
+        });
+        const folded = wrapper.get('details').element;
+        folded.open = true;
+
+        window.dispatchEvent(new Event('beforeprint'));
+        window.dispatchEvent(new Event('afterprint'));
+
+        expect(folded.open).toBe(true);
+
+        wrapper.unmount();
+    });
+
+    it('stops listening for print once unmounted', () => {
+        const wrapper = mount(AdviceList, {
+            props: { advice: advice(5) },
+            attachTo: document.body,
+        });
+        const folded = wrapper.get('details').element;
+        wrapper.unmount();
+
+        window.dispatchEvent(new Event('beforeprint'));
+
+        expect(folded.open).toBe(false);
+    });
 });
