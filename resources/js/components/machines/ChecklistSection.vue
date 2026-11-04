@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { router } from '@inertiajs/vue3';
+import { ChevronRight } from '@lucide/vue';
 import { computed, reactive } from 'vue';
 import { Button } from '@/components/ui/button';
+import {
+    Collapsible,
+    CollapsibleContent,
+    CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import { update } from '@/routes/machines/checklist';
 import type { ChecklistItem, ChecklistOutcome } from '@/types';
 
@@ -82,60 +88,74 @@ function saveNote(item: ChecklistItem): void {
 </script>
 
 <template>
-    <section class="flex flex-col gap-4">
-        <div class="flex items-baseline justify-between">
-            <h2 class="text-lg font-semibold">Checklist</h2>
-            <p class="text-sm text-muted-foreground">
-                {{ checked }} of {{ items.length }} checked
-            </p>
-        </div>
-
-        <div v-for="[group, groupItems] in groups" :key="group">
-            <h3 class="mb-2 text-sm font-medium text-muted-foreground">
-                {{ groupTitles[group] ?? group }}
-            </h3>
-            <ul class="flex flex-col gap-2">
-                <li
-                    v-for="item in groupItems"
-                    :key="item.key"
-                    class="flex flex-col gap-2 rounded-xl border border-sidebar-border/70 p-3"
-                >
-                    <div
-                        class="flex flex-wrap items-center justify-between gap-2"
-                    >
-                        <p class="text-sm">{{ item.label }}</p>
-                        <div class="flex gap-1">
-                            <Button
-                                v-for="option in outcomes"
-                                :key="option.value"
-                                type="button"
-                                size="sm"
-                                :variant="
-                                    item.outcome === option.value
-                                        ? option.value === 'fail'
-                                            ? 'destructive'
-                                            : 'default'
-                                        : 'outline'
-                                "
-                                :aria-pressed="item.outcome === option.value"
-                                @click="choose(item, option.value)"
-                            >
-                                {{ option.label }}
-                            </Button>
-                        </div>
-                    </div>
-                    <input
-                        v-if="item.outcome !== null"
-                        v-model="notes[item.key]"
-                        type="text"
-                        maxlength="1000"
-                        placeholder="Note (optional)"
-                        :aria-label="`Note for ${item.label}`"
-                        class="rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                        @blur="saveNote(item)"
+    <Collapsible as="section" class="flex flex-col gap-4">
+        <h2 class="text-lg font-semibold">
+            <CollapsibleTrigger
+                class="group flex w-full items-center justify-between gap-2 rounded-md text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            >
+                <span class="flex items-center gap-2">
+                    <ChevronRight
+                        class="size-4 transition-transform group-data-[state=open]:rotate-90"
+                        aria-hidden="true"
                     />
-                </li>
-            </ul>
-        </div>
-    </section>
+                    Manual checklist
+                </span>
+                <span class="text-sm font-normal text-muted-foreground">
+                    {{ checked }} of {{ items.length }} done
+                </span>
+            </CollapsibleTrigger>
+        </h2>
+
+        <CollapsibleContent class="flex flex-col gap-4">
+            <div v-for="[group, groupItems] in groups" :key="group">
+                <h3 class="mb-2 text-sm font-medium text-muted-foreground">
+                    {{ groupTitles[group] ?? group }}
+                </h3>
+                <ul class="flex flex-col gap-2">
+                    <li
+                        v-for="item in groupItems"
+                        :key="item.key"
+                        class="flex flex-col gap-2 rounded-xl border border-sidebar-border/70 p-3"
+                    >
+                        <div
+                            class="flex flex-wrap items-center justify-between gap-2"
+                        >
+                            <p class="text-sm">{{ item.label }}</p>
+                            <div class="flex gap-1">
+                                <Button
+                                    v-for="option in outcomes"
+                                    :key="option.value"
+                                    type="button"
+                                    size="sm"
+                                    :variant="
+                                        item.outcome === option.value
+                                            ? option.value === 'fail'
+                                                ? 'destructive'
+                                                : 'default'
+                                            : 'outline'
+                                    "
+                                    :aria-pressed="
+                                        item.outcome === option.value
+                                    "
+                                    @click="choose(item, option.value)"
+                                >
+                                    {{ option.label }}
+                                </Button>
+                            </div>
+                        </div>
+                        <input
+                            v-if="item.outcome !== null"
+                            v-model="notes[item.key]"
+                            type="text"
+                            maxlength="1000"
+                            placeholder="Note (optional)"
+                            :aria-label="`Note for ${item.label}`"
+                            class="rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                            @blur="saveNote(item)"
+                        />
+                    </li>
+                </ul>
+            </div>
+        </CollapsibleContent>
+    </Collapsible>
 </template>
