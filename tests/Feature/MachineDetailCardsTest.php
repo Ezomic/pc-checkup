@@ -33,11 +33,71 @@ function ownerDetails(string $markdown, array $flags = [], string $deviceType = 
 it('gives the owner the three cards from a real Mac report', function () {
     $details = ownerDetails(macReportFixture(), ['macOS 10.14.6 is old and likely out of security support.']);
 
-    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery'])
+    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability'])
         ->and($details[0]['rows'][3])->toBe(['label' => 'Security support', 'value' => 'Out of security support', 'tone' => 'bad'])
         ->and($details[1]['rows'][0])->toBe(['label' => 'Free', 'value' => '14 GB (12%)', 'tone' => 'neutral'])
         ->and($details[1]['list']['items'][0])->toBe(['label' => 'Library', 'value' => '38 GB', 'tone' => 'neutral'])
         ->and($details[2]['rows'][1])->toBe(['label' => 'Condition', 'value' => 'Normal', 'tone' => 'good']);
+});
+
+it('gives the owner the security and stability cards from a real Mac report', function () {
+    $details = ownerDetails(macReportFixture());
+
+    expect($details[3]['title'])->toBe('Security summary')
+        ->and($details[3]['rows'][0])->toBe(['label' => 'FileVault', 'value' => 'Off', 'tone' => 'bad'])
+        ->and($details[3]['rows'][2])->toBe(['label' => 'System Integrity Protection', 'value' => 'On', 'tone' => 'good'])
+        ->and($details[3]['rows'])->toHaveCount(9)
+        ->and($details[4]['title'])->toBe('Stability')
+        ->and($details[4]['rows'][0])->toBe(['label' => 'Kernel panics', 'value' => '2', 'tone' => 'bad'])
+        ->and($details[3]['list'])->toBeNull()
+        ->and($details[4]['list'])->toBeNull();
+});
+
+it('gives the owner the security and stability cards from a Windows report', function () {
+    $details = ownerDetails(windowsLaptopFixture());
+
+    expect(array_column($details[3]['rows'], 'label'))->toBe(['Disk encryption', 'Windows Firewall', 'Defender real-time protection', 'Automatic sign-in', 'Remote Desktop', 'SMBv1', 'Backup'])
+        ->and(array_column($details[4]['rows'], 'label'))->toBe(['Blue screen crashes', 'Unexpected shutdowns', 'Startup programs']);
+});
+
+it('words the firewall for every state through the owner page', function (string $line, string $value) {
+    $markdown = str_replace('Firewall is disabled. (State = 0)', $line, macReportFixture());
+    $rows = array_column(ownerDetails($markdown)[3]['rows'], 'value', 'label');
+
+    expect($rows['Application firewall'])->toBe($value);
+})->with([
+    'state 1' => ['Firewall is enabled. (State = 1)', 'On'],
+    'state 2' => ['Firewall is enabled. (State = 2)', 'On'],
+    'state 0' => ['Firewall is disabled. (State = 0)', 'Off'],
+    'nonsense' => ['Firewall is purple.', 'Not checked'],
+]);
+
+it('never shows a green tick for a fact that was not checked', function () {
+    $markdown = str_replace(
+        ['FileVault is Off.', 'Time Machine: not set up', 'Find My Mac: on', 'Remote Login (SSH): off', 'Screen Sharing: off', 'Automatic login: on (the account name is not recorded)'],
+        ['FileVault: could not check', 'Time Machine: could not check (tmutil did not answer)', 'Find My Mac: could not check', 'Remote Login (SSH): could not check (netstat did not answer)', 'Screen Sharing: could not check (netstat did not answer)', 'Automatic login: off'],
+        macReportFixture(),
+    );
+    $rows = array_column(ownerDetails($markdown)[3]['rows'], null, 'label');
+
+    foreach (['FileVault', 'Backup', 'Find My Mac', 'Remote Login', 'Screen Sharing'] as $label) {
+        expect($rows[$label])->toBe(['label' => $label, 'value' => 'Not checked', 'tone' => 'neutral']);
+    }
+});
+
+it('survives huge counts and markup in the new sections', function () {
+    $markdown = str_replace(
+        ["LaunchAgents/Daemons:\n4", 'Dropbox, Slack'],
+        ["LaunchAgents/Daemons:\n99999999999999999999999", '<img src=x onerror=alert(1)>, {{ 7*7 }}'],
+        macReportFixture(),
+    );
+    $details = ownerDetails($markdown);
+    $rows = array_column($details[4]['rows'], 'value', 'label');
+    $encoded = (string) json_encode($details);
+
+    expect($rows['Login items'])->toBe('2')
+        ->and($rows['Background startup items'])->toBe('4')
+        ->and($encoded)->not->toContain('onerror')->not->toContain('undefined')->not->toContain('NaN');
 });
 
 it('agrees with the free disk fact tile', function () {
@@ -54,7 +114,7 @@ it('agrees with the free disk fact tile', function () {
 it('gives the owner the cards from a Windows report', function () {
     $details = ownerDetails(windowsLaptopFixture(), ['Windows 10 Pro reached end of support on 14 October 2025, so it only gets updates with a paid extension.']);
 
-    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery'])
+    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability'])
         ->and($details[0]['rows'][2]['value'])->toBe('Out of security support')
         ->and($details[1]['rows'][0]['value'])->toBe('52 GB (22%)');
 });
@@ -107,7 +167,7 @@ it('handles a very long report', function () {
     $filler = implode("\n", array_fill(0, 20000, 'filler line'));
     $details = ownerDetails(macReportFixture()."\n## Installed apps\n\n```\n{$filler}\n```\n");
 
-    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery']);
+    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability']);
 });
 
 it('never lets report text become markup or a placeholder value', function () {
@@ -134,6 +194,12 @@ it('keeps all of it off the share pages', function () {
                 expect($props)->not->toHaveKey('detailCards')->not->toHaveKey('details')
                     ->and($encoded)->not->toContain('Library/Caches')
                     ->and($encoded)->not->toContain('Solid state')
+                    ->and($encoded)->not->toContain('Security summary')
+                    ->and($encoded)->not->toContain('FileVault')
+                    ->and($encoded)->not->toContain('Application firewall')
+                    ->and($encoded)->not->toContain('Kernel panic')
+                    ->and($encoded)->not->toContain('Blue screen')
+                    ->and($encoded)->not->toContain('Login items')
                     ->and($encoded)->not->toContain('First released')
                     ->and($encoded)->not->toContain('Charge cycles');
             });

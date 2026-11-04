@@ -117,6 +117,54 @@ describe('DetailCards', () => {
         expect(wrapper.text()).toContain('<img src=x onerror=alert(1)>');
     });
 
+    it('renders the security and stability cards side by side with their tones', () => {
+        const wrapper = mount(DetailCards, {
+            props: {
+                cards: [
+                    card({
+                        id: 'security',
+                        title: 'Security summary',
+                        rows: [
+                            { label: 'FileVault', value: 'Off', tone: 'bad' },
+                            {
+                                label: 'Find My Mac',
+                                value: 'Not checked',
+                                tone: 'neutral',
+                            },
+                            { label: 'Gatekeeper', value: 'On', tone: 'good' },
+                        ],
+                    }),
+                    card({
+                        id: 'stability',
+                        title: 'Stability',
+                        rows: [
+                            {
+                                label: 'Kernel panics',
+                                value: 'None found',
+                                tone: 'good',
+                            },
+                        ],
+                    }),
+                ],
+            },
+        });
+
+        const security = wrapper.get('[data-test="detail-card-security"]');
+        const tones = security
+            .findAll('dd')
+            .map((row) => row.attributes('data-tone'));
+
+        expect(wrapper.findAll('h2').map((h) => h.text())).toEqual([
+            'Security summary',
+            'Stability',
+        ]);
+        expect(tones).toEqual(['bad', 'neutral', 'good']);
+        expect(security.get('dd[data-tone="neutral"]').classes()).not.toContain(
+            'text-green-700',
+        );
+        expect(wrapper.text()).not.toMatch(/undefined|NaN/);
+    });
+
     it('skips the row list for a card that only has a folder list', () => {
         const wrapper = mount(DetailCards, {
             props: {

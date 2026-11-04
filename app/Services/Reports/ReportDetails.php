@@ -42,6 +42,8 @@ final readonly class ReportDetails
             $this->age($sections, $flags),
             $this->storage($sections, $this->facts->from($markdown)['free_disk']),
             $this->battery($sections, $deviceType),
+            $this->card('security', 'Security summary', (new ReportSecurity)->rows($sections)),
+            $this->card('stability', 'Stability', (new ReportStability)->rows($sections, $flags)),
         ]));
     }
 
