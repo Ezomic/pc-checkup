@@ -9,8 +9,10 @@
 # default). Everything it does is logged in the report ("Fix log") and in a text file next to it.
 #
 # The storage step measures folder sizes and groups the user folder by kind of file, for at most
-# 150 seconds. It stores sizes and counts only, never a file name, follows no links and leaves
-# other disks alone. If the time runs out the report says the numbers are partial.
+# 150 seconds. It stores sizes and counts, plus the names and sizes of the biggest folders in your
+# user folder (8 folders, and 5 inside each of the 2 biggest), never a file name or a full path.
+# It follows no links and leaves other disks alone. If the time runs out the report says the
+# numbers are partial.
 #
 # --benchmark also runs short CPU, memory, disk and network speed tests (a minute or so, with a
 # 512 MB temp file that is removed afterwards) and adds a Benchmark section to the report. The
@@ -899,51 +901,179 @@ pcc_storage_missing_roots() {
   done | sort -u
 }
 
-# Turns "KB<TAB>path" lines inside the user folder into home|KB, folder|Name|KB and library|Name|KB.
-# Only the well-known names are kept; every other name is dropped in memory and never printed.
+# Turns "KB<TAB>path" lines inside the user folder into home|KB, folder|Name|KB and library|Name|KB
+# for the well-known names, and into the names the report shows: home|Name|KB for the 8 biggest
+# folders directly inside the user folder and sub|Parent|Name|KB for the 5 biggest inside each of
+# the 2 biggest of those. A name loses its control characters, pipes and slashes, has its spaces
+# collapsed and is cut at 60 bytes without splitting a character. Only folder names are ever kept,
+# never a full path or a file name. A folder listed twice counts once, with the bigger number.
 pcc_storage_homerows() {
   LC_ALL=C awk -F '\t' -v home="${1%/}" -v names="$PCC_STORAGE_HOME_NAMES" -v library="$PCC_STORAGE_LIBRARY_NAMES" '
+    function clean(s,    n, i, b, need) {
+      gsub(/[\011-\015]/, " ", s)
+      gsub(/[\001-\037\177]/, "", s)
+      gsub("[|/\\\\]", "", s)
+      gsub(/  +/, " ", s)
+      sub(/^ /, "", s)
+      sub(/ $/, "", s)
+      if (length(s) > 60) {
+        s = substr(s, 1, 60)
+        n = length(s)
+        for (i = n; i >= 1 && i > n - 3; i--) {
+          b = ord[substr(s, i, 1)]
+          if (b >= 192) {
+            need = (b >= 240) ? 4 : ((b >= 224) ? 3 : 2)
+            if (n - i + 1 < need) s = substr(s, 1, i - 1)
+            break
+          }
+          if (b < 128) break
+        }
+        sub(/ +$/, "", s)
+      }
+      return s
+    }
     BEGIN {
-      n = split(names, list, "|"); for (i = 1; i <= n; i++) known[list[i]] = 1
-      n = split(library, list, "|"); for (i = 1; i <= n; i++) inside[list[i]] = 1
+      for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i
+      nknown = split(names, knownlist, "|"); for (i = 1; i <= nknown; i++) known[knownlist[i]] = 1
+      nlib = split(library, liblist, "|"); for (i = 1; i <= nlib; i++) inside[liblist[i]] = 1
+      total = -1
     }
     $1 ~ /^[0-9]+$/ {
       path = substr($0, length($1) + 2)
-      if (path == home) { print "home|" $1; next }
+      if (path == home) { if ($1 + 0 > total) total = $1 + 0; next }
       if (index(path, home "/") != 1) next
       parts = split(substr(path, length(home) + 2), seg, "/")
-      if (parts == 1 && seg[1] in known) print "folder|" seg[1] "|" $1
-      else if (parts == 2 && seg[1] == "Library" && seg[2] in inside) print "library|" seg[2] "|" $1
+      if (parts == 1 && seg[1] != "") {
+        if (!(seg[1] in one) || $1 + 0 > one[seg[1]] + 0) one[seg[1]] = $1
+      } else if (parts == 2 && seg[1] != "" && seg[2] != "" && index(seg[1] seg[2], SUBSEP) == 0) {
+        key = seg[1] SUBSEP seg[2]
+        if (!(key in two) || $1 + 0 > two[key] + 0) two[key] = $1
+      }
+    }
+    END {
+      if (total >= 0) print "home|" total
+      for (i = 1; i <= nknown; i++) if (knownlist[i] in one) print "folder|" knownlist[i] "|" one[knownlist[i]]
+      for (i = 1; i <= nlib; i++) if (("Library" SUBSEP liblist[i]) in two) print "library|" liblist[i] "|" two["Library" SUBSEP liblist[i]]
+      shown = 0
+      while (shown < 8) {
+        best = ""
+        for (name in one) {
+          if (name in used) continue
+          if (best == "" || one[name] + 0 > one[best] + 0 || (one[name] + 0 == one[best] + 0 && name < best)) best = name
+        }
+        if (best == "" || one[best] + 0 < 1) break
+        used[best] = 1
+        label = clean(best)
+        if (label == "" || label == "." || label == ".." || (label in seen)) continue
+        seen[label] = 1
+        shown++
+        print "home|" label "|" one[best]
+        if (shown <= 2) { parent[shown] = best; plabel[shown] = label; pindex[best] = shown }
+      }
+      for (key in two) {
+        split(key, kk, SUBSEP)
+        if (kk[1] in pindex) { p = pindex[kk[1]]; nkids[p]++; kids[p, nkids[p]] = kk[2] }
+      }
+      for (p = 1; p <= shown && p <= 2; p++) {
+        count = 0
+        while (count < 5) {
+          best = ""
+          for (i = 1; i <= nkids[p]; i++) {
+            name = kids[p, i]
+            if ((p SUBSEP name) in taken) continue
+            key = parent[p] SUBSEP name
+            if (best == "" || two[key] + 0 > two[parent[p] SUBSEP best] + 0 || (two[key] + 0 == two[parent[p] SUBSEP best] + 0 && name < best)) best = name
+          }
+          if (best == "" || two[parent[p] SUBSEP best] + 0 < 1) break
+          taken[p SUBSEP best] = 1
+          label = clean(best)
+          if (label == "" || label == "." || label == ".." || ((p SUBSEP label) in seensub)) continue
+          seensub[p SUBSEP label] = 1
+          count++
+          print "sub|" plabel[p] "|" label "|" two[parent[p] SUBSEP best]
+        }
+      }
     }'
 }
 
-# The user folder in one pass, two levels deep: its total, the well-known folders in it and the
-# well-known folders inside Library. When the pass is stopped, what it did not report is measured
-# one folder at a time, the total last.
+# Prints the full path of every folder directly inside the user folder that a "KB<TAB>path" listing mentions.
+pcc_storage_home_seen() {
+  LC_ALL=C awk -F '\t' -v home="${1%/}" '
+    $1 ~ /^[0-9]+$/ {
+      path = substr($0, length($1) + 2)
+      rest = substr(path, length(home) + 2)
+      if (index(path, home "/") == 1 && rest != "" && index(rest, "/") == 0) print path
+    }'
+}
+
+# Prints the full paths of the $2 biggest folders directly inside the user folder in a listing.
+pcc_storage_home_biggest() {
+  LC_ALL=C awk -F '\t' -v home="${1%/}" -v want="$2" '
+    $1 ~ /^[0-9]+$/ {
+      path = substr($0, length($1) + 2)
+      rest = substr(path, length(home) + 2)
+      if (index(path, home "/") == 1 && rest != "" && index(rest, "/") == 0 && $1 + 0 > 0 && (!(path in kb) || $1 + 0 > kb[path] + 0)) kb[path] = $1
+    }
+    END {
+      for (round = 1; round <= want; round++) {
+        best = ""
+        for (path in kb) {
+          if (path in used) continue
+          if (best == "" || kb[path] + 0 > kb[best] + 0 || (kb[path] + 0 == kb[best] + 0 && path < best)) best = path
+        }
+        if (best == "") break
+        used[best] = 1
+        print best
+      }
+    }'
+}
+
+# What a stopped pass over the user folder did not report, measured one folder at a time: every
+# folder directly inside it, the well-known ones inside Library, Library itself and the total last,
+# then the inside of the two biggest folders. The raw "KB<TAB>path" lines are appended to file $4.
+pcc_storage_home_rest() {
+  local home=${1%/} stop=$2 rc_file=$3 raw=$4 seen rows dir name left parents old_ifs=$IFS
+  seen=$(mktemp)
+  pcc_storage_home_seen "$home" < "$raw" > "$seen"
+  rows=$(pcc_storage_homerows "$home" < "$raw")
+  set --
+  for dir in "$home"/* "$home"/.[!.]* "$home"/..?*; do
+    if [ ! -d "$dir" ] || [ -L "$dir" ] || [ "${dir##*/}" = Library ]; then continue; fi
+    grep -Fxq -- "$dir" "$seen" || set -- "$@" "$dir"
+  done
+  if [ -d "$home/Library" ] && [ ! -L "$home/Library" ]; then
+    IFS='|'
+    for name in $PCC_STORAGE_LIBRARY_NAMES; do
+      if [ -d "$home/Library/$name" ] && [ ! -L "$home/Library/$name" ] && ! printf '%s\n' "$rows" | grep -q "^library|$name|"; then set -- "$@" "$home/Library/$name"; fi
+    done
+    IFS=$old_ifs
+    grep -Fxq -- "$home/Library" "$seen" || set -- "$@" "$home/Library"
+  fi
+  if ! printf '%s\n' "$rows" | grep -q '^home|[0-9]*$'; then set -- "$@" "$home"; fi
+  pcc_storage_each $((SECONDS + ((stop - SECONDS) * 70 + 99) / 100)) "$rc_file" "$@" >> "$raw"
+  parents=$(pcc_storage_home_biggest "$home" 2 < "$raw")
+  left=$(printf '%s\n' "$parents" | grep -c .)
+  printf '%s\n' "$parents" | while IFS= read -r dir; do
+    if [ -z "$dir" ]; then continue; fi
+    if ! grep -Fq -- "$dir/" "$raw"; then pcc_storage_du 1 $(((stop - SECONDS + left - 1) / left)) "$dir" "$rc_file" >> "$raw"; fi
+    left=$((left - 1))
+  done
+  rm -f "$seen"
+}
+
+# The user folder in one pass, two levels deep: its total, the folders in it and the folders inside
+# those. When the pass is stopped, what it did not report is measured one folder at a time.
 pcc_storage_home() {
-  local home=$1 stop=$2 rc_file=$3 pass_rc pass_end rows more="" name old_ifs=$IFS
+  local home=$1 stop=$2 rc_file=$3 pass_rc pass_end raw
   [ -d "$home" ] || return 0
   pass_rc=$(mktemp)
+  raw=$(mktemp)
   pass_end=$((SECONDS + ((stop - SECONDS) * 60 + 99) / 100))
-  rows=$(pcc_storage_du 2 $((pass_end - SECONDS)) "$home" "$pass_rc" | pcc_storage_homerows "$home")
-  if grep -q '^142$' "$pass_rc"; then
-    set --
-    IFS='|'
-    for name in $PCC_STORAGE_HOME_NAMES; do
-      if [ -d "${home%/}/$name" ] && [ ! -L "${home%/}/$name" ] && ! printf '%s\n' "$rows" | grep -q "^folder|$name|"; then set -- "$@" "${home%/}/$name"; fi
-    done
-    if [ -d "${home%/}/Library" ] && [ ! -L "${home%/}/Library" ]; then
-      for name in $PCC_STORAGE_LIBRARY_NAMES; do
-        if [ -d "${home%/}/Library/$name" ] && [ ! -L "${home%/}/Library/$name" ] && ! printf '%s\n' "$rows" | grep -q "^library|$name|"; then set -- "$@" "${home%/}/Library/$name"; fi
-      done
-    fi
-    IFS=$old_ifs
-    if ! printf '%s\n' "$rows" | grep -q '^home|'; then set -- "$@" "${home%/}"; fi
-    more=$(pcc_storage_each "$stop" "$pass_rc" "$@" | pcc_storage_homerows "$home")
-  fi
+  pcc_storage_du 2 $((pass_end - SECONDS)) "$home" "$pass_rc" > "$raw"
+  if grep -q '^142$' "$pass_rc"; then pcc_storage_home_rest "$home" "$stop" "$pass_rc" "$raw"; fi
   cat "$pass_rc" >> "$rc_file"
-  rm -f "$pass_rc"
-  printf '%s\n%s\n' "$rows" "$more"
+  pcc_storage_homerows "$home" < "$raw"
+  rm -f "$pass_rc" "$raw"
 }
 
 # Prints missing|home/Name and missing|library/Name for the well-known folders that exist but were not measured.
@@ -1037,7 +1167,7 @@ pcc_storage_report() {
   echo "  Measuring the biggest folders on the drive..." >&2
   roots=$(pcc_storage_roots "$root" "$data" "$(pcc_storage_stop "$start" "$cap" 35)" "$rc_file" 2>/dev/null)
   echo "  Measuring your user folder..." >&2
-  homes=$(pcc_storage_home "$home" "$(pcc_storage_stop "$start" "$cap" 30)" "$rc_file" 2>/dev/null)
+  homes=$(pcc_storage_home "$home" "$(pcc_storage_stop "$start" "$cap" 40)" "$rc_file" 2>/dev/null)
   echo "  Measuring kinds of files in your user folder..." >&2
   types=$(pcc_storage_types "$home" $((start + cap)) 2>/dev/null)
   if grep -q '^142$' "$rc_file" || printf '%s\n' "$types" | grep -q '^capped|'; then
@@ -1052,7 +1182,7 @@ pcc_storage_report() {
   printf '%s\n' "$roots" | grep '^root|' | sort -t '|' -k 3,3nr -k 2,2 | head -n 6
   if [ -d "$root" ]; then printf '%s\n' "$roots" | awk -F '|' '$1 == "root" && $3 ~ /^[0-9]+$/ { total += $3 } END { print "roots_total|" total + 0 }'; fi
   pcc_storage_missing_roots "$root" "$data" "$roots"
-  printf '%s\n' "$homes" | grep -E '^(home|folder|library)\|'
+  printf '%s\n' "$homes" | grep -E '^(home|folder|library|sub)\|'
   pcc_storage_missing_home "$home" "$homes"
   printf '%s\n' "$types" | grep -E '^(type|noext|ext)\|'
   return 0

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DetailBarList from '@/components/machines/DetailBarList.vue';
 import type { DetailCard, DetailRow, DetailTone } from '@/types';
 
 defineProps<{
@@ -82,34 +83,7 @@ function isLong(row: DetailRow): boolean {
                 data-test="detail-bars"
             >
                 <h3 class="text-sm font-medium">{{ group.title }}</h3>
-                <ul class="mt-2 flex flex-col gap-3 text-sm">
-                    <li v-for="item in group.items" :key="item.label">
-                        <div class="flex justify-between gap-4">
-                            <span class="min-w-0 break-words">{{
-                                item.label
-                            }}</span>
-                            <span class="shrink-0 font-medium">{{
-                                item.value
-                            }}</span>
-                        </div>
-                        <div
-                            class="mt-1 h-2 overflow-hidden rounded-full bg-muted"
-                            role="presentation"
-                        >
-                            <div
-                                class="h-full rounded-full bg-primary"
-                                :style="{ width: `${item.share}%` }"
-                                data-test="detail-bar"
-                            />
-                        </div>
-                        <p
-                            v-if="item.detail"
-                            class="mt-1 text-xs text-muted-foreground"
-                        >
-                            {{ item.detail }}
-                        </p>
-                    </li>
-                </ul>
+                <DetailBarList class="mt-2" :items="group.items" />
             </div>
 
             <p

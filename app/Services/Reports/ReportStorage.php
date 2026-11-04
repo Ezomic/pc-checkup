@@ -6,7 +6,7 @@ namespace App\Services\Reports;
 
 /**
  * @phpstan-type Item array{name: string, bytes: float, count: int|null}
- * @phpstan-type Breakdown array{partial: bool, version: int, home: float|null, rootsTotal: float|null, folders: list<Item>, library: list<Item>, roots: list<Item>, missing: list<string>, categories: list<Item>, extensions: list<Item>}
+ * @phpstan-type Breakdown array{partial: bool, version: int, home: float|null, rootsTotal: float|null, folders: list<Item>, library: list<Item>, roots: list<Item>, missing: list<string>, homeFolders: list<Item>, homeInside: list<array{parent: string, items: list<Item>}>, categories: list<Item>, extensions: list<Item>}
  */
 final readonly class ReportStorage
 {
@@ -19,6 +19,14 @@ final readonly class ReportStorage
     private const MINIMUM_EXTENSION_BYTES = 100 * 1024;
 
     private const NAME_LIMIT = 40;
+
+    private const HOME_NAME_LIMIT = 60;
+
+    private const HOME_LIMIT = 8;
+
+    private const INSIDE_PARENTS = 2;
+
+    private const INSIDE_LIMIT = 5;
 
     private const MAX_BYTES = 1024 ** 5;
 
@@ -53,8 +61,9 @@ final readonly class ReportStorage
             return null;
         }
 
-        $lines = preg_split('/\R/', $text) ?: [];
+        $lines = preg_split('/\r\n|\r|\n/', $text) ?: [];
         $version = $this->version($lines);
+        $homeFolders = $this->homeFolders($lines);
         $breakdown = [
             'partial' => $this->partial($lines),
             'version' => $version,
@@ -64,6 +73,8 @@ final readonly class ReportStorage
             'library' => $this->items($lines, 'library', 2, fn (string $name): ?string => $this->libraryLabel($name)),
             'roots' => array_slice($this->items($lines, 'root', 2, fn (string $name): ?string => $this->folderName($name), false), 0, self::ROOT_LIMIT),
             'missing' => $this->missing($lines),
+            'homeFolders' => $homeFolders,
+            'homeInside' => $this->homeInside($lines, $homeFolders),
             'categories' => $this->items($lines, 'type', 3, fn (string $name): ?string => $this->known($name, self::CATEGORIES), false),
             'extensions' => $this->extensions($lines),
         ];
@@ -263,6 +274,103 @@ final readonly class ReportStorage
         }
 
         return null;
+    }
+
+    /**
+     * @param  list<string>  $lines
+     * @return list<Item>
+     */
+    private function homeFolders(array $lines): array
+    {
+        $items = [];
+
+        foreach ($lines as $line) {
+            $parts = explode('|', trim($line));
+
+            if (count($parts) === 3 && $parts[0] === 'home') {
+                $this->keepNamed($items, $parts[1], $parts[2]);
+            }
+        }
+
+        return array_slice($this->biggest($items), 0, self::HOME_LIMIT);
+    }
+
+    /**
+     * @param  list<string>  $lines
+     * @param  list<Item>  $folders
+     * @return list<array{parent: string, items: list<Item>}>
+     */
+    private function homeInside(array $lines, array $folders): array
+    {
+        $parents = [];
+
+        foreach (array_slice($folders, 0, self::INSIDE_PARENTS) as $folder) {
+            $parents[mb_strtolower($folder['name'])] = $folder['name'];
+        }
+
+        $found = [];
+
+        foreach ($lines as $line) {
+            $parts = explode('|', trim($line));
+            $parent = count($parts) === 4 && $parts[0] === 'sub' ? mb_strtolower((string) $this->homeName($parts[1])) : '';
+
+            if (isset($parents[$parent])) {
+                $found[$parent] ??= [];
+                $this->keepNamed($found[$parent], $parts[2], $parts[3]);
+            }
+        }
+
+        $inside = [];
+
+        foreach ($parents as $key => $name) {
+            $items = array_slice($this->biggest($found[$key] ?? []), 0, self::INSIDE_LIMIT);
+
+            if ($items !== []) {
+                $inside[] = ['parent' => $name, 'items' => $items];
+            }
+        }
+
+        return $inside;
+    }
+
+    /**
+     * @param  array<string, Item>  $items
+     */
+    private function keepNamed(array &$items, string $name, string $size): void
+    {
+        $label = $this->homeName($name);
+        $bytes = $this->bytes($size);
+
+        if ($label === null || $bytes === null || $bytes <= 0.0) {
+            return;
+        }
+
+        $key = mb_strtolower($label);
+
+        if (! isset($items[$key]) || $items[$key]['bytes'] < $bytes) {
+            $items[$key] = ['name' => $label, 'bytes' => $bytes, 'count' => null];
+        }
+    }
+
+    /**
+     * @param  array<string, Item>  $items
+     * @return list<Item>
+     */
+    private function biggest(array $items): array
+    {
+        $items = array_values($items);
+        usort($items, fn (array $a, array $b): int => $b['bytes'] <=> $a['bytes']);
+
+        return $items;
+    }
+
+    private function homeName(string $name): ?string
+    {
+        $spaced = (string) preg_replace('/[\t\n\r\f\x0B\p{Zs}\p{Zl}\p{Zp}]+/u', ' ', mb_scrub($name));
+        $stripped = (string) preg_replace('~[\p{Cc}/\\\\|]|(?![\x{200C}\x{200D}])\p{Cf}~u', '', $spaced);
+        $clean = trim(mb_substr(trim((string) preg_replace('/ {2,}/', ' ', $stripped)), 0, self::HOME_NAME_LIMIT));
+
+        return in_array($clean, ['', '.', '..'], true) ? null : $clean;
     }
 
     private function folderName(string $name): ?string

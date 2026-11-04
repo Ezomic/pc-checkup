@@ -20,7 +20,7 @@ final readonly class ReportSections
         $current = null;
         $inFence = false;
 
-        foreach (preg_split('/\R/', $markdown) ?: [] as $line) {
+        foreach (preg_split('/\r\n|\r|\n/', $markdown) ?: [] as $line) {
             $isFence = str_starts_with(ltrim($line), '```');
 
             if (! $inFence && str_starts_with($line, '## ')) {

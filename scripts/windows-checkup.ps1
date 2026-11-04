@@ -7,8 +7,10 @@
 # file without a byte order mark as ANSI.
 #
 # The storage step measures folder sizes and groups the user folder by kind of file, for at most
-# 150 seconds. It stores sizes and counts only, never a file name, follows no junctions or links
-# and leaves other disks alone. If the time runs out the report says the numbers are partial.
+# 150 seconds. It stores sizes and counts, plus the names and sizes of the biggest folders in your
+# user profile (8 folders, and 5 inside each of the 2 biggest), never a file name or a full path.
+# It follows no junctions or links and leaves other disks alone. If the time runs out the report
+# says the numbers are partial.
 #
 # Optional upload: with a token the finished report is also sent to PC Checkup. The token is
 # read from, in this order: -Token, the PC_CHECKUP_TOKEN environment variable, or a file named
@@ -113,32 +115,58 @@ function Test-StorageFixedPath([string]$Path) {
 
 # Adds up the file sizes under a folder until $StopAtMs on $Clock. It never enters a junction or
 # symbolic link, skips files that only exist in the cloud, and with $Stats also counts the files by
-# kind and extension. File names are looked at in memory only and never kept.
-function Measure-StorageTree([string]$Path, $Clock, [long]$StopAtMs, $Stats, $Skip) {
+# kind and extension. File names are looked at in memory only and never kept. With $Tally, a folder
+# inside the user profile also adds its bytes to the folder directly inside the profile (Tally.One)
+# and to the folder inside that one (Tally.Two, keyed "parent\child"); only those two names are kept.
+function Measure-StorageTree([string]$Path, $Clock, [long]$StopAtMs, $Stats, $Skip, $Tally = $null) {
     $bytes = [long]0
     $capped = $false
     $directory = [int][System.IO.FileAttributes]::Directory
     $reparse = [int][System.IO.FileAttributes]::ReparsePoint
     $cloudOnly = 0x400000 -bor 0x40000 -bor 0x1000
-    $stack = New-Object 'System.Collections.Generic.Stack[System.IO.DirectoryInfo]'
+    $stack = New-Object 'System.Collections.Generic.Stack[object[]]'
     $start = New-Object System.IO.DirectoryInfo($Path)
     if ([int]$start.Attributes -band $reparse) { return [pscustomobject]@{ Bytes = $bytes; Capped = $false } }
-    $stack.Push($start)
+    $one = $null
+    $two = $null
+    if ($Tally) {
+        $separators = [char[]]@('\', '/')
+        $full = [System.IO.Path]::GetFullPath($Path).TrimEnd($separators)
+        $inside = $Tally.Profile + [System.IO.Path]::DirectorySeparatorChar
+        if ($full.StartsWith($inside, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $names = $full.Substring($inside.Length).Split($separators, [System.StringSplitOptions]::RemoveEmptyEntries)
+            if ($names.Count -gt 0) { $one = $names[0] }
+            if ($names.Count -gt 1) { $two = $names[1] }
+        } elseif ($full -ine $Tally.Profile) {
+            $Tally = $null
+        }
+    }
+    $stack.Push([object[]]@($start, $one, $two))
     while ($stack.Count -gt 0) {
         if ($Clock.ElapsedMilliseconds -ge $StopAtMs) { $capped = $true; break }
-        $current = $stack.Pop()
+        $frame = $stack.Pop()
+        $current = $frame[0]
+        $one = $frame[1]
+        $two = $frame[2]
+        $here = [long]0
         try { $entries = $current.GetFileSystemInfos() } catch { continue }
         foreach ($entry in $entries) {
             try {
                 $attributes = [int]$entry.Attributes
                 if ($attributes -band $directory) {
                     if (($attributes -band $reparse) -or ($Skip -and $Skip.Contains($entry.FullName))) { continue }
-                    $stack.Push($entry)
+                    $childOne = $one
+                    $childTwo = $two
+                    if ($Tally) {
+                        if ($null -eq $one) { $childOne = $entry.Name } elseif ($null -eq $two) { $childTwo = $entry.Name }
+                    }
+                    $stack.Push([object[]]@($entry, $childOne, $childTwo))
                     continue
                 }
                 if ($attributes -band $cloudOnly) { continue }
                 $length = [long]$entry.Length
                 $bytes += $length
+                $here += $length
                 if ($Stats) {
                     $name = $entry.Name
                     $dot = $name.LastIndexOf('.')
@@ -169,8 +197,62 @@ function Measure-StorageTree([string]$Path, $Clock, [long]$StopAtMs, $Stats, $Sk
                 continue
             }
         }
+        if ($Tally -and $here -gt 0 -and $null -ne $one) {
+            $Tally.One[$one] = [long]$Tally.One[$one] + $here
+            if ($null -ne $two) {
+                $key = $one + '\' + $two
+                $Tally.Two[$key] = [long]$Tally.Two[$key] + $here
+            }
+        }
     }
     return [pscustomobject]@{ Bytes = $bytes; Capped = $capped }
+}
+
+# A folder name as the report shows it: no control characters, pipes or slashes, spaces collapsed,
+# at most 60 characters. Returns $null when nothing usable is left.
+function Get-StorageFolderLabel([string]$Name) {
+    $label = $Name -replace '[\t\r\n\f\v]', ' '
+    $label = $label -replace '[\x00-\x1F\x7F|/\\]', ''
+    $label = ($label -replace ' {2,}', ' ').Trim()
+    if ($label.Length -gt 60) {
+        $label = $label.Substring(0, 60)
+        if ([char]::IsHighSurrogate($label[59])) { $label = $label.Substring(0, 59) }
+        $label = $label.TrimEnd()
+    }
+    if ($label -eq '' -or $label -eq '.' -or $label -eq '..') { return $null }
+    return $label
+}
+
+# The biggest names of a tally as label and KB: at most $Limit, biggest first, a label that is
+# already taken skipped (the bigger folder came first), folders under 1 KB left out.
+function Get-StorageBiggest($Sizes, [int]$Limit) {
+    $picked = New-Object System.Collections.Generic.List[object]
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]'
+    $ordered = @($Sizes.GetEnumerator() | Sort-Object @{ Expression = { $_.Value }; Descending = $true }, @{ Expression = { $_.Key }; Descending = $false })
+    foreach ($item in $ordered) {
+        if ($picked.Count -ge $Limit) { break }
+        $kb = [long][math]::Round([long]$item.Value / 1024.0)
+        $label = Get-StorageFolderLabel $item.Key
+        if ($kb -lt 1 -or $null -eq $label -or -not $seen.Add($label)) { continue }
+        $picked.Add([pscustomobject]@{ Raw = $item.Key; Label = $label; Kb = $kb })
+    }
+    return $picked.ToArray()
+}
+
+# home|Name|KB for the 8 biggest folders directly inside the user profile, then sub|Parent|Name|KB
+# for the 5 biggest inside each of the 2 biggest of those.
+function Get-StorageHomeLines($Tally) {
+    $lines = New-Object System.Collections.Generic.List[string]
+    $top = @(Get-StorageBiggest $Tally.One 8)
+    foreach ($folder in $top) { $lines.Add("home|$($folder.Label)|$($folder.Kb)") }
+    foreach ($folder in @($top | Select-Object -First 2)) {
+        $inside = @{}
+        foreach ($item in $Tally.Two.GetEnumerator()) {
+            if ($item.Key.StartsWith($folder.Raw + '\', [System.StringComparison]::OrdinalIgnoreCase)) { $inside[$item.Key.Substring($folder.Raw.Length + 1)] = $item.Value }
+        }
+        foreach ($child in @(Get-StorageBiggest $inside 5)) { $lines.Add("sub|$($folder.Label)|$($child.Label)|$($child.Kb)") }
+    }
+    return $lines.ToArray()
 }
 
 # How much of the time left in a phase one bucket may use: its weight's share of the weight still to come.
@@ -224,6 +306,8 @@ function Get-StorageBreakdown {
     Write-Host "Measuring storage (the drive, then your user folder, then file types), stopping after $StorageCapSeconds seconds at the latest..."
     $profileFull = ''
     if (Test-Path -LiteralPath $profilePath -PathType Container) { $profileFull = [System.IO.Path]::GetFullPath($profilePath).TrimEnd($separators) }
+    $tally = $null
+    if ($profileFull -ne '') { $tally = @{ Profile = $profileFull; One = @{}; Two = @{} } }
 
     Write-Host '  Measuring the biggest folders on the drive...'
     $known = @('Users', 'Windows', 'Program Files', 'Program Files (x86)', 'ProgramData')
@@ -307,7 +391,7 @@ function Get-StorageBreakdown {
         if ($item.Key -eq 'Rest') { foreach ($path in $apart) { [void]$skip.Add($path) } }
         $got[$item.Key] = $null
         if ($slice -gt 0) {
-            $result = Measure-StorageTree $item.Path $clock ($clock.ElapsedMilliseconds + $slice) $stats $skip
+            $result = Measure-StorageTree $item.Path $clock ($clock.ElapsedMilliseconds + $slice) $stats $skip $tally
             if (-not $result.Capped) { $got[$item.Key] = $result.Bytes }
         }
         if ($null -eq $got[$item.Key]) { $capped = $true }
@@ -366,6 +450,7 @@ function Get-StorageBreakdown {
     foreach ($line in $absent) { $output.Add($line) }
 
     if ($null -ne $homeTotal) { $output.Add("home|$([long][math]::Round($homeTotal / 1024.0))") }
+    if ($tally) { foreach ($line in (Get-StorageHomeLines $tally)) { $output.Add($line) } }
     foreach ($name in 'Downloads', 'Documents', 'Desktop', 'Pictures', 'Videos', 'Music', 'AppData') {
         $exists = Test-Path -LiteralPath $paths[$name] -PathType Container
         if ($null -ne $folderBytes[$name]) {

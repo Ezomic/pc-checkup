@@ -64,6 +64,7 @@ export type DetailBar = {
     value: string;
     detail: string | null;
     share: number;
+    inside?: { title: string; items: DetailBar[] };
 };
 
 export type DetailBarGroup = {

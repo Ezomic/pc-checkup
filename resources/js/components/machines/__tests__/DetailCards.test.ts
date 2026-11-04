@@ -290,6 +290,97 @@ describe('DetailCards', () => {
         );
     });
 
+    it('draws a labelled nested list under a folder that has one, with its own bars', () => {
+        const wrapper = mount(DetailCards, {
+            props: {
+                cards: [
+                    card({
+                        id: 'storage-breakdown',
+                        rows: [],
+                        bars: [
+                            {
+                                title: 'Biggest folders in your user folder',
+                                items: [
+                                    {
+                                        label: 'Library',
+                                        value: '39 GB',
+                                        detail: '49% of used space',
+                                        share: 100,
+                                        inside: {
+                                            title: 'Inside Library',
+                                            items: [
+                                                {
+                                                    label: 'Application Support',
+                                                    value: '30 GB',
+                                                    detail: '77% of Library',
+                                                    share: 100,
+                                                },
+                                                {
+                                                    label: 'Caches',
+                                                    value: '6 GB',
+                                                    detail: '15% of Library',
+                                                    share: 20,
+                                                },
+                                            ],
+                                        },
+                                    },
+                                    {
+                                        label: 'Documents',
+                                        value: '2 GB',
+                                        detail: null,
+                                        share: 5,
+                                    },
+                                ],
+                            },
+                        ],
+                    }),
+                ],
+            },
+        });
+        const inside = wrapper.findAll('[data-test="detail-inside"]');
+
+        expect(inside).toHaveLength(1);
+        expect(inside[0].get('h4').text()).toBe('Inside Library');
+        expect(inside[0].text()).toContain('Application Support');
+        expect(inside[0].text()).toContain('77% of Library');
+        expect(inside[0].findAll('[data-test="detail-bar"]')).toHaveLength(2);
+        expect(
+            inside[0]
+                .findAll('[data-test="detail-bar"]')[1]
+                .attributes('style'),
+        ).toContain('width: 20%');
+        expect(wrapper.findAll('[data-test="detail-bar"]')).toHaveLength(4);
+    });
+
+    it('shows a folder name as text, never as markup', () => {
+        const name = '<img src=x onerror=alert(1)>';
+        const wrapper = mount(DetailCards, {
+            props: {
+                cards: [
+                    card({
+                        rows: [],
+                        bars: [
+                            {
+                                title: 'Biggest folders in your user folder',
+                                items: [
+                                    {
+                                        label: name,
+                                        value: '1 GB',
+                                        detail: null,
+                                        share: 100,
+                                    },
+                                ],
+                            },
+                        ],
+                    }),
+                ],
+            },
+        });
+
+        expect(wrapper.find('img').exists()).toBe(false);
+        expect(wrapper.text()).toContain(name);
+    });
+
     it('shows the summary sentence under the title', () => {
         const wrapper = mount(DetailCards, {
             props: {
