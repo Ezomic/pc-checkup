@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import AdviceList from '@/components/machines/AdviceList.vue';
 import ChangesSection from '@/components/machines/ChangesSection.vue';
 import ClientSection from '@/components/machines/ClientSection.vue';
+import DetailCards from '@/components/machines/DetailCards.vue';
 import RemoteSupportSection from '@/components/machines/RemoteSupportSection.vue';
 import StaleNote from '@/components/machines/StaleNote.vue';
 import Show from '@/pages/machines/Show.vue';
@@ -61,6 +62,7 @@ function render(
             clients: [],
             report: latest,
             changes,
+            detailCards: [],
             afterFix: null,
             benchmark: null,
             checklist: [],
@@ -176,5 +178,14 @@ describe('machines/Show', () => {
         expect(
             ownerOnly.contains(wrapper.getComponent(AdviceList).element),
         ).toBe(false);
+    });
+
+    it('prints the detail cards, outside the hidden owner-only block', () => {
+        const wrapper = render(report());
+        const ownerOnly = wrapper.get('[data-test="owner-only"]').element;
+        const cards = wrapper.getComponent(DetailCards);
+
+        expect(cards.props('cards')).toEqual([]);
+        expect(ownerOnly.contains(cards.element)).toBe(false);
     });
 });

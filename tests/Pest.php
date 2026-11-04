@@ -121,3 +121,13 @@ function fixtureReport(): string
 {
     return (string) file_get_contents(__DIR__.'/Fixtures/windows-checkup-desktop.md');
 }
+
+function macReportFixture(): string
+{
+    return (string) file_get_contents(__DIR__.'/Fixtures/mac-checkup-air.md');
+}
+
+function windowsLaptopFixture(): string
+{
+    return (string) file_get_contents(__DIR__.'/Fixtures/windows-checkup-laptop.md');
+}

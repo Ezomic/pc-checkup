@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Services\Checklist\ChecklistResolver;
 use App\Services\Flags\FlagAdvice;
 use App\Services\Flags\FlagAdvisor;
+use App\Services\Reports\ReportDetails;
 use App\Services\Reports\ReportFacts;
 use App\Services\Reports\ReportFreshness;
 use Illuminate\Http\RedirectResponse;
@@ -100,7 +101,7 @@ final class MachineController extends Controller
         ]);
     }
 
-    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts, BuildReportInsights $insights, ReportFreshness $freshness, CompareLatestReports $changes): Response
+    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts, BuildReportInsights $insights, ReportFreshness $freshness, CompareLatestReports $changes, ReportDetails $details): Response
     {
         $this->authorize('view', $machine);
 
@@ -117,6 +118,7 @@ final class MachineController extends Controller
                 'markdown' => $report->markdown,
             ],
             'changes' => $changes->handle($machine),
+            'detailCards' => $report === null ? [] : $details->cards($report->markdown, $report->flags, $machine->device_type),
             'client' => $machine->client?->only(['id', 'name']),
             'clients' => Client::query()->where('user_id', $machine->user_id)->orderBy('name')->orderBy('id')->get(['id', 'name']),
             'checklist' => $resolver->withEntries($machine),
