@@ -44,6 +44,21 @@ export type LatestReport = {
     markdown: string;
 };
 
+export type DetailTone = 'good' | 'bad' | 'neutral';
+
+export type DetailRow = {
+    label: string;
+    value: string;
+    tone: DetailTone;
+};
+
+export type DetailCard = {
+    id: string;
+    title: string;
+    rows: DetailRow[];
+    list: { title: string; items: DetailRow[] } | null;
+};
+
 export type MachineDetails = Pick<
     Machine,
     | 'id'

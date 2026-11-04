@@ -8,6 +8,7 @@ import BenchmarkSection from '@/components/machines/BenchmarkSection.vue';
 import ChangesSection from '@/components/machines/ChangesSection.vue';
 import ChecklistSection from '@/components/machines/ChecklistSection.vue';
 import ClientSection from '@/components/machines/ClientSection.vue';
+import DetailCards from '@/components/machines/DetailCards.vue';
 import NotesSection from '@/components/machines/NotesSection.vue';
 import PhotosSection from '@/components/machines/PhotosSection.vue';
 import RemoteSupportSection from '@/components/machines/RemoteSupportSection.vue';
@@ -21,6 +22,7 @@ import type {
     AfterFixReport,
     ChecklistItem,
     ClientOption,
+    DetailCard,
     LatestReport,
     MachineBenchmark,
     MachineNote,
@@ -35,6 +37,7 @@ const props = defineProps<{
     clients: ClientOption[];
     report: LatestReport | null;
     changes: ReportChanges | null;
+    detailCards: DetailCard[];
     afterFix: AfterFixReport | null;
     benchmark: MachineBenchmark | null;
     checklist: ChecklistItem[];
@@ -171,6 +174,8 @@ defineOptions({
             <h2 class="text-lg font-semibold">What to do first</h2>
             <AdviceList :advice="report.advice" />
         </section>
+
+        <DetailCards :cards="detailCards" />
 
         <div class="contents print:hidden" data-test="owner-only">
             <StatusSection :machine-id="machine.id" :status="machine.status" />

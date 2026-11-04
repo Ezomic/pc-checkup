@@ -8,6 +8,8 @@ use App\Enums\FlagSeverity;
 
 final class FlagAdvisor
 {
+    public const UNSUPPORTED_OS = '/end of support|out of security support/';
+
     private const DISK_FULL = 'A full drive slows the machine down and can stop updates. Free up space or move files elsewhere.';
 
     private const FIREWALL = 'Turn it on so unwanted connections are blocked.';
@@ -28,7 +30,7 @@ final class FlagAdvisor
         ['/^Only about (\d+)% of drive (\S+) is free/', FlagSeverity::High, 'Drive {2} is almost full, only {1}% left', self::DISK_FULL],
         ['/^Only about (\d+)% of disk is free/', FlagSeverity::High, 'The disk is almost full, only {1}% left', self::DISK_FULL],
         ['/Defender real-time protection is OFF/', FlagSeverity::High, 'No antivirus is protecting this PC', 'Turn on real-time protection in Windows Security, or install an antivirus.'],
-        ['/end of support|out of security support/', FlagSeverity::High, 'The operating system is no longer supported', 'It no longer gets free security updates. Upgrade it or replace the machine.'],
+        [self::UNSUPPORTED_OS, FlagSeverity::High, 'The operating system is no longer supported', 'It no longer gets free security updates. Upgrade it or replace the machine.'],
         ['/System Integrity Protection is DISABLED/', FlagSeverity::High, 'A core macOS protection is turned off', 'Turn System Integrity Protection back on unless you disabled it on purpose.'],
         ['/Gatekeeper is DISABLED/', FlagSeverity::High, 'macOS is not checking apps before they run', 'Turn Gatekeeper back on in Privacy and Security.'],
         ['/^SMBv1 is enabled/', FlagSeverity::High, 'An outdated file sharing feature is on', 'SMBv1 is decades old and ransomware has used it to spread. Turn it off in Windows Features unless an old device needs it.'],
