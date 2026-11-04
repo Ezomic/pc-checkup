@@ -59,6 +59,12 @@ final readonly class ReportStartup
         ['/(?<![a-z])icloud/', 'iCloud', 'Syncs iCloud files'],
     ];
 
+    private const HASH_PART = '/^[0-9a-f]{32,}$/i';
+
+    private const TLD_PARTS = ['com', 'org', 'net', 'io', 'nl', 'de', 'co', 'app'];
+
+    private const GENERIC_PARTS = ['helper', 'agent', 'daemon', 'updater', 'plist', 'service', 'xpcservice'];
+
     private const WEIGHT_NOTE = 'The scan does not record how much each item slows startup, so this list puts unfamiliar names first instead of the heaviest. Names are matched by wording only: a familiar name is not proof an item is genuine.';
 
     private const OVERLAP_NOTE = 'Login items, background items and launch agents overlap, so the same app can be counted in more than one row.';
@@ -414,11 +420,44 @@ final readonly class ReportStartup
 
     private function shorten(string $base): ?string
     {
-        $label = preg_match('/^[A-Za-z][\w-]*(?:\.[\w@-]+){2,}$/', $base) === 1 ? (string) substr($base, (int) strrpos($base, '.') + 1) : $base;
+        $label = preg_match('/^[A-Za-z][\w-]*(?:\.[\w@-]+){2,}$/', $base) === 1 ? $this->meaningfulPart($base) : $base;
         $name = trim((string) preg_replace('/\s+/', ' ', (string) preg_replace('/[^\p{L}\p{N} ._+\-]/u', '', $label)));
         $name = trim(mb_substr($name, 0, self::NAME_LIMIT));
 
         return $name === '' ? null : $name;
+    }
+
+    private function meaningfulPart(string $label): string
+    {
+        $parts = array_values(array_filter(
+            explode('.', $label),
+            fn (string $part): bool => preg_match(self::HASH_PART, $part) !== 1,
+        ));
+
+        if ($parts === []) {
+            return $label;
+        }
+
+        if (self::isOneOf($parts[0], self::TLD_PARTS)) {
+            array_shift($parts);
+        } elseif (count($parts) > 1 && self::isOneOf($parts[array_key_last($parts)], self::TLD_PARTS)) {
+            $parts = array_reverse(array_slice($parts, 0, -1));
+        }
+
+        $named = array_values(array_filter($parts, fn (string $part): bool => ! self::isOneOf($part, self::TLD_PARTS)));
+        $meaningful = array_values(array_filter($named, fn (string $part): bool => ! self::isOneOf($part, self::GENERIC_PARTS)));
+
+        $pick = $meaningful ?: $named ?: $parts;
+
+        return end($pick) ?: $label;
+    }
+
+    /**
+     * @param  list<string>  $words
+     */
+    private static function isOneOf(string $part, array $words): bool
+    {
+        return in_array(strtolower($part), $words, true);
     }
 
     private function looksRandom(string $name): bool

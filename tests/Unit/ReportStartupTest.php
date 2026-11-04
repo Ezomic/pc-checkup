@@ -77,7 +77,7 @@ function suRecord(string $name, string $type = 'app (0x2)', string $developer = 
 
 it('reads the counts and names from a real Mac report', function () {
     $card = suCard([
-        SU_LAUNCH => "/Library/LaunchAgents:\ncom.example.updater.plist\n\n/Library/LaunchDaemons:\ncom.example.helper.plist\ncom.example.sync.plist\n\n/Users/testuser/Library/LaunchAgents:\ncom.example.menubar.plist",
+        SU_LAUNCH => "/Library/LaunchAgents:\ncom.example.backup.plist\n\n/Library/LaunchDaemons:\ncom.example.indexer.plist\ncom.example.sync.plist\n\n/Users/testuser/Library/LaunchAgents:\ncom.example.menubar.plist",
         SU_LOGIN => 'Dropbox, Slack',
         SU_COUNTS => "LaunchAgents/Daemons:\n4",
     ]);
@@ -88,8 +88,8 @@ it('reads the counts and names from a real Mac report', function () {
             ['label' => 'Login items', 'value' => '2', 'tone' => 'neutral'],
             ['label' => 'Launch agents and daemons', 'value' => '4 (2 agents, 2 daemons)', 'tone' => 'neutral'],
         ])
-        ->and(suLabels($card))->toBe(['updater', 'menubar', 'helper', 'sync', 'Dropbox', 'Slack'])
-        ->and($card['list']['items'][0])->toBe(['label' => 'updater', 'value' => 'Not recognised', 'tone' => 'neutral'])
+        ->and(suLabels($card))->toBe(['backup', 'menubar', 'indexer', 'sync', 'Dropbox', 'Slack'])
+        ->and($card['list']['items'][0])->toBe(['label' => 'backup', 'value' => 'Not recognised', 'tone' => 'neutral'])
         ->and($card['list']['items'][4])->toBe(['label' => 'Dropbox', 'value' => 'Syncs Dropbox files', 'tone' => 'neutral'])
         ->and($card['notes'])->toHaveCount(2)
         ->and($card['notes'][0])->toContain('overlap')
@@ -230,6 +230,54 @@ it('turns plist labels into the last part, and known vendors into a plain name',
     'onedrive' => ['com.microsoft.OneDrive.plist', 'OneDrive', 'Syncs OneDrive files'],
 ]);
 
+it('names every launch file from a real Mac report sensibly', function (string $file, ?string $label, ?string $value) {
+    $card = suCard([SU_LAUNCH => "/Library/LaunchAgents:\n{$file}"]);
+
+    expect($card['list']['items'] ?? null)->toBe($label === null ? null : [['label' => $label, 'value' => $value, 'tone' => 'neutral']]);
+})->with([
+    ['com.adobe.ARMDCHelper.cc24aef4a1b90ed56a725c38014c95072f92651fb65e1bf9c8e43c37a23d420d.plist', 'Adobe', 'Adobe updater or helper'],
+    ['com.microsoft.OneDriveStandaloneUpdater.plist', 'OneDrive', 'Syncs OneDrive files'],
+    ['com.microsoft.update.agent.plist', null, null],
+    ['helper.threeships.com.plist', 'threeships', 'Not recognised'],
+    ['PT.updd.plist', 'PT.updd', 'Not recognised'],
+    ['com.adobe.ARMDC.Communicator.plist', 'Adobe', 'Adobe updater or helper'],
+    ['com.adobe.ARMDC.SMJobBlessHelper.plist', 'Adobe', 'Adobe updater or helper'],
+    ['com.apple.installer.osmessagetracing.plist', 'osmessagetracing', 'Apple style name, unusual place'],
+    ['com.ea.origin.ESHelper.plist', 'ESHelper', 'Not recognised'],
+    ['com.microsoft.OneDriveStandaloneUpdaterDaemon.plist', 'OneDrive', 'Syncs OneDrive files'],
+    ['com.microsoft.OneDriveUpdaterDaemon.plist', 'OneDrive', 'Syncs OneDrive files'],
+    ['com.microsoft.autoupdate.helper.plist', null, null],
+    ['com.microsoft.office.licensingV2.helper.plist', null, null],
+    ['com.microsoft.teams.TeamsUpdaterDaemon.plist', 'Teams', 'Chat and video meetings'],
+    ['com.ea.origin.WebHelper.plist', 'WebHelper', 'Not recognised'],
+    ['com.google.keystone.agent.plist', 'Google', 'Google updater or helper'],
+    ['com.google.keystone.xpcservice.plist', 'Google', 'Google updater or helper'],
+]);
+
+it('reduces reverse-DNS labels to a meaningful name in either order', function (string $file, string $label) {
+    $card = suCard([SU_LAUNCH => "/Library/LaunchAgents:\n{$file}"]);
+
+    expect(suLabels($card))->toBe([$label]);
+})->with([
+    'vendor first' => ['com.acme.widget.plist', 'widget'],
+    'vendor last' => ['widget.acme.com.plist', 'widget'],
+    'bare tld never a name' => ['helper.threeships.com.plist', 'threeships'],
+    'other tld last' => ['sync.acme.io.plist', 'sync'],
+    'other tld first' => ['org.acme.widget.plist', 'widget'],
+    'country tld' => ['tool.acme.nl.plist', 'tool'],
+    'hash suffix dropped' => ['com.acme.widget.cc24aef4a1b90ed56a725c38014c95072f92651fb65e1bf9c8e43c37a23d420d.plist', 'widget'],
+    'generic last falls back to product' => ['com.acme.widget.helper.plist', 'widget'],
+    'generic last falls back to vendor' => ['com.acme.agent.plist', 'acme'],
+    'several generics' => ['com.acme.daemon.updater.plist', 'acme'],
+    'xpc service' => ['com.acme.widget.xpcservice.plist', 'widget'],
+    'all generic keeps the last part' => ['com.helper.agent.plist', 'agent'],
+    'short hex is a name, not a hash' => ['com.example.a1b2c3d4e5f6a7b8.plist', 'a1b2c3d4e5f6a7b8'],
+    'only tlds and a hash keeps the vendor' => ['com.acme.cc24aef4a1b90ed56a725c38014c95072f92651fb65e1bf9c8e43c37a23d420d.plist', 'acme'],
+    'upper case tld' => ['Widget.Acme.COM.plist', 'Widget'],
+    'only hashes keeps the label' => [str_repeat('a', 32).'.'.str_repeat('b', 32).'.'.str_repeat('c', 32).'.plist', mb_substr(str_repeat('a', 32).'.'.str_repeat('b', 32).'.'.str_repeat('c', 32), 0, 40)],
+    'only tlds keeps the last part' => ['com.org.net.plist', 'net'],
+]);
+
 it('describes the other well-known names', function (string $name, string $label, string $value) {
     $card = suCard([SU_LOGIN => $name]);
 
@@ -261,10 +309,10 @@ it('keeps Apple and Microsoft system items out of the list', function () {
 });
 
 it('flags an Apple style name that sits outside a system folder as odd instead of trusting it', function () {
-    $card = suCard([SU_LAUNCH => "/Library/LaunchDaemons:\ncom.apple.update.helper.plist\ncom.example.thing.plist"]);
+    $card = suCard([SU_LAUNCH => "/Library/LaunchDaemons:\ncom.apple.update.tracer.plist\ncom.example.thing.plist"]);
 
     expect($card['list']['items'])->toBe([
-        ['label' => 'helper', 'value' => 'Apple style name, unusual place', 'tone' => 'neutral'],
+        ['label' => 'tracer', 'value' => 'Apple style name, unusual place', 'tone' => 'neutral'],
         ['label' => 'thing', 'value' => 'Not recognised', 'tone' => 'neutral'],
     ]);
 });
