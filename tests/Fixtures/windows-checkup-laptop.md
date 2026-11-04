@@ -93,8 +93,8 @@ Automatic sign-in: off
 
 ```
 Count: 3
-Name   Command        Location
-----   -------        --------
+Name     Command           Location
+----     -------           --------
 OneDrive C:\x\OneDrive.exe HKU\Run
 ```
 
