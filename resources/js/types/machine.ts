@@ -52,11 +52,25 @@ export type DetailRow = {
     tone: DetailTone;
 };
 
+export type DetailBar = {
+    label: string;
+    value: string;
+    detail: string | null;
+    share: number;
+};
+
+export type DetailBarGroup = {
+    title: string;
+    items: DetailBar[];
+};
+
 export type DetailCard = {
     id: string;
     title: string;
     rows: DetailRow[];
     list: { title: string; items: DetailRow[] } | null;
+    bars?: DetailBarGroup[];
+    notes?: string[];
 };
 
 export type MachineDetails = Pick<

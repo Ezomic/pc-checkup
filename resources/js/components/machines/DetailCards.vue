@@ -68,6 +68,51 @@ function isLong(row: DetailRow): boolean {
                 </template>
             </dl>
 
+            <div
+                v-for="group in card.bars ?? []"
+                :key="group.title"
+                data-test="detail-bars"
+            >
+                <h3 class="text-sm font-medium">{{ group.title }}</h3>
+                <ul class="mt-2 flex flex-col gap-3 text-sm">
+                    <li v-for="item in group.items" :key="item.label">
+                        <div class="flex justify-between gap-4">
+                            <span class="min-w-0 break-words">{{
+                                item.label
+                            }}</span>
+                            <span class="shrink-0 font-medium">{{
+                                item.value
+                            }}</span>
+                        </div>
+                        <div
+                            class="mt-1 h-2 overflow-hidden rounded-full bg-muted"
+                            role="presentation"
+                        >
+                            <div
+                                class="h-full rounded-full bg-primary"
+                                :style="{ width: `${item.share}%` }"
+                                data-test="detail-bar"
+                            />
+                        </div>
+                        <p
+                            v-if="item.detail"
+                            class="mt-1 text-xs text-muted-foreground"
+                        >
+                            {{ item.detail }}
+                        </p>
+                    </li>
+                </ul>
+            </div>
+
+            <p
+                v-for="note in card.notes ?? []"
+                :key="note"
+                class="text-xs text-muted-foreground"
+                data-test="detail-note"
+            >
+                {{ note }}
+            </p>
+
             <div v-if="card.list" class="print:hidden" data-test="detail-list">
                 <h3 class="text-sm font-medium">{{ card.list.title }}</h3>
                 <ul class="mt-1 flex flex-col gap-1 text-sm">
