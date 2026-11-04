@@ -127,13 +127,15 @@ function isLong(row: DetailRow): boolean {
                     <li
                         v-for="item in card.list.items"
                         :key="item.label"
-                        class="flex justify-between gap-4"
+                        class="flex flex-col"
                     >
+                        <span class="min-w-0 font-medium break-words">{{
+                            item.label
+                        }}</span>
                         <span
-                            class="min-w-0 break-words text-muted-foreground"
-                            >{{ item.label }}</span
+                            class="min-w-0 text-xs break-words text-muted-foreground"
+                            >{{ item.value }}</span
                         >
-                        <span class="shrink-0">{{ item.value }}</span>
                     </li>
                 </ul>
             </div>

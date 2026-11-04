@@ -89,8 +89,10 @@ it('reads the counts and names from a real Mac report', function () {
             ['label' => 'Launch agents and daemons', 'value' => '4 (2 agents, 2 daemons)', 'tone' => 'neutral'],
         ])
         ->and(suLabels($card))->toBe(['backup', 'menubar', 'indexer', 'sync', 'Dropbox', 'Slack'])
-        ->and($card['list']['items'][0])->toBe(['label' => 'backup', 'value' => 'Not recognised', 'tone' => 'neutral'])
-        ->and($card['list']['items'][4])->toBe(['label' => 'Dropbox', 'value' => 'Syncs Dropbox files', 'tone' => 'neutral'])
+        ->and($card['list']['items'][0])->toBe(['label' => 'backup', 'value' => 'Not recognised. From: system launch agent.', 'tone' => 'neutral'])
+        ->and($card['list']['items'][1]['value'])->toBe('Not recognised. From: user launch agent.')
+        ->and($card['list']['items'][2]['value'])->toBe('Not recognised. From: system launch daemon. A launch daemon runs for the whole Mac, before anyone logs in.')
+        ->and($card['list']['items'][4])->toBe(['label' => 'Dropbox', 'value' => 'Syncs Dropbox files. From: login item.', 'tone' => 'neutral'])
         ->and($card['notes'])->toHaveCount(2)
         ->and($card['notes'][0])->toContain('overlap')
         ->and($card['notes'][1])->toContain('does not record how much');
@@ -218,7 +220,7 @@ it('shows names only, never paths, arguments or user names', function () {
 it('turns plist labels into the last part, and known vendors into a plain name', function (string $plist, string $label, string $value) {
     $card = suCard([SU_LAUNCH => "/Library/LaunchAgents:\n{$plist}"]);
 
-    expect($card['list']['items'])->toBe([['label' => $label, 'value' => $value, 'tone' => 'neutral']]);
+    expect($card['list']['items'])->toBe([['label' => $label, 'value' => $value.'. From: system launch agent.', 'tone' => 'neutral']]);
 })->with([
     'homebrew' => ['homebrew.mxcl.postgresql@14.plist', 'postgresql14', 'Not recognised'],
     'dropbox' => ['com.dropbox.client.plist', 'Dropbox', 'Syncs Dropbox files'],
@@ -230,28 +232,104 @@ it('turns plist labels into the last part, and known vendors into a plain name',
     'onedrive' => ['com.microsoft.OneDrive.plist', 'OneDrive', 'Syncs OneDrive files'],
 ]);
 
-it('names every launch file from a real Mac report sensibly', function (string $file, ?string $label, ?string $value) {
-    $card = suCard([SU_LAUNCH => "/Library/LaunchAgents:\n{$file}"]);
+const SU_ORIGIN = "EA's game launcher, starts a helper at startup and can be switched off if the games are not used";
 
-    expect($card['list']['items'] ?? null)->toBe($label === null ? null : [['label' => $label, 'value' => $value, 'tone' => 'neutral']]);
+const SU_DAEMON = ' A launch daemon runs for the whole Mac, before anyone logs in.';
+
+it('names every launch file from a real Mac report sensibly', function (string $header, string $file, ?string $label, ?string $value, string $from) {
+    $card = suCard([SU_LAUNCH => "{$header}:\n{$file}"]);
+
+    expect($card['list']['items'] ?? null)->toBe($label === null ? null : [['label' => $label, 'value' => "{$value}. From: {$from}.".(str_contains($from, 'daemon') ? SU_DAEMON : ''), 'tone' => 'neutral']]);
 })->with([
-    ['com.adobe.ARMDCHelper.cc24aef4a1b90ed56a725c38014c95072f92651fb65e1bf9c8e43c37a23d420d.plist', 'Adobe', 'Adobe updater or helper'],
-    ['com.microsoft.OneDriveStandaloneUpdater.plist', 'OneDrive', 'Syncs OneDrive files'],
-    ['com.microsoft.update.agent.plist', null, null],
-    ['helper.threeships.com.plist', 'threeships', 'Not recognised'],
-    ['PT.updd.plist', 'PT.updd', 'Not recognised'],
-    ['com.adobe.ARMDC.Communicator.plist', 'Adobe', 'Adobe updater or helper'],
-    ['com.adobe.ARMDC.SMJobBlessHelper.plist', 'Adobe', 'Adobe updater or helper'],
-    ['com.apple.installer.osmessagetracing.plist', 'osmessagetracing', 'Apple style name, unusual place'],
-    ['com.ea.origin.ESHelper.plist', 'ESHelper', 'Not recognised'],
-    ['com.microsoft.OneDriveStandaloneUpdaterDaemon.plist', 'OneDrive', 'Syncs OneDrive files'],
-    ['com.microsoft.OneDriveUpdaterDaemon.plist', 'OneDrive', 'Syncs OneDrive files'],
-    ['com.microsoft.autoupdate.helper.plist', null, null],
-    ['com.microsoft.office.licensingV2.helper.plist', null, null],
-    ['com.microsoft.teams.TeamsUpdaterDaemon.plist', 'Teams', 'Chat and video meetings'],
-    ['com.ea.origin.WebHelper.plist', 'WebHelper', 'Not recognised'],
-    ['com.google.keystone.agent.plist', 'Google', 'Google updater or helper'],
-    ['com.google.keystone.xpcservice.plist', 'Google', 'Google updater or helper'],
+    ['/Library/LaunchAgents', 'com.adobe.ARMDCHelper.cc24aef4a1b90ed56a725c38014c95072f92651fb65e1bf9c8e43c37a23d420d.plist', 'Adobe', 'Adobe updater or helper', 'system launch agent'],
+    ['/Library/LaunchAgents', 'com.microsoft.OneDriveStandaloneUpdater.plist', 'OneDrive', 'Syncs OneDrive files', 'system launch agent'],
+    ['/Library/LaunchAgents', 'com.microsoft.update.agent.plist', null, null, ''],
+    ['/Library/LaunchAgents', 'helper.threeships.com.plist', 'threeships', 'Not recognised', 'system launch agent'],
+    ['/Library/LaunchDaemons', 'PT.updd.plist', 'PT.updd', 'Not recognised', 'system launch daemon'],
+    ['/Library/LaunchDaemons', 'com.adobe.ARMDC.Communicator.plist', 'Adobe', 'Adobe updater or helper', 'system launch daemon'],
+    ['/Library/LaunchDaemons', 'com.adobe.ARMDC.SMJobBlessHelper.plist', 'Adobe', 'Adobe updater or helper', 'system launch daemon'],
+    ['/Library/LaunchDaemons', 'com.apple.installer.osmessagetracing.plist', 'osmessagetracing', 'Apple installer item', 'system launch daemon'],
+    ['/Library/LaunchDaemons', 'com.ea.origin.ESHelper.plist', 'EA Origin', SU_ORIGIN, 'system launch daemon'],
+    ['/Library/LaunchDaemons', 'com.microsoft.OneDriveStandaloneUpdaterDaemon.plist', 'OneDrive', 'Syncs OneDrive files', 'system launch daemon'],
+    ['/Library/LaunchDaemons', 'com.microsoft.OneDriveUpdaterDaemon.plist', 'OneDrive', 'Syncs OneDrive files', 'system launch daemon'],
+    ['/Library/LaunchDaemons', 'com.microsoft.autoupdate.helper.plist', null, null, ''],
+    ['/Library/LaunchDaemons', 'com.microsoft.office.licensingV2.helper.plist', null, null, ''],
+    ['/Library/LaunchDaemons', 'com.microsoft.teams.TeamsUpdaterDaemon.plist', 'Teams', 'Chat and video meetings', 'system launch daemon'],
+    ['/Users/someone/Library/LaunchAgents', 'com.ea.origin.WebHelper.plist', 'EA Origin', SU_ORIGIN, 'user launch agent'],
+    ['/Users/someone/Library/LaunchAgents', 'com.google.keystone.agent.plist', 'Google', 'Google updater or helper', 'user launch agent'],
+    ['/Users/someone/Library/LaunchAgents', 'com.google.keystone.xpcservice.plist', 'Google', 'Google updater or helper', 'user launch agent'],
+    ['/Users/someone/Library/LaunchAgents', 'com.apple.installer.osmessagetracing.plist', 'osmessagetracing', 'Apple style name, unusual place', 'user launch agent'],
+    ['/Library/LaunchAgents', 'com.apple.installer.osmessagetracing.plist', 'osmessagetracing', 'Apple style name, unusual place', 'system launch agent'],
+]);
+
+it('groups the real Mac dataset into one row per app, with every place it comes from', function () {
+    $card = suCard([
+        SU_LAUNCH => "/Library/LaunchAgents:\ncom.adobe.ARMDCHelper.cc24aef4a1b90ed56a725c38014c95072f92651fb65e1bf9c8e43c37a23d420d.plist\ncom.microsoft.OneDriveStandaloneUpdater.plist\ncom.microsoft.update.agent.plist\nhelper.threeships.com.plist\n\n"
+            ."/Library/LaunchDaemons:\nPT.updd.plist\ncom.adobe.ARMDC.Communicator.plist\ncom.adobe.ARMDC.SMJobBlessHelper.plist\ncom.apple.installer.osmessagetracing.plist\ncom.ea.origin.ESHelper.plist\ncom.microsoft.OneDriveStandaloneUpdaterDaemon.plist\ncom.microsoft.OneDriveUpdaterDaemon.plist\ncom.microsoft.autoupdate.helper.plist\ncom.microsoft.office.licensingV2.helper.plist\ncom.microsoft.teams.TeamsUpdaterDaemon.plist\n\n"
+            ."/Users/someone/Library/LaunchAgents:\ncom.ea.origin.WebHelper.plist\ncom.google.keystone.agent.plist\ncom.google.keystone.xpcservice.plist",
+        SU_LOGIN => 'Origin, Loom',
+    ]);
+
+    expect(suRows($card)['Launch agents and daemons'])->toBe('17 (7 agents, 10 daemons)')
+        ->and($card['list']['items'])->toBe([
+            ['label' => 'threeships', 'value' => 'Not recognised. From: system launch agent.', 'tone' => 'neutral'],
+            ['label' => 'PT.updd', 'value' => 'Not recognised. From: system launch daemon.'.SU_DAEMON, 'tone' => 'neutral'],
+            ['label' => 'EA Origin', 'value' => SU_ORIGIN.'. From: login item, user launch agent, system launch daemon.'.SU_DAEMON, 'tone' => 'neutral'],
+            ['label' => 'Loom', 'value' => 'Screen recording app, can be switched off. From: login item.', 'tone' => 'neutral'],
+            ['label' => 'Adobe', 'value' => 'Adobe updater or helper. From: system launch agent, system launch daemon.'.SU_DAEMON, 'tone' => 'neutral'],
+            ['label' => 'OneDrive', 'value' => 'Syncs OneDrive files. From: system launch agent, system launch daemon.'.SU_DAEMON, 'tone' => 'neutral'],
+        ]);
+});
+
+it('ranks an Apple installer leftover below everything else but keeps it in the list', function () {
+    $card = suCard([
+        SU_LAUNCH => "/Library/LaunchDaemons:\ncom.apple.installer.osmessagetracing.plist\ncom.example.thing.plist\n\n/Library/LaunchAgents:\ncom.microsoft.OneDriveStandaloneUpdater.plist",
+    ]);
+
+    expect(suLabels($card))->toBe(['thing', 'OneDrive', 'osmessagetracing']);
+});
+
+it('says background items and a listing without folder headers in plain words too', function () {
+    $background = suCard([SU_BACKGROUND => suRecord('Loom', 'app (0x2)', 'Loom, Inc.')]);
+    $bare = suCard([SU_LAUNCH => "com.example.thing.plist\n"]);
+
+    expect($background['list']['items'])->toBe([['label' => 'Loom', 'value' => 'Screen recording app, can be switched off. From: background item.', 'tone' => 'neutral']])
+        ->and($bare['list']['items'])->toBe([['label' => 'thing', 'value' => 'Not recognised. From: launch agent.', 'tone' => 'neutral']]);
+});
+
+it('keeps names only in the origin text', function () {
+    $card = suCard([SU_LAUNCH => "/Users/someone/Library/LaunchAgents:\ncom.ea.origin.WebHelper.plist"]);
+
+    expect((string) json_encode($card))->not->toContain('someone')->not->toContain('/Users');
+});
+
+it('does not call a folder it does not know a user launch agent', function () {
+    $card = suCard([SU_LAUNCH => "/System/Library/LaunchAgents:\ncom.example.one.plist\n\n/Users/someone/Library/LaunchAgents:\ncom.example.two.plist"]);
+
+    expect(array_column($card['list']['items'], 'value', 'label'))->toBe([
+        'one' => 'Not recognised. From: launch agent.',
+        'two' => 'Not recognised. From: user launch agent.',
+    ]);
+});
+
+it('keeps the more suspicious description when one name comes from two places', function () {
+    $card = suCard([SU_LAUNCH => "/Library/LaunchDaemons:\ncom.apple.installer.osmessagetracing.plist\n\n/Library/LaunchAgents:\ncom.apple.installer.osmessagetracing.plist"]);
+
+    expect($card['list']['items'])->toBe([['label' => 'osmessagetracing', 'value' => 'Apple style name, unusual place. From: system launch agent, system launch daemon.'.SU_DAEMON, 'tone' => 'neutral']]);
+});
+
+it('matches Origin and Loom by name only, not look-alikes', function (string $name, string $label, string $kind) {
+    $card = suCard([SU_LOGIN => $name]);
+
+    expect($card['list']['items'][0]['label'])->toBe($label)
+        ->and($card['list']['items'][0]['value'])->toStartWith($kind);
+})->with([
+    'origin' => ['Origin', 'EA Origin', "EA's game launcher"],
+    'ea origin' => ['EA Origin', 'EA Origin', "EA's game launcher"],
+    'loom' => ['Loom', 'Loom', 'Screen recording app'],
+    'loom desktop' => ['com.loom.desktop', 'Loom', 'Screen recording app'],
+    'originlab' => ['OriginPro', 'OriginPro', 'Not recognised'],
+    'loomis' => ['Loomis', 'Loomis', 'Not recognised'],
 ]);
 
 it('reduces reverse-DNS labels to a meaningful name in either order', function (string $file, string $label) {
@@ -281,7 +359,7 @@ it('reduces reverse-DNS labels to a meaningful name in either order', function (
 it('describes the other well-known names', function (string $name, string $label, string $value) {
     $card = suCard([SU_LOGIN => $name]);
 
-    expect($card['list']['items'])->toBe([['label' => $label, 'value' => $value, 'tone' => 'neutral']]);
+    expect($card['list']['items'])->toBe([['label' => $label, 'value' => $value.'. From: login item.', 'tone' => 'neutral']]);
 })->with([
     'teams' => ['Microsoft Teams', 'Teams', 'Chat and video meetings'],
     'ms teams' => ['MSTeams', 'Teams', 'Chat and video meetings'],
@@ -293,7 +371,7 @@ it('describes the other well-known names', function (string $name, string $label
 it('does not mistake look-alike words for a known app', function (string $name) {
     $card = suCard([SU_LOGIN => $name]);
 
-    expect($card['list']['items'][0]['value'])->toBe('Not recognised');
+    expect($card['list']['items'][0]['value'])->toBe('Not recognised. From: login item.');
 })->with(['steams', 'Zoomer', 'Teamsters']);
 
 it('keeps Apple and Microsoft system items out of the list', function () {
@@ -312,8 +390,8 @@ it('flags an Apple style name that sits outside a system folder as odd instead o
     $card = suCard([SU_LAUNCH => "/Library/LaunchDaemons:\ncom.apple.update.tracer.plist\ncom.example.thing.plist"]);
 
     expect($card['list']['items'])->toBe([
-        ['label' => 'tracer', 'value' => 'Apple style name, unusual place', 'tone' => 'neutral'],
-        ['label' => 'thing', 'value' => 'Not recognised', 'tone' => 'neutral'],
+        ['label' => 'tracer', 'value' => 'Apple style name, unusual place. From: system launch daemon.'.SU_DAEMON, 'tone' => 'neutral'],
+        ['label' => 'thing', 'value' => 'Not recognised. From: system launch daemon.'.SU_DAEMON, 'tone' => 'neutral'],
     ]);
 });
 
@@ -322,7 +400,7 @@ it('puts random looking names first and shows at most six', function () {
     $card = suCard([SU_LAUNCH => $plists]);
 
     expect($card['list']['items'])->toHaveCount(6)
-        ->and($card['list']['items'][0])->toBe(['label' => 'a1b2c3d4e5f6a7b8', 'value' => 'Odd looking name', 'tone' => 'neutral'])
+        ->and($card['list']['items'][0])->toBe(['label' => 'a1b2c3d4e5f6a7b8', 'value' => 'Odd looking name. From: system launch agent.', 'tone' => 'neutral'])
         ->and($card['list']['items'][1]['label'])->toBe('xkcdrtqz')
         ->and(array_slice(suLabels($card), 2))->toBe(['tool1', 'tool2', 'tool3', 'tool4']);
 });
@@ -330,19 +408,19 @@ it('puts random looking names first and shows at most six', function () {
 it('only treats long vowel-free names as random', function () {
     $card = suCard([SU_LOGIN => 'GTK, RTHDVCPL']);
 
-    expect(array_column($card['list']['items'], 'value', 'label'))->toBe(['RTHDVCPL' => 'Odd looking name', 'GTK' => 'Not recognised']);
+    expect(array_column($card['list']['items'], 'value', 'label'))->toBe(['RTHDVCPL' => 'Odd looking name. From: login item.', 'GTK' => 'Not recognised. From: login item.']);
 });
 
 it('does not call a long non-Latin name random', function () {
     $card = suCard([SU_LOGIN => "\u{41f}\u{440}\u{438}\u{432}\u{435}\u{442}\u{43c}\u{438}\u{440}\u{43d}\u{44b}\u{439}, \u{30b7}\u{30b9}\u{30c6}\u{30e0}\u{30a2}\u{30d7}\u{30ea}\u{30b1}"]);
 
-    expect(array_column($card['list']['items'], 'value'))->toBe(['Not recognised', 'Not recognised']);
+    expect(array_column($card['list']['items'], 'value'))->toBe(['Not recognised. From: login item.', 'Not recognised. From: login item.']);
 });
 
 it('does not rename or hide an item for merely resembling a known or system name', function (string $name) {
     $card = suCard([SU_LOGIN => $name]);
 
-    expect($card['list']['items'])->toBe([['label' => $name, 'value' => 'Not recognised', 'tone' => 'neutral']]);
+    expect($card['list']['items'])->toBe([['label' => $name, 'value' => 'Not recognised. From: login item.', 'tone' => 'neutral']]);
 })->with(['slacker', 'MyDropbox', 'WindowsUpdateHelper', 'microsoftfoo', 'securityhealthfake', 'ctfmonster']);
 
 it('counts a background item once when the dump lists it twice', function () {
