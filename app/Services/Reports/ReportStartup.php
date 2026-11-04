@@ -10,9 +10,9 @@ use Illuminate\Support\Str;
  * @phpstan-import-type Card from ReportDetails
  * @phpstan-import-type Row from ReportDetails
  *
- * @phpstan-type Entry array{raw: string, developer: string}
+ * @phpstan-type Entry array{raw: string, developer: string, source: string}
  * @phpstan-type Found array{rows: list<Row>, entries: list<Entry>, notes: list<string>}
- * @phpstan-type Ranked array{name: string, value: string, rank: int}
+ * @phpstan-type Ranked array{name: string, description: string, rank: int, sources: list<string>}
  */
 final readonly class ReportStartup
 {
@@ -38,11 +38,34 @@ final readonly class ReportStartup
 
     private const RANK_KNOWN = 3;
 
+    private const RANK_INSTALLER = 4;
+
     private const UNKNOWN = 'Not recognised';
 
     private const RANDOM = 'Odd looking name';
 
     private const APPLE_STYLE = 'Apple style name, unusual place';
+
+    private const APPLE_INSTALLER = 'Apple installer item';
+
+    private const LOGIN_ITEM = 'login item';
+
+    private const BACKGROUND_ITEM = 'background item';
+
+    private const USER_AGENT = 'user launch agent';
+
+    private const SYSTEM_AGENT = 'system launch agent';
+
+    private const SYSTEM_DAEMON = 'system launch daemon';
+
+    private const LAUNCH_AGENT = 'launch agent';
+
+    private const SOURCE_ORDER = [self::LOGIN_ITEM, self::BACKGROUND_ITEM, self::USER_AGENT, self::SYSTEM_AGENT, self::SYSTEM_DAEMON, self::LAUNCH_AGENT];
+
+    private const DAEMON_NOTE = 'A launch daemon runs for the whole Mac, before anyone logs in.';
+
+    /** Exact labels seen on real Macs, not a rule about com.apple.*: anything else Apple style is still flagged. */
+    private const APPLE_INSTALLER_DAEMONS = ['com.apple.installer.osmessagetracing'];
 
     private const SYSTEM = '/^(?:com\.microsoft\.|securityhealth(?![a-z])|windows ?(?:security|defender)|microsoftedgeautolaunch|msedge(?:autolaunch)?(?![a-z])|ctfmon(?![a-z])|microsoft (?:edge|office|onenote|outlook))/';
 
@@ -57,6 +80,8 @@ final readonly class ReportStartup
         ['/(?<![a-z])(?:google|keystone)/', 'Google', 'Google updater or helper'],
         ['/(?<![a-z])steam(?![a-z])|valvesoftware/', 'Steam', 'Game store'],
         ['/(?<![a-z])icloud/', 'iCloud', 'Syncs iCloud files'],
+        ['/^(?:ea )?origin$|^com\.ea\.origin(?![a-z])/', 'EA Origin', "EA's game launcher, starts a helper at startup and can be switched off if the games are not used"],
+        ['/^loom$|^loom desktop$|^com\.loom(?![a-z])/', 'Loom', 'Screen recording app, can be switched off'],
     ];
 
     private const HASH_PART = '/^[0-9a-f]{32,}$/i';
@@ -119,9 +144,9 @@ final readonly class ReportStartup
         return [
             'rows' => $rows,
             'entries' => [
-                ...$this->entries($login ?? []),
+                ...$this->entries($login ?? [], self::LOGIN_ITEM),
                 ...($background === null ? [] : $background['items']),
-                ...$this->entries($launch['names']),
+                ...$launch['entries'],
             ],
             'notes' => [
                 ...$this->highNote($measures, 'on this Mac', 'Switch off what you do not need in System Settings, under General, then Login Items & Extensions.'),
@@ -148,7 +173,7 @@ final readonly class ReportStartup
 
         return [
             'rows' => $this->rows($measures),
-            'entries' => $this->entries($names),
+            'entries' => $this->entries($names, ''),
             'notes' => [
                 ...$this->highNote($measures, 'with Windows', 'Switch off what you do not need in Task Manager, on the Startup tab.'),
                 ...($names !== [] && count($names) < $count ? ['The scan named '.count($names).' of the '.number_format($count).' startup programs.'] : []),
@@ -248,7 +273,7 @@ final readonly class ReportStartup
             $type = strtolower($record['type']);
 
             if ($type !== '' && ! str_starts_with($type, 'developer') && preg_match('/\bdisabled\b/i', $record['disposition']) !== 1) {
-                $items[$record['name'].'|'.$record['developer'].'|'.$type] = ['raw' => $record['name'] === '(null)' ? '' : $record['name'], 'developer' => $record['developer']];
+                $items[$record['name'].'|'.$record['developer'].'|'.$type] = ['raw' => $record['name'] === '(null)' ? '' : $record['name'], 'developer' => $record['developer'], 'source' => self::BACKGROUND_ITEM];
             }
         }
 
@@ -258,13 +283,13 @@ final readonly class ReportStartup
     }
 
     /**
-     * @return array{total: int|null, detail: string|null, names: list<string>}
+     * @return array{total: int|null, detail: string|null, entries: list<Entry>}
      */
     private function launch(?string $listing, ?string $counts): array
     {
         $agents = [];
         $daemons = [];
-        $daemon = false;
+        $source = self::LAUNCH_AGENT;
         $listed = false;
 
         foreach (preg_split('/\R/', (string) $listing) ?: [] as $line) {
@@ -272,12 +297,12 @@ final readonly class ReportStartup
             $listed = $listed || ($line !== '' && ! str_starts_with($line, 'ls:'));
 
             if (str_starts_with($line, '/') && str_ends_with($line, ':')) {
-                $daemon = str_contains($line, 'LaunchDaemons');
+                $source = $this->folderSource($line);
             } elseif (preg_match('/\.plist$/i', $line) === 1 && ! str_starts_with($line, '/')) {
-                if ($daemon) {
+                if ($source === self::SYSTEM_DAEMON) {
                     $daemons[] = $line;
                 } else {
-                    $agents[] = $line;
+                    $agents[] = ['raw' => $line, 'developer' => '', 'source' => $source];
                 }
             }
         }
@@ -286,13 +311,23 @@ final readonly class ReportStartup
             return [
                 'total' => count($agents) + count($daemons),
                 'detail' => number_format(count($agents)).' '.Str::plural('agent', count($agents)).', '.number_format(count($daemons)).' '.Str::plural('daemon', count($daemons)),
-                'names' => [...$agents, ...$daemons],
+                'entries' => [...$agents, ...$this->entries($daemons, self::SYSTEM_DAEMON)],
             ];
         }
 
         $total = $counts !== null && preg_match('/^LaunchAgents\/Daemons:\s*\n\s*(\d{1,5})\s*$/m', $counts, $match) === 1 ? (int) $match[1] : null;
 
-        return ['total' => $total, 'detail' => null, 'names' => []];
+        return ['total' => $total, 'detail' => null, 'entries' => []];
+    }
+
+    private function folderSource(string $header): string
+    {
+        return match (true) {
+            str_contains($header, 'LaunchDaemons') => self::SYSTEM_DAEMON,
+            str_starts_with($header, '/Library/') => self::SYSTEM_AGENT,
+            str_starts_with($header, '/Users/') => self::USER_AGENT,
+            default => self::LAUNCH_AGENT,
+        };
     }
 
     /**
@@ -343,9 +378,9 @@ final readonly class ReportStartup
      * @param  list<string>  $names
      * @return list<Entry>
      */
-    private function entries(array $names): array
+    private function entries(array $names, string $source): array
     {
-        return array_map(fn (string $name): array => ['raw' => $name, 'developer' => ''], $names);
+        return array_map(fn (string $name): array => ['raw' => $name, 'developer' => '', 'source' => $source], $names);
     }
 
     /**
@@ -360,7 +395,10 @@ final readonly class ReportStartup
             $described = $this->describe($entry);
 
             if ($described !== null) {
-                $ranked[mb_strtolower($described['name'])] ??= $described;
+                $key = mb_strtolower($described['name']);
+                $sources = [...($ranked[$key]['sources'] ?? []), ...$described['sources']];
+                $kept = isset($ranked[$key]) && $ranked[$key]['rank'] <= $described['rank'] ? $ranked[$key] : $described;
+                $ranked[$key] = [...$kept, 'sources' => $sources];
             }
         }
 
@@ -374,10 +412,24 @@ final readonly class ReportStartup
         return [
             'title' => 'Worth a look',
             'items' => array_map(
-                fn (array $item): array => ['label' => $item['name'], 'value' => $item['value'], 'tone' => 'neutral'],
+                fn (array $item): array => ['label' => $item['name'], 'value' => $this->value($item['description'], $item['sources']), 'tone' => 'neutral'],
                 array_slice($ranked, 0, self::LIST_LIMIT),
             ),
         ];
+    }
+
+    /**
+     * @param  list<string>  $sources
+     */
+    private function value(string $description, array $sources): string
+    {
+        $sources = array_values(array_filter(self::SOURCE_ORDER, fn (string $source): bool => in_array($source, $sources, true)));
+
+        if ($sources === []) {
+            return $description;
+        }
+
+        return $description.'. From: '.implode(', ', $sources).'.'.(in_array(self::SYSTEM_DAEMON, $sources, true) ? ' '.self::DAEMON_NOTE : '');
     }
 
     /**
@@ -394,18 +446,20 @@ final readonly class ReportStartup
         }
 
         $key = mb_strtolower($base);
+        $sources = $entry['source'] === '' ? [] : [$entry['source']];
 
         foreach (self::KNOWN as [$pattern, $known, $description]) {
             if (preg_match($pattern, $key) === 1) {
-                return ['name' => $known, 'value' => $description, 'rank' => self::RANK_KNOWN];
+                return ['name' => $known, 'description' => $description, 'rank' => self::RANK_KNOWN, 'sources' => $sources];
             }
         }
 
         return match (true) {
             preg_match(self::SYSTEM, $key) === 1 => null,
-            str_starts_with($key, 'com.apple.') => ['name' => $name, 'value' => self::APPLE_STYLE, 'rank' => self::RANK_APPLE_STYLE],
-            $this->looksRandom($name) => ['name' => $name, 'value' => self::RANDOM, 'rank' => self::RANK_RANDOM],
-            default => ['name' => $name, 'value' => self::UNKNOWN, 'rank' => self::RANK_UNKNOWN],
+            $entry['source'] === self::SYSTEM_DAEMON && in_array($key, self::APPLE_INSTALLER_DAEMONS, true) => ['name' => $name, 'description' => self::APPLE_INSTALLER, 'rank' => self::RANK_INSTALLER, 'sources' => $sources],
+            str_starts_with($key, 'com.apple.') => ['name' => $name, 'description' => self::APPLE_STYLE, 'rank' => self::RANK_APPLE_STYLE, 'sources' => $sources],
+            $this->looksRandom($name) => ['name' => $name, 'description' => self::RANDOM, 'rank' => self::RANK_RANDOM, 'sources' => $sources],
+            default => ['name' => $name, 'description' => self::UNKNOWN, 'rank' => self::RANK_UNKNOWN, 'sources' => $sources],
         };
     }
 
