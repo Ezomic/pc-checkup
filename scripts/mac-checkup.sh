@@ -588,6 +588,10 @@ PCC_INSTALL_HISTORY="${PCC_INSTALL_HISTORY:-/Library/Receipts/InstallHistory.pli
 PCC_BACKUP_MAX_DAYS=30
 PCC_UPDATE_MAX_DAYS=60
 PCC_ADMIN_FLAG_AT=3
+# Oldest macOS major Apple still patches (the current major and the two before it). Apple went
+# from 15 to 26, so count releases, not numbers. Each autumn, when a new major ships, raise this
+# to the next major in the release list (26, 15, 14 today; after the next release 15 is the oldest).
+PCC_OLDEST_SUPPORTED_MACOS=14
 
 # Whole days from a YYYY-MM-DD date (UTC) to today; prints nothing for anything else.
 pcc_days_since() {
@@ -707,6 +711,12 @@ pcc_admins_check() {
   done
   echo "Administrator accounts: $count (not counting root)"
   if [ "$count" -ge "$PCC_ADMIN_FLAG_AT" ]; then echo "FLAG: $count accounts have administrator rights (see Administrator accounts section)."; fi
+}
+
+pcc_os_check() {
+  local major=${1%%.*}
+  case "$major" in '' | *[!0-9]*) return 0 ;; esac
+  if [ "$major" -lt "$PCC_OLDEST_SUPPORTED_MACOS" ]; then echo "FLAG: macOS $1 is old and likely out of security support."; fi
 }
 
 pcc_check_flags() { printf '%s\n' "$1" | sed -n 's/^FLAG: /- /p'; }
@@ -862,8 +872,7 @@ UPDATES=$(softwareupdate -l 2>&1)
 
 echo "$UPDATES" | grep -q "^\* Label" && flag "Software updates are pending (see Software updates section)."
 
-OSMAJOR=$(sw_vers -productVersion | cut -d. -f1)
-[ "${OSMAJOR:-0}" -lt 13 ] 2>/dev/null && flag "macOS $(sw_vers -productVersion) is old and likely out of security support."
+pcc_check_flags "$(pcc_os_check "$(sw_vers -productVersion)")" >> "$FLAGS"
 
 NCPU=$(sysctl -n hw.ncpu)
 LOAD1=$(sysctl -n vm.loadavg | awk '{print $2}')
