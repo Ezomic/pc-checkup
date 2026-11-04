@@ -18,6 +18,7 @@ use App\Services\Flags\FlagAdvisor;
 use App\Services\Reports\ReportDetails;
 use App\Services\Reports\ReportFacts;
 use App\Services\Reports\ReportFreshness;
+use App\Services\Reports\ReportScriptVersion;
 use App\Services\Reports\ReportTrends;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -102,7 +103,7 @@ final class MachineController extends Controller
         ]);
     }
 
-    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts, BuildReportInsights $insights, ReportFreshness $freshness, CompareLatestReports $changes, ReportDetails $details, ReportTrends $trends): Response
+    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts, BuildReportInsights $insights, ReportFreshness $freshness, CompareLatestReports $changes, ReportDetails $details, ReportTrends $trends, ReportScriptVersion $scriptVersion): Response
     {
         $this->authorize('view', $machine);
 
@@ -116,6 +117,7 @@ final class MachineController extends Controller
                 'stale' => $freshness->isStale($report),
                 'advice' => array_map(fn (FlagAdvice $advice): array => $advice->toArray(), $advisor->adviseAll($report->flags)),
                 'facts' => $facts->from($report->markdown),
+                'script' => $scriptVersion->for($report->markdown),
                 'markdown' => $report->markdown,
             ],
             'changes' => $changes->handle($machine),

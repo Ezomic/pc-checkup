@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
+use App\Enums\CheckupScript;
 use App\Models\User;
 use App\Services\Portal\IdPortalClient;
 use Illuminate\Http\Request;
@@ -50,6 +51,10 @@ class HandleInertiaRequests extends Middleware
             ],
             'workflow' => [
                 'enabled' => $workflowEnabled,
+            ],
+            'scriptVersions' => fn (): array => [
+                'windows' => CheckupScript::Windows->version(),
+                'mac' => CheckupScript::Mac->version(),
             ],
             'portalApps' => fn (): array => $this->portalApps($request, $workflowEnabled),
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',

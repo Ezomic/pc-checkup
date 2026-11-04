@@ -5,6 +5,7 @@ import ChangesSection from '@/components/machines/ChangesSection.vue';
 import ClientSection from '@/components/machines/ClientSection.vue';
 import DetailCards from '@/components/machines/DetailCards.vue';
 import RemoteSupportSection from '@/components/machines/RemoteSupportSection.vue';
+import ScriptVersionNote from '@/components/machines/ScriptVersionNote.vue';
 import StaleNote from '@/components/machines/StaleNote.vue';
 import TrendsCard from '@/components/machines/TrendsCard.vue';
 import Show from '@/pages/machines/Show.vue';
@@ -26,6 +27,7 @@ function report(overrides: Partial<LatestReport> = {}): LatestReport {
         id: 1,
         created_at: '2026-08-04T12:00:00.000000Z',
         stale: false,
+        script: null,
         advice: [
             {
                 severity: 'high',
@@ -110,6 +112,22 @@ describe('machines/Show', () => {
         expect(wrapper.text()).toContain('Scanned 90 days ago');
         expect(wrapper.get('[data-test="stale-hint"]').text()).toBe(
             'Run the check again to refresh this report.',
+        );
+    });
+
+    it('shows the script version note beside the scanned time and leaves it out without one', () => {
+        const script = { version: null, current: 'bbbb2222', outdated: true };
+
+        expect(
+            render(report({ script }))
+                .findComponent(ScriptVersionNote)
+                .props('script'),
+        ).toEqual(script);
+        expect(render(report()).findComponent(ScriptVersionNote).exists()).toBe(
+            false,
+        );
+        expect(render(null).findComponent(ScriptVersionNote).exists()).toBe(
+            false,
         );
     });
 

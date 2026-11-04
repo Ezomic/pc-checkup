@@ -8,7 +8,11 @@ vi.mock('@inertiajs/vue3', () => ({
     Head: { template: '<span />' },
     Link: { props: ['href'], template: '<a :href="href"><slot /></a>' },
     usePage: () => ({
-        props: { name: 'PC Checkup', auth: { user: state.user } },
+        props: {
+            name: 'PC Checkup',
+            auth: { user: state.user },
+            scriptVersions: { windows: 'aaaa1111', mac: 'bbbb2222' },
+        },
     }),
 }));
 
@@ -54,10 +58,18 @@ describe('Welcome', () => {
         const wrapper = mount(Welcome);
         const command = () => wrapper.get('[data-test="run-command"]').text();
 
-        expect(command()).toContain('windows-checkup.ps1');
+        expect(command()).toBe(
+            'powershell -ExecutionPolicy Bypass -File windows-checkup-aaaa1111.ps1',
+        );
 
         await wrapper.get('[data-test="download-mac"]').trigger('click');
 
-        expect(command()).toBe('bash mac-checkup.sh');
+        expect(command()).toBe('bash mac-checkup-bbbb2222.sh');
+        expect(wrapper.get('[data-test="run-hint"]').text()).toContain(
+            'mac-checkup-bbbb2222.sh',
+        );
+        expect(wrapper.get('[data-test="run-hint"]').text()).toContain(
+            'Delete older copies',
+        );
     });
 });

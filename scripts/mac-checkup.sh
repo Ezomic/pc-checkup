@@ -29,6 +29,14 @@
 set -u
 
 PCC_DEFAULT_URL="https://pc-checkup.thijssensoftware.nl"
+# The app swaps this marker for the version of this file when it serves the download.
+PCC_SCRIPT_VERSION="__PCC_SCRIPT_VERSION__"
+PCC_SCRIPT_NAME=$(basename "${BASH_SOURCE[0]:-mac-checkup.sh}")
+case $PCC_SCRIPT_NAME in *.sh) ;; *) PCC_SCRIPT_NAME="mac-checkup.sh" ;; esac
+
+pcc_banner() { echo "PC Checkup Mac script, version $PCC_SCRIPT_VERSION"; }
+
+pcc_version_line() { echo "- Script version: $PCC_SCRIPT_VERSION"; }
 PCC_SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)
 PCC_TOKEN=""
 PCC_TOKEN_SOURCE=""
@@ -1067,7 +1075,7 @@ while [ $# -gt 0 ]; do
     --url=*) PCC_CLI_URL=${1#--url=}; shift ;;
     --fix) PCC_CLI_FIX=1; shift ;;
     --benchmark) PCC_BENCHMARK=1; shift ;;
-    *) echo "Unknown option: $1. Usage: bash mac-checkup.sh [--token TOKEN] [--code CODE] [--url URL] [--fix] [--benchmark]"; exit 2 ;;
+    *) echo "Unknown option: $1. Usage: bash $PCC_SCRIPT_NAME [--token TOKEN] [--code CODE] [--url URL] [--fix] [--benchmark]"; exit 2 ;;
   esac
 done
 pcc_find_token "$PCC_CLI_TOKEN"
@@ -1099,6 +1107,7 @@ section() {
 
 sh_section() { section "$1" bash -c "$2"; }
 
+pcc_banner
 echo "Running checkup, this can take a few minutes..."
 
 # ---------- Flags ----------
@@ -1273,6 +1282,7 @@ if [ "$PCC_CLI_FIX" = 1 ]; then pcc_fix_run; fi
   echo "This report comes from one scan that ran once, only read information, and installed and changed nothing on this Mac. Changes happen only in the optional --fix mode, one y/N question at a time, and are listed under Fix log."
   echo
   echo "- Format: 1"
+  pcc_version_line
   echo "- OS: macOS"
   echo "- Device type: $(echo "$SP_HW" | grep -q 'Model Name: MacBook' && echo laptop || echo desktop)"
   echo "- Generated: $(date)"
@@ -1331,4 +1341,4 @@ echo "  $OUT"
 echo
 pcc_upload_report "$OUT" || true
 echo
-echo "Optional: for sections that need admin rights (firmware password, some logs), re-run with: sudo bash mac-checkup.sh"
+echo "Optional: for sections that need admin rights (firmware password, some logs), re-run with: sudo bash $PCC_SCRIPT_NAME"

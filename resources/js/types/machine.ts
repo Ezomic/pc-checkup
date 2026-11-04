@@ -35,10 +35,17 @@ export type ReportFacts = {
     cpu: string | null;
 };
 
+export type ReportScript = {
+    version: string | null;
+    current: string;
+    outdated: boolean;
+};
+
 export type LatestReport = {
     id: number;
     created_at: string;
     stale: boolean;
+    script: ReportScript | null;
     advice: FlagAdvice[];
     facts: ReportFacts;
     markdown: string;
