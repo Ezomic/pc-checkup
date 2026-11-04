@@ -28,6 +28,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $DefaultUrl = 'https://pc-checkup.thijssensoftware.nl'
+# The app swaps this marker for the version of this file when it serves the download.
+$ScriptVersion = '__PCC_SCRIPT_VERSION__'
 
 if ($PSVersionTable.PSEdition -eq 'Core' -and -not $IsWindows) {
     Write-Host 'This script only runs on Windows. Use mac-checkup.sh on a Mac.'
@@ -611,6 +613,11 @@ if (-not $found) {
     try { $foundCode = Get-ScanCode $Code } catch { Write-Host "Upload skipped: could not read the scan code ($(One-Line $_.Exception.Message))." }
 }
 
+function Get-ScriptBanner { "PC Checkup Windows script, version $ScriptVersion" }
+
+function Get-ScriptVersionLine { "- Script version: $ScriptVersion" }
+
+Write-Host (Get-ScriptBanner)
 Write-Host 'Running checkup, this can take a few minutes...'
 
 # ---------- Identity ----------
@@ -1224,6 +1231,7 @@ $lines.Add('')
 $lines.Add('This report comes from one scan that ran once, only read information, and installed and changed nothing on this PC.')
 $lines.Add('')
 $lines.Add('- Format: 1')
+$lines.Add((Get-ScriptVersionLine))
 $lines.Add('- OS: Windows')
 $lines.Add("- Device type: $deviceType")
 $lines.Add("- Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm')")

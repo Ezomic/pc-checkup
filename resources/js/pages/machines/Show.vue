@@ -12,6 +12,7 @@ import DetailCards from '@/components/machines/DetailCards.vue';
 import NotesSection from '@/components/machines/NotesSection.vue';
 import PhotosSection from '@/components/machines/PhotosSection.vue';
 import RemoteSupportSection from '@/components/machines/RemoteSupportSection.vue';
+import ScriptVersionNote from '@/components/machines/ScriptVersionNote.vue';
 import StaleNote from '@/components/machines/StaleNote.vue';
 import StatusBadge from '@/components/machines/StatusBadge.vue';
 import StatusSection from '@/components/machines/StatusSection.vue';
@@ -112,6 +113,10 @@ defineOptions({
                         >
                     </template>
                 </p>
+                <ScriptVersionNote
+                    v-if="report?.script"
+                    :script="report.script"
+                />
                 <template v-if="report?.stale">
                     <StaleNote class="text-sm" />
                     <p

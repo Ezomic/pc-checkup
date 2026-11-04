@@ -7,10 +7,10 @@ use App\Enums\CheckupScript;
 it('lets a guest download each checkup script', function (CheckupScript $script) {
     $response = $this->get(route('scripts.download', $script))->assertOk();
 
-    expect($response->headers->get('content-disposition'))->toContain($script->filename())
+    expect($response->headers->get('content-disposition'))->toContain($script->downloadName())
         ->and($response->headers->get('content-type'))->toStartWith('text/plain')
         ->and($response->headers->get('x-content-type-options'))->toBe('nosniff')
-        ->and($response->streamedContent())->toBe(file_get_contents($script->path()));
+        ->and($response->getContent())->toBe($script->contents());
 })->with([CheckupScript::Windows, CheckupScript::Mac]);
 
 it('makes browsers and proxies revalidate each script instead of reusing a saved copy', function (CheckupScript $script) {

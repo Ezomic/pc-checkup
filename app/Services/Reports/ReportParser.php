@@ -49,7 +49,13 @@ final class ReportParser
             benchmark: $this->benchmark($lines),
             rustdeskId: RustDeskId::orNull($header['rustdesk id'] ?? null),
             ranAsAdmin: $this->rights($header['run as administrator'] ?? null),
+            scriptVersion: $this->scriptVersion($header['script version'] ?? null),
         );
+    }
+
+    private function scriptVersion(?string $value): ?string
+    {
+        return $value !== null && preg_match('/\A[A-Za-z0-9.-]{1,32}\z/', $value) === 1 ? $value : null;
     }
 
     private function rights(?string $value): ?bool

@@ -20,6 +20,7 @@ declare module '@inertiajs/core' {
             name: string;
             auth: Auth;
             workflow: { enabled: boolean };
+            scriptVersions: { windows: string; mac: string };
             portalApps: PortalApp[];
             sidebarOpen: boolean;
             [key: string]: unknown;
