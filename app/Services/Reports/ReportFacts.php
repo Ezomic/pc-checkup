@@ -13,7 +13,7 @@ final class ReportFacts
     {
         $header = [];
 
-        foreach (preg_split('/\R/', $markdown) ?: [] as $line) {
+        foreach (preg_split('/\r\n|\r|\n/', $markdown) ?: [] as $line) {
             if (str_starts_with($line, '## ')) {
                 break;
             }

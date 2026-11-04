@@ -24,3 +24,9 @@ it('keeps a value that only contains n/a', function () {
 it('has nothing when the lines are missing', function () {
     expect((new ReportFacts)->from("# Checkup\n\n## Things to look at\n"))->toBe(['free_disk' => null, 'memory' => null, 'cpu' => null]);
 });
+
+it('does not split a header value on the 0x85 byte inside a UTF-8 letter', function () {
+    $facts = (new ReportFacts)->from("# Checkup\n\n- Chip/CPU: ÅMD Ryzen 5\n- Memory: 16 GB\n\n## Things to look at\n");
+
+    expect($facts['cpu'])->toBe('ÅMD Ryzen 5')->and($facts['memory'])->toBe('16 GB');
+});
