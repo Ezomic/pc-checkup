@@ -392,7 +392,7 @@ final readonly class ReportSlowness
         return $megabytes <= self::SWAP_SANE_MAX_MB ? $megabytes : null;
     }
 
-    private function ramGb(?string $value): ?float
+    public function ramGb(?string $value): ?float
     {
         if ($value === null || preg_match('/^(\d+(?:\.\d+)?)\s*(MB|GB|TB)$/i', trim($value), $match) !== 1) {
             return null;

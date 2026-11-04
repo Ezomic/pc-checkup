@@ -33,7 +33,7 @@ function ownerDetails(string $markdown, array $flags = [], string $deviceType = 
 it('gives the owner the three cards from a real Mac report', function () {
     $details = ownerDetails(macReportFixture(), ['macOS 10.14.6 is old and likely out of security support.']);
 
-    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'startup'])
+    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'startup', 'verdict'])
         ->and($details[0]['rows'][3])->toBe(['label' => 'Security support', 'value' => 'Out of security support', 'tone' => 'bad'])
         ->and($details[1]['rows'][0])->toBe(['label' => 'Free', 'value' => '14 GB (12%)', 'tone' => 'neutral'])
         ->and($details[1]['list']['items'][0])->toBe(['label' => 'Library', 'value' => '38 GB', 'tone' => 'neutral'])
@@ -114,7 +114,7 @@ it('agrees with the free disk fact tile', function () {
 it('gives the owner the cards from a Windows report', function () {
     $details = ownerDetails(windowsLaptopFixture(), ['Windows 10 Pro reached end of support on 14 October 2025, so it only gets updates with a paid extension.']);
 
-    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'startup'])
+    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'startup', 'verdict'])
         ->and($details[0]['rows'][2]['value'])->toBe('Out of security support')
         ->and($details[1]['rows'][0]['value'])->toBe('52 GB (22%)');
 });
@@ -129,7 +129,7 @@ it('sends no cards for a machine without a report', function () {
 it('sends only the cards whose data exists', function (string $markdown, array $ids) {
     expect(array_column(ownerDetails($markdown, [], 'desktop'), 'id'))->toBe($ids);
 })->with([
-    'a report from an old script version' => ["# Mac checkup: Old\n\n- Format: 1\n- OS: macOS\n- Free disk: 30%\n\n## Things to look at\n\n- Nothing flagged automatically.\n", ['storage', 'slowness']],
+    'a report from an old script version' => ["# Mac checkup: Old\n\n- Format: 1\n- OS: macOS\n- Free disk: 30%\n\n## Things to look at\n\n- Nothing flagged automatically.\n", ['storage', 'slowness', 'verdict']],
     'a title and nothing else' => ["# Report\n", []],
     'an empty report' => ['', []],
     'sections that exist but are empty' => ["# Report\n\n## Disk usage\n\n```\n```\n\n## Software update age\n\n```\n```\n", []],
@@ -167,7 +167,7 @@ it('handles a very long report', function () {
     $filler = implode("\n", array_fill(0, 20000, 'filler line'));
     $details = ownerDetails(macReportFixture()."\n## Installed apps\n\n```\n{$filler}\n```\n");
 
-    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'startup']);
+    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'startup', 'verdict']);
 });
 
 it('never lets report text become markup or a placeholder value', function () {
@@ -229,7 +229,8 @@ it('gives the owner the slowness card with a verdict and reasons from a slow sca
     $markdown = str_replace('- Free disk: 12%', '- Free disk: 4%', macReportFixture())
         ."\n## Memory pressure\n\n```\nSystem-wide memory free percentage: 5%\n```\n";
 
-    $card = collect(ownerDetails($markdown))->firstWhere('id', 'slowness');
+    $details = ownerDetails($markdown);
+    $card = $details[array_search('slowness', array_column($details, 'id'), true)];
 
     expect($card['id'])->toBe('slowness')
         ->and($card['title'])->toBe('Why is it slow?')
@@ -274,9 +275,42 @@ it('never gives the storage breakdown to a share page', function () {
     }
 });
 
-it('gives the owner the startup items card from a real Mac report under the camelCase detailCards prop', function () {
-    $details = ownerDetails(macReportFixture());
+it('gives the owner the worth keeping card last, with a verdict and the rule of thumb note', function () {
+    $details = ownerDetails(macReportFixture(), ['macOS 10.14.6 is old and likely out of security support.']);
     $card = end($details);
+
+    expect($card['id'])->toBe('verdict')
+        ->and($card['title'])->toBe('Worth keeping?')
+        ->and($card['rows'][0])->toBe(['label' => 'Verdict', 'value' => 'Replace', 'tone' => 'bad'])
+        ->and(array_column($card['rows'], 'label'))->toBe(['Verdict', 'The operating system no longer gets security updates', 'About 11 years old', 'Good to know'])
+        ->and($card['list'])->toBeNull();
+});
+
+it('keeps the verdict off the share pages', function () {
+    $client = Client::factory()->withShareLink()->create();
+    $machine = Machine::factory()->for($client->user)->create(['client_id' => $client->id, 'device_type' => 'laptop']);
+    Report::factory()->for($machine)->create(['markdown' => macReportFixture(), 'flags' => ['macOS 10.14.6 is old and likely out of security support.']]);
+
+    foreach (["/c/{$client->share_token}", "/c/{$client->share_token}/machines/{$machine->id}"] as $path) {
+        $this->get($path)
+            ->assertOk()
+            ->assertInertia(function ($page): void {
+                $encoded = (string) json_encode($page->toArray()['props']);
+
+                expect($encoded)->not->toContain('Worth keeping')
+                    ->and($encoded)->not->toContain('rule of thumb')
+                    ->and($encoded)->not->toContain('no longer gets security updates');
+            });
+    }
+});
+
+function startupCard(string $markdown): array
+{
+    return collect(ownerDetails($markdown))->firstWhere('id', 'startup');
+}
+
+it('gives the owner the startup items card from a real Mac report under the camelCase detailCards prop', function () {
+    $card = startupCard(macReportFixture());
 
     expect($card['id'])->toBe('startup')
         ->and($card['title'])->toBe('Startup items')
@@ -285,8 +319,7 @@ it('gives the owner the startup items card from a real Mac report under the came
 });
 
 it('gives the owner the startup items card from a Windows report', function () {
-    $details = ownerDetails(windowsLaptopFixture());
-    $card = end($details);
+    $card = startupCard(windowsLaptopFixture());
 
     expect($card['id'])->toBe('startup')
         ->and(array_column($card['rows'], 'value', 'label'))->toBe(['Startup programs' => '3'])
