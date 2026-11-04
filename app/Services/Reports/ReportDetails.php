@@ -111,7 +111,7 @@ final readonly class ReportDetails
      */
     private function storage(ReportSections $sections, ?string $freeDisk): ?array
     {
-        $capacity = $this->macCapacity($sections->text('Disk usage')) ?? $this->windowsCapacity($sections->text('Storage (volumes and free space)'));
+        $capacity = $this->capacity($sections);
         $health = $this->macHealth($sections->text('Storage (boot volume)')) ?? $this->windowsHealth($sections->text('Storage (physical disks)'));
 
         return $this->card('storage', 'Storage', [
@@ -120,6 +120,14 @@ final readonly class ReportDetails
             isset($health['health']) ? $this->healthRow($health['health']) : null,
             $this->row('Drive type', $health['drive'] ?? null),
         ], $this->folders($sections->text('Performance: biggest folders in home')));
+    }
+
+    /**
+     * @return array{size: float, free: float}|null
+     */
+    public function capacity(ReportSections $sections): ?array
+    {
+        return $this->macCapacity($sections->text('Disk usage')) ?? $this->windowsCapacity($sections->text('Storage (volumes and free space)'));
     }
 
     /**

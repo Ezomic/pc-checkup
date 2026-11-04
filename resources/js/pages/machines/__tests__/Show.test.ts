@@ -6,8 +6,9 @@ import ClientSection from '@/components/machines/ClientSection.vue';
 import DetailCards from '@/components/machines/DetailCards.vue';
 import RemoteSupportSection from '@/components/machines/RemoteSupportSection.vue';
 import StaleNote from '@/components/machines/StaleNote.vue';
+import TrendsCard from '@/components/machines/TrendsCard.vue';
 import Show from '@/pages/machines/Show.vue';
-import type { LatestReport, ReportChanges } from '@/types';
+import type { LatestReport, ReportChanges, Trend } from '@/types';
 
 vi.mock('@inertiajs/vue3', () => ({
     Head: { template: '<span />' },
@@ -42,6 +43,7 @@ function report(overrides: Partial<LatestReport> = {}): LatestReport {
 function render(
     latest: LatestReport | null,
     changes: ReportChanges | null = null,
+    trends: Trend[] = [],
 ) {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-11-02T12:00:00Z'));
@@ -63,6 +65,7 @@ function render(
             report: latest,
             changes,
             detailCards: [],
+            trends,
             afterFix: null,
             benchmark: null,
             checklist: [],
@@ -76,6 +79,30 @@ function render(
 }
 
 describe('machines/Show', () => {
+    it('hands the trends prop to the trends card, outside the owner-only block', () => {
+        const trends: Trend[] = [
+            {
+                id: 'disk',
+                title: 'Free disk space',
+                points: [],
+                latest: '5 GB',
+                change: '-1 GB',
+                sentence: null,
+                tone: 'neutral',
+            },
+        ];
+        const wrapper = render(report(), null, trends);
+        const card = wrapper.findComponent(TrendsCard);
+
+        expect(card.props('trends')).toEqual(trends);
+        expect(
+            wrapper
+                .get('[data-test="owner-only"]')
+                .findComponent(TrendsCard)
+                .exists(),
+        ).toBe(false);
+    });
+
     it('adds the note and the hint beside the scanned time of a stale report', () => {
         const wrapper = render(report({ stale: true }));
 

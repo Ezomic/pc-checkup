@@ -18,6 +18,7 @@ use App\Services\Flags\FlagAdvisor;
 use App\Services\Reports\ReportDetails;
 use App\Services\Reports\ReportFacts;
 use App\Services\Reports\ReportFreshness;
+use App\Services\Reports\ReportTrends;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;
@@ -101,7 +102,7 @@ final class MachineController extends Controller
         ]);
     }
 
-    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts, BuildReportInsights $insights, ReportFreshness $freshness, CompareLatestReports $changes, ReportDetails $details): Response
+    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts, BuildReportInsights $insights, ReportFreshness $freshness, CompareLatestReports $changes, ReportDetails $details, ReportTrends $trends): Response
     {
         $this->authorize('view', $machine);
 
@@ -119,6 +120,7 @@ final class MachineController extends Controller
             ],
             'changes' => $changes->handle($machine),
             'detailCards' => $report === null ? [] : $details->cards($report->markdown, $report->flags, $machine->device_type),
+            'trends' => $trends->forMachine($machine),
             'client' => $machine->client?->only(['id', 'name']),
             'clients' => Client::query()->where('user_id', $machine->user_id)->orderBy('name')->orderBy('id')->get(['id', 'name']),
             'checklist' => $resolver->withEntries($machine),

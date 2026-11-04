@@ -8,4 +8,5 @@ export * from './pagination';
 export * from './portal';
 export * from './share';
 export * from './tool';
+export * from './trend';
 export * from './ui';
