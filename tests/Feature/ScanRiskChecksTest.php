@@ -253,6 +253,68 @@ describe('Mac administrator accounts check', function () {
     });
 });
 
+function fakeDf(?string $dataVolume, ?string $rootVolume): string
+{
+    $answer = fn (?string $row) => $row === null ? 'exit 1' : "cat <<'EOF'\nFilesystem 1024-blocks Used Available Capacity iused ifree %iused Mounted on\n{$row}\nEOF";
+
+    return fakeMacBin(['df' => 'case "$*" in *Data*) '.$answer($dataVolume)."\n;; *) ".$answer($rootVolume)."\n;; esac"]);
+}
+
+describe('Mac free disk check', function () {
+    $bootVolume = '/dev/disk1s1 118489088 101711872 14680064 88% 930917 9223372036853844890 0% /';
+
+    it('reads the root volume on a Mac without a separate data volume', function () use ($bootVolume) {
+        expect(runMacCheck(fakeDf(null, $bootVolume), 'pcc_free_disk_pct')['facts'])->toBe('12');
+    });
+
+    it('keeps reading the data volume on newer macOS', function () use ($bootVolume) {
+        $bin = fakeDf('/dev/disk3s5 971350180 612000000 322000000 66% 1000 9223372036853844890 0% /System/Volumes/Data', $bootVolume);
+
+        expect(runMacCheck($bin, 'pcc_free_disk_pct')['facts'])->toBe('33');
+    });
+
+    it('falls back to the root volume when the data volume row is unusable', function () use ($bootVolume) {
+        $bin = fakeDf('/dev/disk3s5 0 0 0 0% 0 0 0% /System/Volumes/Data', $bootVolume);
+
+        expect(runMacCheck($bin, 'pcc_free_disk_pct')['facts'])->toBe('12');
+    });
+
+    it('says nothing when neither volume can be read', function () {
+        expect(runMacCheck(fakeDf(null, null), 'pcc_free_disk_pct')['facts'])->toBe('');
+    });
+
+    it('says nothing when df prints a header only', function () {
+        $bin = fakeMacBin(['df' => 'echo "Filesystem 1024-blocks Used Available Capacity Mounted on"']);
+
+        expect(runMacCheck($bin, 'pcc_free_disk_pct')['facts'])->toBe('');
+    });
+
+    it('handles odd values', function (string $row, string $expected) {
+        expect(runMacCheck(fakeDf(null, $row), 'pcc_free_disk_pct')['facts'])->toBe($expected);
+    })->with([
+        'nothing available' => ['/dev/disk1s1 100 100 0 100% 1 1 0% /', '0'],
+        'everything available' => ['/dev/disk1s1 100 0 100 0% 1 1 0% /', '100'],
+        'rounds down' => ['/dev/disk1s1 1000 1 999 1% 1 1 0% /', '99'],
+        'a size of zero' => ['/dev/disk1s1 0 0 0 0% 1 1 0% /', ''],
+        'human readable units' => ['/dev/disk1s1 113Gi 97Gi 14Gi 88% 1 1 0% /', ''],
+        'terabytes' => ['/dev/disk1s1 2Ti 1Ti 1Ti 50% 1 1 0% /', ''],
+        'megabytes' => ['/dev/disk1s1 500Mi 400Mi 100Mi 80% 1 1 0% /', ''],
+        'bytes' => ['/dev/disk1s1 512Bi 512Bi 0Bi 100% 1 1 0% /', ''],
+        'decimals' => ['/dev/disk1s1 113.5 97.0 14.2 88% 1 1 0% /', ''],
+        'a missing column' => ['/dev/disk1s1 100', ''],
+    ]);
+
+    it('feeds the report header, the flag and the disk tile at 12 percent', function () use ($bootVolume) {
+        $free = runMacCheck(fakeDf(null, $bootVolume), 'pcc_free_disk_pct')['facts'];
+        $markdown = "# Mac checkup: Air\n\n- Free disk: {$free}%\n\n## Things to look at\n\n- Only about {$free}% of disk is free.\n";
+
+        $parsed = (new ReportParser)->parse($markdown);
+
+        expect((new ReportFacts)->from($markdown)['free_disk'])->toBe('12%')
+            ->and((new FlagAdvisor)->adviseAll($parsed->flags)[0]->headline)->toBe('The disk is almost full, only 12% left');
+    });
+});
+
 describe('days since helper', function () {
     it('counts whole days from a date', function () {
         $bin = fakeMacBin([]);
