@@ -741,6 +741,35 @@ if ($cs.PartOfDomain) { Add-Flag "Joined to the domain $(One-Line $cs.Domain) (m
 # ---------- Windows ----------
 if ($buildNumber -gt 0 -and $buildNumber -lt 22000) { Add-Flag "$osCaption reached end of support on 14 October 2025, so it only gets updates with a paid extension." }
 
+# Last day of security updates per Microsoft's Windows 11 release information, checked 2026-11-04. Add a row when a new version ships.
+# HomePro covers Home, Pro and Pro Education; Enterprise covers Enterprise, Education and IoT Enterprise.
+$Windows11Support = @(
+    [pscustomobject]@{ Build = 22000; Version = '21H2'; HomePro = '2023-10-10'; Enterprise = '2024-10-08' }
+    [pscustomobject]@{ Build = 22621; Version = '22H2'; HomePro = '2024-10-08'; Enterprise = '2025-10-14' }
+    [pscustomobject]@{ Build = 22631; Version = '23H2'; HomePro = '2025-11-11'; Enterprise = '2026-11-10' }
+    [pscustomobject]@{ Build = 26100; Version = '24H2'; HomePro = '2026-10-13'; Enterprise = '2027-10-12' }
+    [pscustomobject]@{ Build = 26200; Version = '25H2'; HomePro = '2027-10-12'; Enterprise = '2028-10-10' }
+    [pscustomobject]@{ Build = 28000; Version = '26H1'; HomePro = '2028-03-14'; Enterprise = '2029-03-13' }
+    [pscustomobject]@{ Build = 26300; Version = '26H2'; HomePro = '2028-10-10'; Enterprise = '2029-10-09' }
+)
+
+function Get-Windows11SupportFlag([string]$Build, [string]$Caption, [string]$EditionId, [datetime]$Today) {
+    if ($Build -notmatch '^\s*(\d{1,9})(\.\d+)?\s*$') { return $null }
+    $number = [int]$Matches[1]
+    $row = $Windows11Support | Where-Object { $_.Build -eq $number } | Select-Object -First 1
+    if (-not $row) { return $null }
+    if ($Caption -match 'Windows Server|LTSC' -or $EditionId -match '^(Server(?!Rdsh)|EnterpriseSN?$|IoTEnterpriseSN?$)') { return $null }
+    $longTerm = $EditionId -match '^(Enterprise|Education|IoTEnterprise|ServerRdsh)N?$'
+    $endDate = if ($longTerm) { $row.Enterprise } else { $row.HomePro }
+    $end = [datetime]::ParseExact($endDate, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+    if ($Today.Date -le $end) { return $null }
+    return "Windows 11 $($row.Version) reached end of support on $($end.ToString('d MMMM yyyy', [Globalization.CultureInfo]::InvariantCulture)), so it no longer gets security updates. Update to the newest version of Windows 11."
+}
+
+$editionId = (Try-Run { Get-RegValue $currentVersion 'EditionID' }).Value
+$windows11Flag = (Try-Run { Get-Windows11SupportFlag -Build "$($os.BuildNumber)" -Caption $osCaption -EditionId $editionId -Today (Get-Date) }).Value
+if ($windows11Flag) { Add-Flag $windows11Flag }
+
 $updatesKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update'
 $rebootReasons = New-Object System.Collections.Generic.List[string]
 if (Test-Path -LiteralPath "$updatesKey\RebootRequired") { $rebootReasons.Add('Windows Update is waiting for a restart') }
