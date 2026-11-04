@@ -10,6 +10,7 @@ use App\Models\Report;
 use App\Models\User;
 use App\Services\Reports\ParsedReport;
 use App\Services\Reports\ReportParser;
+use App\Services\Reports\ReportRedactor;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -23,6 +24,10 @@ final class ImportReport
         }
 
         $markdown = $this->normalise($markdown);
+        // The checksum is of the text as the scanner wrote it, so a re-upload of the same scan is
+        // still a duplicate and a "before checksum" taken from an original still matches.
+        $checksum = hash('sha256', $markdown);
+        $markdown = (new ReportRedactor)->redact($markdown);
         $parsed = (new ReportParser)->parse($markdown);
         $identity = $parsed->identityKey();
 
@@ -33,10 +38,10 @@ final class ImportReport
         }
 
         try {
-            return DB::transaction(fn (): Report => $this->store($user, $markdown, $parsed, $identity));
+            return DB::transaction(fn (): Report => $this->store($user, $markdown, $checksum, $parsed, $identity));
         } catch (UniqueConstraintViolationException) {
             // A double submit raced us to the same machine or report, so the retry finds it.
-            return DB::transaction(fn (): Report => $this->store($user, $markdown, $parsed, $identity));
+            return DB::transaction(fn (): Report => $this->store($user, $markdown, $checksum, $parsed, $identity));
         }
     }
 
@@ -49,10 +54,9 @@ final class ImportReport
         return trim(str_replace(["\r\n", "\r"], "\n", $markdown))."\n";
     }
 
-    private function store(User $user, string $markdown, ParsedReport $parsed, string $identity): Report
+    private function store(User $user, string $markdown, string $checksum, ParsedReport $parsed, string $identity): Report
     {
         $machine = $user->machines()->withTrashed()->where('identity_key', $identity)->first();
-        $checksum = hash('sha256', $markdown);
         $existing = $machine?->reports()->withTrashed()->where('checksum', $checksum)->first();
 
         // Re-importing a report we already hold must not roll the machine back to what an

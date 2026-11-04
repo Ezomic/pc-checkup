@@ -727,6 +727,36 @@ pcc_admin_check() {
   fi
 }
 
+# Firmware settings are read from an allowlist of key names. nvram also holds the iCloud Find My
+# sign-in token and other binary data, which must never reach a report, so nothing else is printed.
+pcc_firmware_facts() {
+  nvram -p 2>/dev/null | awk -F'\t' '
+    $1 ~ /^(boot-args|auto-boot|prev-lang:kbd)$/ && tolower($2) !~ /bplist00|%[0-9a-f][0-9a-f]%[0-9a-f][0-9a-f]%[0-9a-f][0-9a-f]/ { print $1 ": " substr($2, 1, 200) }'
+}
+
+# Find My Mac is on when the key exists. Only the key name is tested, the value is never printed.
+pcc_findmy_status() {
+  local listing
+  listing=$(nvram -p 2>/dev/null) || listing=""
+  if [ -z "$listing" ]; then
+    echo "Find My Mac: could not check"
+  elif printf '%s\n' "$listing" | awk -F'\t' '$1 == "fmm-mobileme-token-FMM" { found = 1 } END { exit !found }'; then
+    echo "Find My Mac: on"
+  else
+    echo "Find My Mac: off"
+  fi
+}
+
+pcc_firmware_report() {
+  system_profiler SPiBridgeDataType 2>/dev/null | head -30
+  pcc_firmware_facts
+}
+
+pcc_findmy_report() {
+  system_profiler SPHardwareDataType | grep -i 'activation lock'
+  pcc_findmy_status
+}
+
 # Sourcing this file (for tests) stops here instead of running the checkup.
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
 
@@ -892,8 +922,8 @@ section "Cameras and audio" system_profiler SPCameraDataType SPAudioDataType
 section "Printers" system_profiler SPPrintersDataType
 
 sh_section "Security: FileVault, SIP, Gatekeeper, firewall" "fdesetup status; csrutil status; spctl --status; /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate; /usr/libexec/ApplicationFirewall/socketfilterfw --getstealthmode"
-sh_section "Security: secure boot and firmware" "system_profiler SPiBridgeDataType 2>/dev/null | head -30; nvram -p 2>/dev/null | grep -iE 'boot-args|efi-boot|fmm|prev-lang' "
-sh_section "Activation Lock and Find My" "system_profiler SPHardwareDataType | grep -i 'activation lock'; nvram -p 2>/dev/null | grep -i fmm"
+section "Security: secure boot and firmware" pcc_firmware_report
+section "Activation Lock and Find My" pcc_findmy_report
 sh_section "MDM and enrolment" "profiles status -type enrollment; echo; profiles list 2>&1 | head -40"
 sh_section "Firmware password (Intel only)" "firmwarepasswd -check 2>&1 | head -5"
 sh_section "Sharing and remote access" "systemsetup -getremotelogin 2>&1; systemsetup -getremoteappleevents 2>&1; launchctl print-disabled system 2>/dev/null | grep -iE 'ssh|screensharing|remotemanagement'"
