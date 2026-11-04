@@ -9,7 +9,7 @@
 # default). Everything it does is logged in the report ("Fix log") and in a text file next to it.
 #
 # The storage step measures folder sizes and groups the user folder by kind of file, for at most
-# 90 seconds. It stores sizes and counts only, never a file name, follows no links and leaves
+# 150 seconds. It stores sizes and counts only, never a file name, follows no links and leaves
 # other disks alone. If the time runs out the report says the numbers are partial.
 #
 # --benchmark also runs short CPU, memory, disk and network speed tests (a minute or so, with a
@@ -781,7 +781,9 @@ pcc_findmy_report() {
   pcc_findmy_status
 }
 
-pcc_storage_name() { printf '%s' "$1" | tr -c 'A-Za-z0-9 ._()+-' '_' | cut -c1-40; }
+PCC_STORAGE_HOME_NAMES="Downloads|Documents|Desktop|Pictures|Movies|Music|Library|Applications"
+PCC_STORAGE_LIBRARY_NAMES="Application Support|Caches|Containers|Group Containers|Mail|Messages|Mobile Documents|Developer|Logs|Safari"
+PCC_STORAGE_ROOT_NAMES="Users|Applications|Library|System|private|usr|opt|var|bin|sbin"
 
 pcc_storage_stop() {
   local slice=$(($2 * $3 / 100)) stop
@@ -791,45 +793,164 @@ pcc_storage_stop() {
   echo "$stop"
 }
 
-# Prints the disk usage of directory $1 in KB, nothing when it is unreadable or $2 seconds run out.
-# du never follows symbolic links, and -x keeps it on the one disk.
+# Prints "KB<TAB>path" for every directory down to depth $1 under $3, in one pass, and appends the
+# exit code to file $4: 142 means the $2 seconds ran out. du never follows symbolic links, and -x
+# keeps it on the one disk. A du that the clock stopped may print nothing at all.
 pcc_storage_du() {
-  perl -e 'alarm shift; exec @ARGV' "$2" du -skx "$1" 2>/dev/null | awk 'NR == 1 && $1 ~ /^[0-9]+$/ { print $1 }'
+  local depth=$1 secs=$2 dir=$3 rc_file=$4
+  if [ "$secs" -lt 1 ]; then echo 142 >> "$rc_file"; return 0; fi
+  perl -e 'alarm shift; exec @ARGV' "$secs" du -x -k -d "$depth" "$dir" 2>/dev/null
+  echo $? >> "$rc_file"
 }
 
-pcc_storage_folders() {
-  local home=$1 apps=$2 stop=$3 name dir kb
-  for name in Downloads Documents Desktop Pictures Movies Music Applications Library; do
-    dir=$home/$name
-    if [ "$name" = Applications ]; then dir=$apps; fi
-    if [ ! -d "$dir" ] || [ -L "$dir" ]; then continue; fi
-    if [ "$SECONDS" -ge "$stop" ]; then echo "capped|1"; return 0; fi
-    kb=$(pcc_storage_du "$dir" $((stop - SECONDS)))
-    if [ -n "$kb" ]; then
-      printf 'folder|%s|%s\n' "$name" "$kb"
-    elif [ "$SECONDS" -ge "$stop" ]; then
-      echo "capped|1"
-      return 0
-    fi
+# du buffers what it prints, so when the clock stops it the whole pass can come back empty. The
+# folders a stopped pass did not report are then measured one at a time with du -s, each with an
+# equal share of the time that is left. Reads directory names and prints "KB<TAB>path" lines.
+pcc_storage_each() {
+  local stop=$1 rc_file=$2 dir left
+  shift 2
+  left=$#
+  for dir in "$@"; do
+    pcc_storage_du 0 $(((stop - SECONDS + left - 1) / left)) "$dir" "$rc_file"
+    left=$((left - 1))
   done
 }
 
-# Mounted volumes and pseudo file systems are left out, so only this disk is measured.
+# Turns "KB<TAB>path" lines into root|Name|KB, one per top level folder, the biggest number winning.
+# The data volume (macOS 10.15 and later) is firmlinked into the system volume, so for the folders
+# that are whole firmlinks only its number counts. Mounted volumes and pseudo file systems are left out.
+pcc_storage_rootrows() {
+  LC_ALL=C awk -F '\t' -v root="${1%/}" -v data="${2%/}" -v hasdata="$3" -v whole="|$4" '
+    BEGIN { split("Volumes dev net home cores Network", left, " "); for (i in left) skip[left[i]] = 1 }
+    $1 ~ /^[0-9]+$/ {
+      path = substr($0, length($1) + 2)
+      fromdata = 0
+      if (hasdata == 1 && index(path, data "/") == 1) {
+        rel = substr(path, length(data) + 2)
+        fromdata = 1
+      } else if (index(path, root "/") == 1) {
+        rel = substr(path, length(root) + 2)
+      } else next
+      if (rel == "" || index(rel, "/") > 0 || rel in skip) next
+      if (!fromdata && hasdata == 1 && index(whole, "|" rel "|") > 0) next
+      if (!(rel in best) || $1 + 0 > best[rel] + 0) best[rel] = $1
+    }
+    END {
+      for (name in best) {
+        clean = name
+        gsub(/[^A-Za-z0-9 ._()+-]/, "_", clean)
+        print "root|" substr(clean, 1, 40) "|" best[name]
+      }
+    }'
+}
+
+# The top of the system volume in one pass, then one folder at a time for the well-known ones the
+# pass did not report. Prints root|Name|KB for every folder measured.
 pcc_storage_roots() {
-  local root=$1 stop=$2 dir name kb
-  for dir in "$root"/*; do
+  local root=$1 data=$2 stop=$3 rc_file=$4 firm=${PCC_STORAGE_FIRMLINKS:-/usr/share/firmlinks}
+  local whole="" hasdata=0 pass_rc pass_end rows more="" name dir old_ifs=$IFS
+  if [ -d "$data" ]; then
+    hasdata=1
+    whole=$(awk -F '\t' '$1 ~ /^\/[^\/]+$/ { print substr($1, 2) }' "$firm" 2>/dev/null | tr '\n' '|')
+  fi
+  pass_rc=$(mktemp)
+  pass_end=$((SECONDS + ((stop - SECONDS) * 60 + 99) / 100))
+  rows=$({
+    if [ "$hasdata" = 1 ]; then pcc_storage_du 1 $((((pass_end - SECONDS) * 65 + 99) / 100)) "$data" "$pass_rc"; fi
+    pcc_storage_du 1 $((pass_end - SECONDS)) "$root" "$pass_rc"
+  } | pcc_storage_rootrows "$root" "$data" "$hasdata" "$whole")
+  if grep -q '^142$' "$pass_rc"; then
+    set --
+    IFS='|'
+    for name in $PCC_STORAGE_ROOT_NAMES; do
+      dir=""
+      if printf '%s\n' "$rows" | grep -q "^root|$name|"; then continue; fi
+      if [ "$hasdata" = 1 ] && [ -d "$data/$name" ] && [ ! -L "$data/$name" ] && case "|$whole" in *"|$name|"*) true ;; *) false ;; esac; then
+        dir=${data%/}/$name
+      elif [ -d "${root%/}/$name" ] && [ ! -L "${root%/}/$name" ]; then
+        dir=${root%/}/$name
+      fi
+      if [ -n "$dir" ]; then set -- "$@" "$dir"; fi
+    done
+    IFS=$old_ifs
+    more=$(pcc_storage_each "$stop" "$pass_rc" "$@" | pcc_storage_rootrows "$root" "$data" "$hasdata" "$whole")
+  fi
+  cat "$pass_rc" >> "$rc_file"
+  rm -f "$pass_rc"
+  printf '%s\n%s\n' "$rows" "$more"
+}
+
+# Prints missing|root/Name for the well-known top level folders that exist but were not measured.
+pcc_storage_missing_roots() {
+  local root=$1 data=$2 measured=$3 dir name
+  for dir in "${root%/}"/* "${data%/}"/*; do
     if [ ! -d "$dir" ] || [ -L "$dir" ]; then continue; fi
     name=${dir##*/}
-    case $name in Volumes | dev | net | home | cores | Network) continue ;; esac
-    if [ "$SECONDS" -ge "$stop" ]; then echo "capped|1"; return 0; fi
-    kb=$(pcc_storage_du "$dir" $((stop - SECONDS)))
-    if [ -n "$kb" ]; then
-      printf 'root|%s|%s\n' "$(pcc_storage_name "$name")" "$kb"
-    elif [ "$SECONDS" -ge "$stop" ]; then
-      echo "capped|1"
-      return 0
+    case "|$PCC_STORAGE_ROOT_NAMES|" in *"|$name|"*) ;; *) continue ;; esac
+    printf '%s\n' "$measured" | grep -q "^root|$name|" || echo "missing|root/$name"
+  done | sort -u
+}
+
+# Turns "KB<TAB>path" lines inside the user folder into home|KB, folder|Name|KB and library|Name|KB.
+# Only the well-known names are kept; every other name is dropped in memory and never printed.
+pcc_storage_homerows() {
+  LC_ALL=C awk -F '\t' -v home="${1%/}" -v names="$PCC_STORAGE_HOME_NAMES" -v library="$PCC_STORAGE_LIBRARY_NAMES" '
+    BEGIN {
+      n = split(names, list, "|"); for (i = 1; i <= n; i++) known[list[i]] = 1
+      n = split(library, list, "|"); for (i = 1; i <= n; i++) inside[list[i]] = 1
+    }
+    $1 ~ /^[0-9]+$/ {
+      path = substr($0, length($1) + 2)
+      if (path == home) { print "home|" $1; next }
+      if (index(path, home "/") != 1) next
+      parts = split(substr(path, length(home) + 2), seg, "/")
+      if (parts == 1 && seg[1] in known) print "folder|" seg[1] "|" $1
+      else if (parts == 2 && seg[1] == "Library" && seg[2] in inside) print "library|" seg[2] "|" $1
+    }'
+}
+
+# The user folder in one pass, two levels deep: its total, the well-known folders in it and the
+# well-known folders inside Library. When the pass is stopped, what it did not report is measured
+# one folder at a time, the total last.
+pcc_storage_home() {
+  local home=$1 stop=$2 rc_file=$3 pass_rc pass_end rows more="" name old_ifs=$IFS
+  [ -d "$home" ] || return 0
+  pass_rc=$(mktemp)
+  pass_end=$((SECONDS + ((stop - SECONDS) * 60 + 99) / 100))
+  rows=$(pcc_storage_du 2 $((pass_end - SECONDS)) "$home" "$pass_rc" | pcc_storage_homerows "$home")
+  if grep -q '^142$' "$pass_rc"; then
+    set --
+    IFS='|'
+    for name in $PCC_STORAGE_HOME_NAMES; do
+      if [ -d "${home%/}/$name" ] && [ ! -L "${home%/}/$name" ] && ! printf '%s\n' "$rows" | grep -q "^folder|$name|"; then set -- "$@" "${home%/}/$name"; fi
+    done
+    if [ -d "${home%/}/Library" ] && [ ! -L "${home%/}/Library" ]; then
+      for name in $PCC_STORAGE_LIBRARY_NAMES; do
+        if [ -d "${home%/}/Library/$name" ] && [ ! -L "${home%/}/Library/$name" ] && ! printf '%s\n' "$rows" | grep -q "^library|$name|"; then set -- "$@" "${home%/}/Library/$name"; fi
+      done
     fi
+    IFS=$old_ifs
+    if ! printf '%s\n' "$rows" | grep -q '^home|'; then set -- "$@" "${home%/}"; fi
+    more=$(pcc_storage_each "$stop" "$pass_rc" "$@" | pcc_storage_homerows "$home")
+  fi
+  cat "$pass_rc" >> "$rc_file"
+  rm -f "$pass_rc"
+  printf '%s\n%s\n' "$rows" "$more"
+}
+
+# Prints missing|home/Name and missing|library/Name for the well-known folders that exist but were not measured.
+pcc_storage_missing_home() {
+  local home=$1 measured=$2 name
+  printf '%s\n' "$PCC_STORAGE_HOME_NAMES" | tr '|' '\n' | while IFS= read -r name; do
+    if [ ! -d "$home/$name" ] || [ -L "$home/$name" ]; then continue; fi
+    printf '%s\n' "$measured" | grep -q "^folder|$name|" || echo "missing|home/$name"
   done
+  if [ -d "$home/Library" ] && [ ! -L "$home/Library" ]; then
+    printf '%s\n' "$PCC_STORAGE_LIBRARY_NAMES" | tr '|' '\n' | while IFS= read -r name; do
+      if [ ! -d "$home/Library/$name" ] || [ -L "$home/Library/$name" ]; then continue; fi
+      printf '%s\n' "$measured" | grep -q "^library|$name|" || echo "missing|library/$name"
+    done
+  fi
 }
 
 # File names go through awk in memory only. What comes out is a total and a count per kind of file
@@ -867,7 +988,10 @@ pcc_storage_types() {
       kind = (ext != "" && ext in group) ? group[ext] : "Other"
       kindKb[kind] += kb
       kindN[kind]++
-      if (ext ~ /^[a-z0-9]+$/ && length(ext) <= 10) {
+      if (ext == "") {
+        bareKb += kb
+        bareN++
+      } else if (ext ~ /^[a-z0-9]+$/ && length(ext) <= 10) {
         extKb[ext] += kb
         extN[ext]++
       }
@@ -876,7 +1000,8 @@ pcc_storage_types() {
       for (i = 1; i <= 7; i++) {
         if (kindN[order[i]] > 0) print "type|" order[i] "|" kindKb[order[i]] "|" kindN[order[i]]
       }
-      for (round = 1; round <= 8; round++) {
+      if (bareN > 0) print "noext|" bareKb "|" bareN
+      for (round = 1; round <= 24; round++) {
         best = ""
         for (e in extKb) {
           if (e in shown) continue
@@ -892,28 +1017,36 @@ pcc_storage_types() {
   if [ "$rc" = 142 ] || [ "$SECONDS" -ge "$stop" ]; then echo "capped|1"; fi
 }
 
-# Measures disk usage once, read only, and never longer than the cap (90 seconds by default).
-# Progress goes to the screen and the report text goes to stdout.
+# Measures disk usage once, read only, and never longer than the cap (150 seconds by default).
+# The biggest buckets come first, each phase gets its share of the clock and hands back what it
+# did not use. Progress goes to the screen and the report text goes to stdout.
 pcc_storage_report() {
-  local home=${PCC_STORAGE_HOME:-$HOME} root=${PCC_STORAGE_ROOT:-/} apps=${PCC_STORAGE_APPS:-/Applications}
-  local cap=${PCC_STORAGE_CAP:-90} start=$SECONDS folders roots types scan="complete"
-  case $cap in '' | *[!0-9]* | 0*) cap=90 ;; esac
-  echo "Measuring storage (folders, then file types), stopping after $cap seconds at the latest..." >&2
-  folders=$(pcc_storage_folders "$home" "$apps" "$(pcc_storage_stop "$start" "$cap" 25)")
+  local home=${PCC_STORAGE_HOME:-$HOME} root=${PCC_STORAGE_ROOT:-/} data=${PCC_STORAGE_DATA:-/System/Volumes/Data}
+  local cap=${PCC_STORAGE_CAP:-150} start=$SECONDS roots homes types rc_file scan="complete"
+  case $cap in '' | *[!0-9]* | 0*) cap=150 ;; esac
+  rc_file=$(mktemp)
+  echo "Measuring storage (the drive, then your user folder, then file types), stopping after $cap seconds at the latest..." >&2
   echo "  Measuring the biggest folders on the drive..." >&2
-  roots=$(pcc_storage_roots "$root" "$(pcc_storage_stop "$start" "$cap" 40)")
+  roots=$(pcc_storage_roots "$root" "$data" "$(pcc_storage_stop "$start" "$cap" 35)" "$rc_file" 2>/dev/null)
+  echo "  Measuring your user folder..." >&2
+  homes=$(pcc_storage_home "$home" "$(pcc_storage_stop "$start" "$cap" 30)" "$rc_file" 2>/dev/null)
   echo "  Measuring kinds of files in your user folder..." >&2
-  types=$(pcc_storage_types "$home" "$(pcc_storage_stop "$start" "$cap" 35)")
-  if printf '%s\n%s\n%s\n' "$folders" "$roots" "$types" | grep -q '^capped|'; then
+  types=$(pcc_storage_types "$home" $((start + cap)) 2>/dev/null)
+  if grep -q '^142$' "$rc_file" || printf '%s\n' "$types" | grep -q '^capped|'; then
     scan="partial (time limit of $cap seconds reached)"
     echo "  The time limit was reached, so the storage numbers are partial." >&2
   fi
+  rm -f "$rc_file"
   echo "scan: $scan"
   echo "seconds: $((SECONDS - start))"
   echo "limit: $cap"
-  printf '%s\n' "$folders" | grep '^folder|'
-  printf '%s\n' "$roots" | grep '^root|' | sort -t '|' -k 3,3nr -k 2,2 | head -n 5
-  printf '%s\n' "$types" | grep -E '^(type|ext)\|'
+  echo "format: 2"
+  printf '%s\n' "$roots" | grep '^root|' | sort -t '|' -k 3,3nr -k 2,2 | head -n 6
+  if [ -d "$root" ]; then printf '%s\n' "$roots" | awk -F '|' '$1 == "root" && $3 ~ /^[0-9]+$/ { total += $3 } END { print "roots_total|" total + 0 }'; fi
+  pcc_storage_missing_roots "$root" "$data" "$roots"
+  printf '%s\n' "$homes" | grep -E '^(home|folder|library)\|'
+  pcc_storage_missing_home "$home" "$homes"
+  printf '%s\n' "$types" | grep -E '^(type|noext|ext)\|'
   return 0
 }
 

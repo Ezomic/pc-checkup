@@ -36,6 +36,14 @@ function isLong(row: DetailRow): boolean {
         >
             <h2 class="text-lg font-semibold">{{ card.title }}</h2>
 
+            <p
+                v-if="card.summary"
+                class="text-sm font-medium break-words"
+                data-test="detail-summary"
+            >
+                {{ card.summary }}
+            </p>
+
             <dl
                 v-if="card.rows.length > 0"
                 class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm"

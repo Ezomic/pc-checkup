@@ -11,7 +11,9 @@ use Illuminate\Support\Str;
 /**
  * @phpstan-type Row array{label: string, value: string, tone: 'good'|'bad'|'neutral'}
  * @phpstan-type Bar array{label: string, value: string, detail: string|null, share: int}
- * @phpstan-type Card array{id: string, title: string, rows: list<Row>, list: array{title: string, items: list<Row>}|null, bars?: list<array{title: string, items: list<Bar>}>, notes?: list<string>}
+ * @phpstan-type Card array{id: string, title: string, rows: list<Row>, list: array{title: string, items: list<Row>}|null, summary?: string|null, bars?: list<array{title: string, items: list<Bar>}>, notes?: list<string>}
+ *
+ * @phpstan-import-type Breakdown from ReportStorage
  */
 final readonly class ReportDetails
 {
@@ -132,13 +134,15 @@ final readonly class ReportDetails
     {
         $capacity = $this->capacity($sections);
         $health = $this->macHealth($sections->text('Storage (boot volume)')) ?? $this->windowsHealth($sections->text('Storage (physical disks)'));
+        $breakdown = (new ReportStorage)->read($sections);
+        $explained = $breakdown !== null && $breakdown['version'] >= 2 && ($breakdown['home'] !== null || $breakdown['folders'] !== []);
 
         return $this->card('storage', 'Storage', [
             $this->row('Free', $this->freeText($capacity, $this->capture('/^(\d{1,3})%$/', $freeDisk))),
             $capacity === null ? null : $this->row('Used', $this->format(max($capacity['size'] - $capacity['free'], 0.0)).' of '.$this->format($capacity['size'])),
             isset($health['health']) ? $this->healthRow($health['health']) : null,
             $this->row('Drive type', $health['drive'] ?? null),
-        ], $this->folders($sections->text('Performance: biggest folders in home')));
+        ], $explained ? null : $this->folders($sections->text('Performance: biggest folders in home')));
     }
 
     /**
@@ -160,12 +164,16 @@ final readonly class ReportDetails
             return null;
         }
 
-        $capacity = $this->macCapacity($sections->text('Disk usage')) ?? $this->windowsCapacity($sections->text('Storage (volumes and free space)'));
-        $used = $capacity === null ? 0.0 : $capacity['size'] - $capacity['free'];
+        $capacity = $this->capacity($sections);
+        $used = $capacity === null ? 0.0 : max($capacity['size'] - $capacity['free'], 0.0);
         $counted = array_sum(array_column($read['categories'], 'bytes'));
+        $notMeasured = $this->notMeasured($read, $used);
+        $drive = $notMeasured === null ? $read['roots'] : [...$read['roots'], ['name' => 'Not measured', 'bytes' => $notMeasured, 'count' => null]];
+        $mine = $read['home'] === null ? $read['folders'] : [['name' => 'Everything in your user folder', 'bytes' => $read['home'], 'count' => null], ...$read['folders']];
         $groups = [
-            ['Your folders', $read['folders'], $used, 'used space', false],
-            ['Biggest folders on the drive', $read['roots'], $used, 'used space', false],
+            ['Biggest folders on the drive', $drive, $used, 'used space', false],
+            ['Your folders', $mine, $used, 'used space', false],
+            ['Library and AppData', $read['library'], $used, 'used space', false],
             ['Kinds of files in your user folder', $read['categories'], $counted, 'what was counted', true],
             ['Biggest file endings', $read['extensions'], $counted, 'what was counted', true],
         ];
@@ -180,13 +188,65 @@ final readonly class ReportDetails
         return [
             'id' => 'storage-breakdown',
             'title' => 'Storage breakdown',
+            'summary' => $this->summary($read, $used, $notMeasured),
             'rows' => [],
             'list' => null,
             'bars' => $bars,
-            'notes' => [
-                ...($read['partial'] ? ['The scan stopped at its time limit, so these sizes are a minimum and the real numbers may be bigger.'] : []),
-                ...($read['categories'] !== [] || $read['extensions'] !== [] ? ['Kinds of files count your own user folder only. Only sizes and counts were recorded, no file names.'] : []),
-            ],
+            'notes' => $this->breakdownNotes($read, $notMeasured !== null),
+        ];
+    }
+
+    /**
+     * @param  Breakdown  $read
+     */
+    private function notMeasured(array $read, float $used): ?float
+    {
+        if ($read['version'] < 2 || $read['rootsTotal'] === null || $used <= 0) {
+            return null;
+        }
+
+        $rest = $used - $read['rootsTotal'];
+
+        return $rest > 0 ? $rest : null;
+    }
+
+    /**
+     * @param  Breakdown  $read
+     */
+    private function summary(array $read, float $used, ?float $notMeasured): ?string
+    {
+        $top = array_slice($read['roots'], 0, 3);
+        $sentence = null;
+
+        if ($top !== []) {
+            $names = array_map(fn (array $item): string => $item['name'].' ('.$this->format($item['bytes']).')', $top);
+            $lead = array_sum(array_column($top, 'bytes')) * 2 >= $used && $used > 0 ? 'Most of the space is used by' : 'The biggest folders found are';
+            $sentence = "{$lead} ".(count($names) > 1 ? implode(', ', array_slice($names, 0, -1)).' and '.end($names) : $names[0]).'.';
+        } elseif ($read['home'] !== null) {
+            $sentence = 'Your user folder uses '.$this->format($read['home']).'.';
+        }
+
+        if ($notMeasured !== null) {
+            $sentence = trim("{$sentence} ".$this->format($notMeasured).' was not measured.');
+        }
+
+        return $sentence;
+    }
+
+    /**
+     * @param  Breakdown  $read
+     * @return list<string>
+     */
+    private function breakdownNotes(array $read, bool $hasNotMeasured): array
+    {
+        $both = in_array('Applications (in your user folder)', array_column($read['folders'], 'name'), true) && in_array('Applications', array_column($read['roots'], 'name'), true);
+
+        return [
+            ...($read['partial'] ? ['The scan stopped at its time limit, so these sizes are a minimum and the real numbers may be bigger.'] : []),
+            ...($read['missing'] === [] ? [] : [($read['partial'] ? 'Not measured before the time ran out: ' : 'Could not be read: ').implode(', ', $read['missing']).'.']),
+            ...($hasNotMeasured ? ['Not measured is used space that the folders above do not add up to, such as hidden system files, snapshots and anything the scan could not read.'] : []),
+            ...($both ? ['Applications in your user folder is a separate folder from the Applications folder on the drive.'] : []),
+            ...($read['categories'] !== [] || $read['extensions'] !== [] ? ['Kinds of files count your own user folder only. Only sizes and counts were recorded, no file names.'] : []),
         ];
     }
 
@@ -194,19 +254,20 @@ final readonly class ReportDetails
      * @param  list<array{name: string, bytes: float, count: int|null}>  $items
      * @return list<Bar>
      */
-    private function bars(array $items, float $whole, string $of, bool $withCount, bool $dotted): array
+    private function bars(array $items, float $whole, string $of, bool $withCount, bool $endings): array
     {
         $biggest = max(1.0, ...array_column($items, 'bytes'));
 
-        return array_map(function (array $item) use ($biggest, $whole, $of, $withCount, $dotted): array {
+        return array_map(function (array $item) use ($biggest, $whole, $of, $withCount, $endings): array {
             $percent = $whole > 0 && $item['bytes'] > 0 ? $this->percentText(min($item['bytes'] / $whole * 100, 100.0), $of) : null;
             $files = $withCount && $item['count'] !== null ? number_format($item['count']).' '.Str::plural('file', $item['count']) : null;
             $share = $item['bytes'] > 0 ? max((int) round($item['bytes'] / $biggest * 100), self::MINIMUM_SHARE) : 0;
+            $other = $withCount && ! $endings && $item['name'] === 'Other' ? 'mostly system and app files' : null;
 
             return [
-                'label' => ($dotted ? '.' : '').$item['name'],
+                'label' => ($endings && ctype_alnum($item['name']) ? '.' : '').$item['name'],
                 'value' => $this->format($item['bytes']),
-                'detail' => $files === null && $percent === null ? null : implode(', ', array_filter([$files, $percent])),
+                'detail' => implode(', ', array_filter([$files, $percent, $other])) ?: null,
                 'share' => $share,
             ];
         }, $items);

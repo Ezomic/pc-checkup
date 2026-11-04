@@ -1,0 +1,27 @@
+scan: partial (time limit of 90 seconds reached)
+seconds: 90
+limit: 90
+folder|Downloads|248540
+folder|Documents|12
+folder|Desktop|2168068
+folder|Pictures|347540
+folder|Movies|8
+folder|Music|21068
+root|Applications|13333212
+root|System|7232700
+root|Library|4357068
+type|Photos|366288|7015
+type|Videos|209176|6
+type|Music|2700|23
+type|Documents|169780|171
+type|Archives|460|1
+type|Apps|256|1
+type|Other|7922992|31019
+ext|file|2695188|765
+ext|package|919100|463
+ext|ver1|779396|155
+ext|png|276636|2199
+ext|db|171036|16
+ext|avi|159760|3
+ext|tbz|126704|3
+ext|pptx|114520|1
