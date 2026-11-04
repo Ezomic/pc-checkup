@@ -609,6 +609,16 @@ pcc_tm_last_date() {
   printf '%s' "$when"
 }
 
+# The data volume only exists from macOS 10.15; before that the boot volume is "/".
+pcc_free_disk_pct() {
+  local volume pct
+  for volume in /System/Volumes/Data /; do
+    pct=$(df -k "$volume" 2>/dev/null | awk 'NR==2 && $2 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/ && $2 > 0 {printf "%d", ($4/$2)*100}')
+    if [ -n "$pct" ]; then printf '%s' "$pct"; return 0; fi
+  done
+  return 0
+}
+
 pcc_backup_check() {
   local info last days
   if ! info=$(tmutil destinationinfo 2>&1); then
@@ -810,7 +820,7 @@ if [ -n "${DISKSMART:-}" ] && [ "$DISKSMART" != "Verified" ] && [ "$DISKSMART" !
   flag "Disk SMART status is '$DISKSMART'."
 fi
 
-FREE_PCT=$(df -k /System/Volumes/Data 2>/dev/null | awk 'NR==2 {printf "%d", ($4/$2)*100}')
+FREE_PCT=$(pcc_free_disk_pct)
 [ -n "${FREE_PCT:-}" ] && [ "$FREE_PCT" -lt 15 ] 2>/dev/null && flag "Only about ${FREE_PCT}% of disk is free."
 
 PANICS=$(ls /Library/Logs/DiagnosticReports/*.panic 2>/dev/null | wc -l | tr -d ' ')
