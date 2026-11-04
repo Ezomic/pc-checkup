@@ -79,6 +79,15 @@ describe('machines/Index', () => {
         expect(stale.text()).toContain('+2 more to look at');
     });
 
+    // jsdom cannot measure layout, so this pins the class that lets the
+    // three buttons wrap at phone width instead of widening the page.
+    it('lets the action buttons wrap so they cannot overflow a phone', () => {
+        const actions = render([card()]).get('[data-test="actions"]');
+
+        expect(actions.classes()).toContain('flex-wrap');
+        expect(actions.findAll('a, button')).toHaveLength(3);
+    });
+
     it('shows no note for a fresh machine', () => {
         expect(render([card()]).find('[data-test="stale-note"]').exists()).toBe(
             false,
