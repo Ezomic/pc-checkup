@@ -7,6 +7,7 @@ namespace App\Actions\Machines;
 use App\Models\Machine;
 use App\Models\Report;
 use App\Services\Flags\FlagAdvisor;
+use App\Services\Reports\LocaleNumber;
 use App\Services\Reports\ReportFacts;
 
 final readonly class CompareLatestReports
@@ -34,7 +35,7 @@ final readonly class CompareLatestReports
             'fixed' => array_values(array_diff_key($before, $now)),
             'open' => count(array_intersect_key($now, $before)),
             'disk' => $this->change($current, $previous, 'free_disk', '/\A(\d+)%\z/'),
-            'memory' => $this->change($current, $previous, 'memory', '/\A(\d+(?:\.\d+)?)\s*GB\z/i'),
+            'memory' => $this->change($current, $previous, 'memory', '/\A('.LocaleNumber::PATTERN.')\s*GB\z/i'),
             'same_rights' => $current->ran_as_admin !== null && $current->ran_as_admin === $previous->ran_as_admin,
         ];
     }
@@ -70,6 +71,6 @@ final readonly class CompareLatestReports
             return null;
         }
 
-        return (float) $toMatch[1] === (float) $fromMatch[1] ? null : ['from' => $from, 'to' => $to];
+        return LocaleNumber::float($toMatch[1]) === LocaleNumber::float($fromMatch[1]) ? null : ['from' => $from, 'to' => $to];
     }
 }

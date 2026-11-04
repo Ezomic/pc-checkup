@@ -200,8 +200,10 @@ final class ReportParser
                 continue;
             }
 
-            if (in_array($match[1], self::BENCHMARK_KEYS, true) && is_numeric($match[2]) && is_finite((float) $match[2])) {
-                $benchmark[$match[1]] = $match[2] + 0;
+            $number = is_numeric($match[2]) ? $match[2] + 0 : LocaleNumber::float($match[2]);
+
+            if (in_array($match[1], self::BENCHMARK_KEYS, true) && $number !== null && is_finite($number)) {
+                $benchmark[$match[1]] = $number;
             }
         }
 

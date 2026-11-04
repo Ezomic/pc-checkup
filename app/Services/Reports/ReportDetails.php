@@ -520,11 +520,9 @@ final readonly class ReportDetails
 
     private function bytes(string $token): ?float
     {
-        if (preg_match('/^(\d+(?:\.\d+)?)([BKMGTP]?)i?B?$/', $token, $match) !== 1) {
-            return null;
-        }
+        $amount = preg_match('/^('.LocaleNumber::PATTERN.')([BKMGTP]?)i?B?$/', $token, $match) === 1 ? LocaleNumber::float($match[1]) : null;
 
-        return (float) $match[1] * self::UNITS[$match[2] === '' ? 'B' : $match[2]];
+        return $amount === null ? null : $amount * self::UNITS[$match[2] === '' ? 'B' : $match[2]];
     }
 
     private function format(float $bytes): string

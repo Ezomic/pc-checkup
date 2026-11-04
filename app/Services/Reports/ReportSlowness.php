@@ -117,8 +117,8 @@ final readonly class ReportSlowness
             'spinning' => $spinningDrive,
             'slowestSpeed' => $this->slowestSpeed($sections->text('Performance: disk write and read speed (512 MB test)')),
             'idle' => $this->idle($sections->text('Performance: 10 second CPU sample (second snapshot is the real one)')),
-            'load' => $this->load($performance),
-            'cores' => $this->cores($sections->text('Model identifier and chip')),
+            'load' => $this->load($performance, $sections->text('macOS version')),
+            'cores' => $this->cores($sections->text('Hardware overview'), $sections->text('Model identifier and chip')),
             'speedLimit' => $this->percent('/CPU_Speed_Limit\s*=\s*(\d{1,3})(?!\d)/', $performance),
             'lowPower' => $this->lowPower($performance),
             'spotlight' => $this->spotlight($sections->text('Performance: Spotlight indexing')),
@@ -383,22 +383,22 @@ final readonly class ReportSlowness
 
     private function swapMb(?string $text): ?float
     {
-        if ($text === null || preg_match('/\bused\s*=\s*(\d+(?:\.\d+)?)\s*([KMGT])\b/', $text, $match) !== 1) {
+        if ($text === null || preg_match('/\bused\s*=\s*('.LocaleNumber::PATTERN.')\s*([KMGT])\b/', $text, $match) !== 1) {
             return null;
         }
 
-        $megabytes = (float) $match[1] * self::UNITS_IN_MB[$match[2]];
+        $megabytes = LocaleNumber::captured($match[1]) * self::UNITS_IN_MB[$match[2]];
 
         return $megabytes <= self::SWAP_SANE_MAX_MB ? $megabytes : null;
     }
 
     public function ramGb(?string $value): ?float
     {
-        if ($value === null || preg_match('/^(\d+(?:\.\d+)?)\s*(MB|GB|TB)$/i', trim($value), $match) !== 1) {
+        if ($value === null || preg_match('/^('.LocaleNumber::PATTERN.')\s*(MB|GB|TB)$/i', trim($value), $match) !== 1) {
             return null;
         }
 
-        $gigabytes = (float) $match[1] * match (strtoupper($match[2])) {
+        $gigabytes = LocaleNumber::captured($match[1]) * match (strtoupper($match[2])) {
             'MB' => 1 / 1024,
             'GB' => 1,
             default => 1024,
@@ -420,23 +420,37 @@ final readonly class ReportSlowness
 
     private function idle(?string $text): ?float
     {
-        $found = $text !== null && preg_match('/CPU usage:.*?(?<![\d.])(\d{1,3}(?:\.\d+)?)%\s+idle/', $text, $match) === 1;
+        $found = $text !== null && preg_match('/CPU usage:.*?(?<![\d.,])(\d{1,3}(?:[.,]\d+)?)%\s+idle/', $text, $match) === 1;
+        $idle = $found ? LocaleNumber::float($match[1]) : null;
 
-        return $found && (float) $match[1] <= 100 ? (float) $match[1] : null;
+        return $idle !== null && $idle <= 100 ? $idle : null;
     }
 
-    private function load(?string $text): ?float
+    private function load(?string $performance, ?string $version): ?float
     {
-        $found = $text !== null && preg_match('/vm\.loadavg:\s*\{\s*[\d.]+\s+([\d.]+)\s+[\d.]+\s*\}/', $text, $match) === 1;
+        $number = LocaleNumber::PATTERN;
+        $sysctl = $performance !== null && preg_match("/vm\.loadavg:\s*\{\s*{$number}\s+({$number})\s+{$number}\s*\}/", $performance, $first) === 1;
+        $uptime = $version !== null && preg_match("/load averages:\s*{$number},?\s+({$number}),?\s+{$number}/", $version, $second) === 1;
+        $readings = array_filter([
+            $sysctl ? LocaleNumber::float($first[1]) : null,
+            $uptime ? LocaleNumber::float($second[1]) : null,
+        ], fn (?float $reading): bool => $reading !== null);
 
-        return $found && is_numeric($match[1]) ? (float) $match[1] : null;
+        return $readings === [] ? null : max($readings);
     }
 
-    private function cores(?string $text): ?int
+    private function cores(?string $hardware, ?string $chip): ?int
     {
-        $found = $text !== null && preg_match('/^(\d{1,3})$/m', $text, $match) === 1;
+        $logical = $chip !== null && preg_match('/^(\d{1,3})$/m', $chip, $other) === 1;
+        $physical = $hardware !== null && preg_match('/^\s*Total Number of Cores:\s*([1-9]\d{0,2})\b/m', $hardware, $match) === 1;
 
-        return $found && (int) $match[1] > 0 ? (int) $match[1] : null;
+        $cores = match (true) {
+            $logical => (int) $other[1],
+            $physical => (int) $match[1],
+            default => null,
+        };
+
+        return $cores !== null && $cores > 0 ? $cores : null;
     }
 
     private function lowPower(?string $text): ?bool
@@ -452,9 +466,10 @@ final readonly class ReportSlowness
             return null;
         }
 
-        preg_match_all('/^\s*\d+\s+(\d+(?:\.\d+)?)\s+(?:mds|mdworker)\S*\s*$/m', $text, $found);
+        preg_match_all('/^\s*\d+\s+('.LocaleNumber::PATTERN.')\s+(?:mds|mdworker)\S*\s*$/m', $text, $found);
+        $busy = array_map(fn (string $percent): float => LocaleNumber::captured($percent), $found[1]);
 
-        return $found[1] === [] ? 0.0 : max(array_map('floatval', $found[1]));
+        return $busy === [] ? 0.0 : max($busy);
     }
 
     /**
@@ -465,7 +480,7 @@ final readonly class ReportSlowness
         $programs = [];
 
         foreach (explode("\n", (string) $text) as $line) {
-            if (preg_match('/^\s*\d+\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\S.*?)\s*$/', $line, $match) !== 1) {
+            if (preg_match('/^\s*\d+\s+('.LocaleNumber::PATTERN.')\s+('.LocaleNumber::PATTERN.')\s+(\S.*?)\s*$/', $line, $match) !== 1) {
                 continue;
             }
 
@@ -473,8 +488,8 @@ final readonly class ReportSlowness
 
             if ($name !== null) {
                 $programs[] = ['name' => $name, 'heavy' => $byProcessor
-                    ? (float) $match[1] >= self::MAC_PROGRAM_BUSY_PERCENT
-                    : (float) $match[2] >= self::PROGRAM_MEMORY_HEAVY_PERCENT];
+                    ? LocaleNumber::captured($match[1]) >= self::MAC_PROGRAM_BUSY_PERCENT
+                    : LocaleNumber::captured($match[2]) >= self::PROGRAM_MEMORY_HEAVY_PERCENT];
             }
         }
 
@@ -489,14 +504,14 @@ final readonly class ReportSlowness
         $programs = [];
 
         foreach (explode("\n", (string) $text) as $line) {
-            if (preg_match('/^(\S.*?)\s+(\d+(?:\.\d+)?)\s+\d+\s+\d+\s*$/', $line, $match) !== 1) {
+            if (preg_match('/^(\S.*?)\s+('.LocaleNumber::PATTERN.')\s+\d+\s+\d+\s*$/', $line, $match) !== 1) {
                 continue;
             }
 
             $name = $this->programName($match[1]);
 
             if ($name !== null) {
-                $programs[] = ['name' => $name, 'heavy' => (float) $match[2] >= self::WINDOWS_PROGRAM_BUSY_PERCENT];
+                $programs[] = ['name' => $name, 'heavy' => LocaleNumber::captured($match[2]) >= self::WINDOWS_PROGRAM_BUSY_PERCENT];
             }
         }
 

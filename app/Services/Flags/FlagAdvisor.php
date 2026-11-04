@@ -84,7 +84,7 @@ final class FlagAdvisor
 
     private function withoutNumbers(string $text): string
     {
-        return preg_replace('/\d+/', '#', $text) ?? $text;
+        return preg_replace('/\d+(?:[.,]\d+)*/', '#', $text) ?? $text;
     }
 
     /**

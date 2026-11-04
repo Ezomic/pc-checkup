@@ -22,6 +22,8 @@ final readonly class ReportStorage
 
     private const MAX_BYTES = 1024 ** 5;
 
+    private const MAX_COUNT = 999999999999;
+
     private const BUNDLES_LABEL = 'app and system bundles';
 
     private const NO_EXTENSION_LABEL = 'no extension';
@@ -280,17 +282,19 @@ final readonly class ReportStorage
 
     private function bytes(string $value): ?float
     {
-        if (preg_match('/^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB|TB)?$/i', trim($value), $match) !== 1) {
+        if (preg_match('/^('.LocaleNumber::PATTERN.')\s*(B|KB|MB|GB|TB)?$/i', trim($value), $match) !== 1) {
             return null;
         }
 
-        $bytes = (float) $match[1] * self::UNITS[strtoupper($match[2] ?? '')];
+        $bytes = LocaleNumber::captured($match[1]) * self::UNITS[strtoupper($match[2] ?? '')];
 
         return $bytes <= self::MAX_BYTES ? $bytes : null;
     }
 
     private function count(string $value): ?int
     {
-        return preg_match('/^\d{1,12}$/', trim($value)) === 1 ? (int) $value : null;
+        $count = LocaleNumber::count($value);
+
+        return $count !== null && $count <= self::MAX_COUNT ? $count : null;
     }
 }
