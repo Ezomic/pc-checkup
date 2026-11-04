@@ -43,3 +43,67 @@ D:       Data Files NTFS          500    400    80
 Newest installed update: 2026-10-20 (14 days ago)
 Restart pending: no
 ```
+
+## Security: Secure Boot, TPM, BitLocker
+
+```
+Secure Boot: on
+TPM:         present, ready: True, enabled: True
+BitLocker:   On (FullyEncrypted) (C:)
+Run as administrator: True
+```
+
+## Security: Defender
+
+```
+AMServiceEnabled              : True
+AntivirusEnabled              : True
+RealTimeProtectionEnabled     : True
+IsTamperProtected             : True
+```
+
+## Security: firewall
+
+```
+Name    Enabled
+----    -------
+Domain     True
+Private    True
+Public    False
+```
+
+## Backup status
+
+```
+File History: not set up
+OneDrive signed in: yes
+Folders saved to OneDrive (Windows Backup): Desktop, Documents
+OneDrive keeps these folders in sync, so it has no backup date. Other backup software cannot be detected by this scan.
+```
+
+## Remote exposure
+
+```
+Remote Desktop (RDP): ENABLED (network level authentication required: yes)
+SMBv1: off
+Automatic sign-in: off
+```
+
+## Startup programs
+
+```
+Count: 3
+Name   Command        Location
+----   -------        --------
+OneDrive C:\x\OneDrive.exe HKU\Run
+```
+
+## Crashes and unexpected shutdowns (last 30 days)
+
+```
+TimeCreated           Id ProviderName
+-----------           -- ------------
+11/1/2026 3:12:00 AM  41 Microsoft-Windows-Kernel-Power
+11/1/2026 3:12:10 AM  1001 Microsoft-Windows-WER-SystemErrorReporting
+10/20/2026 8:00:00 PM 41 Microsoft-Windows-Kernel-Power
+```
