@@ -11,8 +11,14 @@ const tones: Record<DetailTone, string> = {
     neutral: '',
 };
 
+const LONG_VALUE = 80;
+
 function toneClass(row: DetailRow): string {
     return tones[row.tone];
+}
+
+function isLong(row: DetailRow): boolean {
+    return row.value.length > LONG_VALUE;
 }
 </script>
 
@@ -35,14 +41,30 @@ function toneClass(row: DetailRow): string {
                 class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm"
             >
                 <template v-for="row in card.rows" :key="row.label">
-                    <dt class="text-muted-foreground">{{ row.label }}</dt>
-                    <dd
-                        class="min-w-0 text-right font-medium break-words"
-                        :class="toneClass(row)"
-                        :data-tone="row.tone"
-                    >
-                        {{ row.value }}
-                    </dd>
+                    <template v-if="isLong(row)">
+                        <dt
+                            class="col-span-2 font-medium break-words"
+                            :class="toneClass(row)"
+                            :data-tone="row.tone"
+                        >
+                            {{ row.label }}
+                        </dt>
+                        <dd
+                            class="col-span-2 -mt-1 min-w-0 break-words text-muted-foreground"
+                        >
+                            {{ row.value }}
+                        </dd>
+                    </template>
+                    <template v-else>
+                        <dt class="text-muted-foreground">{{ row.label }}</dt>
+                        <dd
+                            class="min-w-0 text-right font-medium break-words"
+                            :class="toneClass(row)"
+                            :data-tone="row.tone"
+                        >
+                            {{ row.value }}
+                        </dd>
+                    </template>
                 </template>
             </dl>
 

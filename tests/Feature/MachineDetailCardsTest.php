@@ -33,7 +33,7 @@ function ownerDetails(string $markdown, array $flags = [], string $deviceType = 
 it('gives the owner the three cards from a real Mac report', function () {
     $details = ownerDetails(macReportFixture(), ['macOS 10.14.6 is old and likely out of security support.']);
 
-    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability'])
+    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness'])
         ->and($details[0]['rows'][3])->toBe(['label' => 'Security support', 'value' => 'Out of security support', 'tone' => 'bad'])
         ->and($details[1]['rows'][0])->toBe(['label' => 'Free', 'value' => '14 GB (12%)', 'tone' => 'neutral'])
         ->and($details[1]['list']['items'][0])->toBe(['label' => 'Library', 'value' => '38 GB', 'tone' => 'neutral'])
@@ -114,7 +114,7 @@ it('agrees with the free disk fact tile', function () {
 it('gives the owner the cards from a Windows report', function () {
     $details = ownerDetails(windowsLaptopFixture(), ['Windows 10 Pro reached end of support on 14 October 2025, so it only gets updates with a paid extension.']);
 
-    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability'])
+    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness'])
         ->and($details[0]['rows'][2]['value'])->toBe('Out of security support')
         ->and($details[1]['rows'][0]['value'])->toBe('52 GB (22%)');
 });
@@ -129,7 +129,7 @@ it('sends no cards for a machine without a report', function () {
 it('sends only the cards whose data exists', function (string $markdown, array $ids) {
     expect(array_column(ownerDetails($markdown, [], 'desktop'), 'id'))->toBe($ids);
 })->with([
-    'a report from an old script version' => ["# Mac checkup: Old\n\n- Format: 1\n- OS: macOS\n- Free disk: 30%\n\n## Things to look at\n\n- Nothing flagged automatically.\n", ['storage']],
+    'a report from an old script version' => ["# Mac checkup: Old\n\n- Format: 1\n- OS: macOS\n- Free disk: 30%\n\n## Things to look at\n\n- Nothing flagged automatically.\n", ['storage', 'slowness']],
     'a title and nothing else' => ["# Report\n", []],
     'an empty report' => ['', []],
     'sections that exist but are empty' => ["# Report\n\n## Disk usage\n\n```\n```\n\n## Software update age\n\n```\n```\n", []],
@@ -167,7 +167,7 @@ it('handles a very long report', function () {
     $filler = implode("\n", array_fill(0, 20000, 'filler line'));
     $details = ownerDetails(macReportFixture()."\n## Installed apps\n\n```\n{$filler}\n```\n");
 
-    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability']);
+    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness']);
 });
 
 it('never lets report text become markup or a placeholder value', function () {
@@ -201,7 +201,39 @@ it('keeps all of it off the share pages', function () {
                     ->and($encoded)->not->toContain('Blue screen')
                     ->and($encoded)->not->toContain('Login items')
                     ->and($encoded)->not->toContain('First released')
-                    ->and($encoded)->not->toContain('Charge cycles');
+                    ->and($encoded)->not->toContain('Charge cycles')
+                    ->and($encoded)->not->toContain('Why is it slow')
+                    ->and($encoded)->not->toContain('slowness')
+                    ->and($encoded)->not->toContain('Nothing obviously slowing it down');
             });
     }
+});
+
+it('keeps the slowness card off the share pages of a slow machine too', function () {
+    $client = Client::factory()->withShareLink()->create();
+    $machine = Machine::factory()->for($client->user)->create(['client_id' => $client->id, 'device_type' => 'laptop']);
+    Report::factory()->for($machine)->create(['markdown' => str_replace('- Free disk: 12%', '- Free disk: 4%', macReportFixture())]);
+
+    foreach (["/c/{$client->share_token}", "/c/{$client->share_token}/machines/{$machine->id}"] as $path) {
+        $this->get($path)
+            ->assertOk()
+            ->assertInertia(function ($page): void {
+                $encoded = (string) json_encode($page->toArray()['props']);
+
+                expect($encoded)->not->toContain('Probably slow because')->not->toContain('The drive is almost full');
+            });
+    }
+});
+
+it('gives the owner the slowness card with a verdict and reasons from a slow scan', function () {
+    $markdown = str_replace('- Free disk: 12%', '- Free disk: 4%', macReportFixture())
+        ."\n## Memory pressure\n\n```\nSystem-wide memory free percentage: 5%\n```\n";
+
+    $details = ownerDetails($markdown);
+    $card = end($details);
+
+    expect($card['id'])->toBe('slowness')
+        ->and($card['title'])->toBe('Why is it slow?')
+        ->and($card['rows'][0])->toBe(['label' => 'Verdict', 'value' => 'Probably slow because of 2 things', 'tone' => 'bad'])
+        ->and(array_column($card['rows'], 'label'))->toBe(['Verdict', 'Memory is almost full', 'The drive is almost full']);
 });

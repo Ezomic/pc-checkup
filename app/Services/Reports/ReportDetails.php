@@ -18,6 +18,8 @@ final readonly class ReportDetails
 
     private const VALUE_LIMIT = 80;
 
+    private const SPINNING_DRIVE = 'Spinning hard drive';
+
     private const UNITS = ['B' => 1, 'K' => 1024, 'M' => 1024 ** 2, 'G' => 1024 ** 3, 'T' => 1024 ** 4, 'P' => 1024 ** 5];
 
     private const BATTERY_CONDITIONS = [
@@ -37,14 +39,23 @@ final readonly class ReportDetails
     public function cards(string $markdown, array $flags, ?string $deviceType): array
     {
         $sections = ReportSections::parse($markdown);
+        $freeDisk = $this->facts->from($markdown)['free_disk'];
 
         return array_values(array_filter([
             $this->age($sections, $flags),
-            $this->storage($sections, $this->facts->from($markdown)['free_disk']),
+            $this->storage($sections, $freeDisk),
             $this->battery($sections, $deviceType),
             $this->card('security', 'Security summary', (new ReportSecurity)->rows($sections)),
             $this->card('stability', 'Stability', (new ReportStability)->rows($sections, $flags)),
+            $this->card('slowness', 'Why is it slow?', (new ReportSlowness)->rows($sections, $freeDisk, $this->spinningDrive($sections))),
         ]));
+    }
+
+    private function spinningDrive(ReportSections $sections): bool
+    {
+        $health = $this->macHealth($sections->text('Storage (boot volume)')) ?? $this->windowsHealth($sections->text('Storage (physical disks)'));
+
+        return ($health['drive'] ?? null) === self::SPINNING_DRIVE;
     }
 
     /**
@@ -205,7 +216,7 @@ final readonly class ReportDetails
             },
             'drive' => match (strtolower((string) $solid)) {
                 'yes' => 'Solid state drive',
-                'no' => 'Spinning hard drive',
+                'no' => self::SPINNING_DRIVE,
                 default => null,
             },
         ];
@@ -240,7 +251,7 @@ final readonly class ReportDetails
             'drive' => match (true) {
                 isset($kinds['SSD'], $kinds['HDD']) => 'Both solid state and spinning',
                 isset($kinds['SSD']) => 'Solid state drive',
-                isset($kinds['HDD']) => 'Spinning hard drive',
+                isset($kinds['HDD']) => self::SPINNING_DRIVE,
                 default => null,
             },
         ];

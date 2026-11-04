@@ -188,7 +188,7 @@ describe('storage', function () {
     it('shows only the percentage when there is no disk table', function () {
         $markdown = "# Mac checkup: Old\n\n- Free disk: 12%\n";
 
-        expect(detailRows($markdown))->toBe(['storage' => ['Free' => '12%']]);
+        expect(detailRows($markdown))->toBe(['storage' => ['Free' => '12%'], 'slowness' => ['Verdict' => 'Nothing obviously slowing it down']]);
     });
 
     it('reads terabytes, megabytes, kilobytes and decimals from df', function () {
