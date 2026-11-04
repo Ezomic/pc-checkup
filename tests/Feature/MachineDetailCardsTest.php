@@ -33,7 +33,7 @@ function ownerDetails(string $markdown, array $flags = [], string $deviceType = 
 it('gives the owner the three cards from a real Mac report', function () {
     $details = ownerDetails(macReportFixture(), ['macOS 10.14.6 is old and likely out of security support.']);
 
-    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'verdict'])
+    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'startup', 'verdict'])
         ->and($details[0]['rows'][3])->toBe(['label' => 'Security support', 'value' => 'Out of security support', 'tone' => 'bad'])
         ->and($details[1]['rows'][0])->toBe(['label' => 'Free', 'value' => '14 GB (12%)', 'tone' => 'neutral'])
         ->and($details[1]['list']['items'][0])->toBe(['label' => 'Library', 'value' => '38 GB', 'tone' => 'neutral'])
@@ -97,7 +97,7 @@ it('survives huge counts and markup in the new sections', function () {
 
     expect($rows['Login items'])->toBe('2')
         ->and($rows['Background startup items'])->toBe('4')
-        ->and($encoded)->not->toContain('onerror')->not->toContain('undefined')->not->toContain('NaN');
+        ->and($encoded)->not->toContain('<')->not->toContain('undefined')->not->toContain('NaN');
 });
 
 it('agrees with the free disk fact tile', function () {
@@ -114,7 +114,7 @@ it('agrees with the free disk fact tile', function () {
 it('gives the owner the cards from a Windows report', function () {
     $details = ownerDetails(windowsLaptopFixture(), ['Windows 10 Pro reached end of support on 14 October 2025, so it only gets updates with a paid extension.']);
 
-    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'verdict'])
+    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'startup', 'verdict'])
         ->and($details[0]['rows'][2]['value'])->toBe('Out of security support')
         ->and($details[1]['rows'][0]['value'])->toBe('52 GB (22%)');
 });
@@ -167,7 +167,7 @@ it('handles a very long report', function () {
     $filler = implode("\n", array_fill(0, 20000, 'filler line'));
     $details = ownerDetails(macReportFixture()."\n## Installed apps\n\n```\n{$filler}\n```\n");
 
-    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'verdict']);
+    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'startup', 'verdict']);
 });
 
 it('never lets report text become markup or a placeholder value', function () {
@@ -300,6 +300,54 @@ it('keeps the verdict off the share pages', function () {
                 expect($encoded)->not->toContain('Worth keeping')
                     ->and($encoded)->not->toContain('rule of thumb')
                     ->and($encoded)->not->toContain('no longer gets security updates');
+            });
+    }
+});
+
+function startupCard(string $markdown): array
+{
+    return collect(ownerDetails($markdown))->firstWhere('id', 'startup');
+}
+
+it('gives the owner the startup items card from a real Mac report under the camelCase detailCards prop', function () {
+    $card = startupCard(macReportFixture());
+
+    expect($card['id'])->toBe('startup')
+        ->and($card['title'])->toBe('Startup items')
+        ->and(array_column($card['rows'], 'value', 'label'))->toBe(['Login items' => '2', 'Launch agents and daemons' => '4 (2 agents, 2 daemons)'])
+        ->and(array_column($card['list']['items'], 'label'))->toBe(['updater', 'menubar', 'helper', 'sync', 'Dropbox', 'Slack']);
+});
+
+it('gives the owner the startup items card from a Windows report', function () {
+    $card = startupCard(windowsLaptopFixture());
+
+    expect($card['id'])->toBe('startup')
+        ->and(array_column($card['rows'], 'value', 'label'))->toBe(['Startup programs' => '3'])
+        ->and($card['list']['items'])->toBe([['label' => 'OneDrive', 'value' => 'Syncs OneDrive files', 'tone' => 'neutral']])
+        ->and($card['notes'][0])->toBe('The scan named 1 of the 3 startup programs.');
+});
+
+it('shows no startup items card for an older report without the sections', function () {
+    $markdown = (string) preg_replace('/## (?:Login items|Performance: login item and startup counts|Startup items: LaunchAgents and LaunchDaemons)\n.*?```\n.*?```\n/s', '', macReportFixture());
+
+    expect($markdown)->not->toContain('## Login items')->not->toContain('## Startup items')
+        ->and(array_column(ownerDetails($markdown), 'id'))->not->toContain('startup');
+});
+
+it('never gives the startup items card to a share page', function () {
+    $client = Client::factory()->withShareLink()->create();
+    $machine = Machine::factory()->for($client->user)->create(['client_id' => $client->id, 'device_type' => 'laptop']);
+    Report::factory()->for($machine)->create(['markdown' => macReportFixture()]);
+
+    foreach (["/c/{$client->share_token}", "/c/{$client->share_token}/machines/{$machine->id}"] as $path) {
+        $this->get($path)
+            ->assertOk()
+            ->assertInertia(function ($page): void {
+                $props = $page->toArray()['props'];
+                $encoded = (string) json_encode($props);
+
+                expect($props)->not->toHaveKey('detailCards')
+                    ->and($encoded)->not->toContain('Startup items')->not->toContain('Worth a look')->not->toContain('Syncs Dropbox')->not->toContain('menubar');
             });
     }
 });
