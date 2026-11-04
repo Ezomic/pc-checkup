@@ -217,4 +217,59 @@ describe('DetailCards', () => {
 
         expect(wrapper.find('dl').exists()).toBe(false);
     });
+
+    it('draws a bar per item with its width, size and detail', () => {
+        const wrapper = mount(DetailCards, {
+            props: {
+                cards: [
+                    card({
+                        id: 'storage-breakdown',
+                        title: 'Storage breakdown',
+                        rows: [],
+                        bars: [
+                            {
+                                title: 'Your folders',
+                                items: [
+                                    {
+                                        label: 'Library',
+                                        value: '20 GB',
+                                        detail: '25% of used space',
+                                        share: 100,
+                                    },
+                                    {
+                                        label: 'Downloads',
+                                        value: '1.5 GB',
+                                        detail: null,
+                                        share: 8,
+                                    },
+                                ],
+                            },
+                        ],
+                        notes: ['The scan stopped at its time limit.'],
+                    }),
+                ],
+            },
+        });
+        const bars = wrapper.findAll('[data-test="detail-bar"]');
+
+        expect(wrapper.get('[data-test="detail-bars"] h3').text()).toBe(
+            'Your folders',
+        );
+        expect(bars).toHaveLength(2);
+        expect(bars[0].attributes('style')).toContain('width: 100%');
+        expect(bars[1].attributes('style')).toContain('width: 8%');
+        expect(wrapper.text()).toContain('20 GB');
+        expect(wrapper.text()).toContain('25% of used space');
+        expect(wrapper.findAll('dl')).toHaveLength(0);
+        expect(wrapper.get('[data-test="detail-note"]').text()).toBe(
+            'The scan stopped at its time limit.',
+        );
+    });
+
+    it('draws no bars or notes for a card without them', () => {
+        const wrapper = mount(DetailCards, { props: { cards: [card()] } });
+
+        expect(wrapper.find('[data-test="detail-bars"]').exists()).toBe(false);
+        expect(wrapper.find('[data-test="detail-note"]').exists()).toBe(false);
+    });
 });

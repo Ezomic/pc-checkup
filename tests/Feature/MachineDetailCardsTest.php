@@ -237,3 +237,40 @@ it('gives the owner the slowness card with a verdict and reasons from a slow sca
         ->and($card['rows'][0])->toBe(['label' => 'Verdict', 'value' => 'Probably slow because of 2 things', 'tone' => 'bad'])
         ->and(array_column($card['rows'], 'label'))->toBe(['Verdict', 'Memory is almost full', 'The drive is almost full']);
 });
+
+function storageBreakdownMarkdown(): string
+{
+    return macReportFixture()."\n## Storage breakdown\n\n```\nscan: partial (time limit of 90 seconds reached)\nseconds: 90\nlimit: 90\nfolder|Downloads|1572864\nroot|Users|31457280\ntype|Photos|5242880|1200\next|jpg|4194304|1000\n```\n";
+}
+
+it('gives the owner the storage breakdown card with the camelCase detailCards prop', function () {
+    $details = ownerDetails(storageBreakdownMarkdown());
+    $card = collect($details)->firstWhere('id', 'storage-breakdown');
+
+    expect(array_column($details, 'id'))->toContain('storage-breakdown')
+        ->and($card['title'])->toBe('Storage breakdown')
+        ->and($card['bars'][0]['items'][0]['label'])->toBe('Downloads')
+        ->and($card['notes'][0])->toContain('time limit');
+});
+
+it('shows no storage breakdown card for an older report without the section', function () {
+    expect(array_column(ownerDetails(macReportFixture()), 'id'))->not->toContain('storage-breakdown');
+});
+
+it('never gives the storage breakdown to a share page', function () {
+    $client = Client::factory()->withShareLink()->create();
+    $machine = Machine::factory()->for($client->user)->create(['client_id' => $client->id]);
+    Report::factory()->for($machine)->create(['markdown' => storageBreakdownMarkdown()]);
+
+    foreach (["/c/{$client->share_token}", "/c/{$client->share_token}/machines/{$machine->id}"] as $path) {
+        $this->get($path)
+            ->assertOk()
+            ->assertDontSee('Storage breakdown')
+            ->assertInertia(function ($page): void {
+                $props = $page->toArray()['props'];
+
+                expect($props)->not->toHaveKey('detailCards')
+                    ->and((string) json_encode($props))->not->toContain('Storage breakdown')->not->toContain('storage-breakdown');
+            });
+    }
+});

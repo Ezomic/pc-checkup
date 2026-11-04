@@ -10,7 +10,8 @@ use Illuminate\Support\Str;
 
 /**
  * @phpstan-type Row array{label: string, value: string, tone: 'good'|'bad'|'neutral'}
- * @phpstan-type Card array{id: string, title: string, rows: list<Row>, list: array{title: string, items: list<Row>}|null}
+ * @phpstan-type Bar array{label: string, value: string, detail: string|null, share: int}
+ * @phpstan-type Card array{id: string, title: string, rows: list<Row>, list: array{title: string, items: list<Row>}|null, bars?: list<array{title: string, items: list<Bar>}>, notes?: list<string>}
  */
 final readonly class ReportDetails
 {
@@ -19,6 +20,8 @@ final readonly class ReportDetails
     private const VALUE_LIMIT = 80;
 
     private const SPINNING_DRIVE = 'Spinning hard drive';
+
+    private const MINIMUM_SHARE = 1;
 
     private const UNITS = ['B' => 1, 'K' => 1024, 'M' => 1024 ** 2, 'G' => 1024 ** 3, 'T' => 1024 ** 4, 'P' => 1024 ** 5];
 
@@ -44,6 +47,7 @@ final readonly class ReportDetails
         return array_values(array_filter([
             $this->age($sections, $flags),
             $this->storage($sections, $freeDisk),
+            $this->storageBreakdown($sections),
             $this->battery($sections, $deviceType),
             $this->card('security', 'Security summary', (new ReportSecurity)->rows($sections)),
             $this->card('stability', 'Stability', (new ReportStability)->rows($sections, $flags)),
@@ -141,6 +145,74 @@ final readonly class ReportDetails
     public function capacity(ReportSections $sections): ?array
     {
         return $this->macCapacity($sections->text('Disk usage')) ?? $this->windowsCapacity($sections->text('Storage (volumes and free space)'));
+    }
+
+    /**
+     * @return Card|null
+     */
+    private function storageBreakdown(ReportSections $sections): ?array
+    {
+        $read = (new ReportStorage)->read($sections);
+
+        if ($read === null) {
+            return null;
+        }
+
+        $capacity = $this->macCapacity($sections->text('Disk usage')) ?? $this->windowsCapacity($sections->text('Storage (volumes and free space)'));
+        $used = $capacity === null ? 0.0 : $capacity['size'] - $capacity['free'];
+        $counted = array_sum(array_column($read['categories'], 'bytes'));
+        $groups = [
+            ['Your folders', $read['folders'], $used, 'used space', false],
+            ['Biggest folders on the drive', $read['roots'], $used, 'used space', false],
+            ['Kinds of files in your user folder', $read['categories'], $counted, 'what was counted', true],
+            ['Biggest file endings', $read['extensions'], $counted, 'what was counted', true],
+        ];
+        $bars = [];
+
+        foreach ($groups as [$title, $items, $whole, $of, $withCount]) {
+            if ($items !== []) {
+                $bars[] = ['title' => $title, 'items' => $this->bars($items, $whole, $of, $withCount, $title === 'Biggest file endings')];
+            }
+        }
+
+        return [
+            'id' => 'storage-breakdown',
+            'title' => 'Storage breakdown',
+            'rows' => [],
+            'list' => null,
+            'bars' => $bars,
+            'notes' => [
+                ...($read['partial'] ? ['The scan stopped at its time limit, so these sizes are a minimum and the real numbers may be bigger.'] : []),
+                ...($read['categories'] !== [] || $read['extensions'] !== [] ? ['Kinds of files count your own user folder only. Only sizes and counts were recorded, no file names.'] : []),
+            ],
+        ];
+    }
+
+    /**
+     * @param  list<array{name: string, bytes: float, count: int|null}>  $items
+     * @return list<Bar>
+     */
+    private function bars(array $items, float $whole, string $of, bool $withCount, bool $dotted): array
+    {
+        $biggest = max(1.0, ...array_column($items, 'bytes'));
+
+        return array_map(function (array $item) use ($biggest, $whole, $of, $withCount, $dotted): array {
+            $percent = $whole > 0 && $item['bytes'] > 0 ? $this->percentText(min($item['bytes'] / $whole * 100, 100.0), $of) : null;
+            $files = $withCount && $item['count'] !== null ? number_format($item['count']).' '.Str::plural('file', $item['count']) : null;
+            $share = $item['bytes'] > 0 ? max((int) round($item['bytes'] / $biggest * 100), self::MINIMUM_SHARE) : 0;
+
+            return [
+                'label' => ($dotted ? '.' : '').$item['name'],
+                'value' => $this->format($item['bytes']),
+                'detail' => $files === null && $percent === null ? null : implode(', ', array_filter([$files, $percent])),
+                'share' => $share,
+            ];
+        }, $items);
+    }
+
+    private function percentText(float $percent, string $of): string
+    {
+        return ($percent < 0.5 ? 'under 1%' : round($percent).'%')." of {$of}";
     }
 
     /**
