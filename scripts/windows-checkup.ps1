@@ -119,7 +119,9 @@ function Measure-StorageTree([string]$Path, $Clock, [long]$StopAtMs, $Stats, $Sk
     $reparse = [int][System.IO.FileAttributes]::ReparsePoint
     $cloudOnly = 0x400000 -bor 0x40000 -bor 0x1000
     $stack = New-Object 'System.Collections.Generic.Stack[System.IO.DirectoryInfo]'
-    $stack.Push((New-Object System.IO.DirectoryInfo($Path)))
+    $start = New-Object System.IO.DirectoryInfo($Path)
+    if ([int]$start.Attributes -band $reparse) { return [pscustomobject]@{ Bytes = $bytes; Capped = $false } }
+    $stack.Push($start)
     while ($stack.Count -gt 0) {
         if ($Clock.ElapsedMilliseconds -ge $StopAtMs) { $capped = $true; break }
         $current = $stack.Pop()

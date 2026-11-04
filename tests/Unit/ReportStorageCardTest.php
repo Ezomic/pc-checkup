@@ -119,6 +119,11 @@ describe('odd data', function () {
         expect(array_column($card['bars'], 'title'))->toBe(['Biggest folders on the drive', 'Biggest file endings']);
     });
 
+    it('leaves out the note about kinds of files when the card has none', function () {
+        expect(bdCard(bdDoc('scan: complete
+folder|Downloads|10'))['notes'])->toBe([]);
+    });
+
     it('shows a drive folder name as plain text', function () {
         $card = bdCard(bdDoc("scan: complete\nroot|<b>Evil</b>|100"));
 

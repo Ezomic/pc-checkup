@@ -889,7 +889,7 @@ pcc_storage_types() {
     }'
   rc=$(cat "$rc_file" 2>/dev/null)
   rm -f "$rc_file"
-  if [ "$rc" = 142 ]; then echo "capped|1"; fi
+  if [ "$rc" = 142 ] || [ "$SECONDS" -ge "$stop" ]; then echo "capped|1"; fi
 }
 
 # Measures disk usage once, read only, and never longer than the cap (90 seconds by default).

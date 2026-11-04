@@ -183,7 +183,7 @@ final readonly class ReportDetails
             'bars' => $bars,
             'notes' => [
                 ...($read['partial'] ? ['The scan stopped at its time limit, so these sizes are a minimum and the real numbers may be bigger.'] : []),
-                'Kinds of files count your own user folder only. Only sizes and counts were recorded, no file names.',
+                ...($read['categories'] !== [] || $read['extensions'] !== [] ? ['Kinds of files count your own user folder only. Only sizes and counts were recorded, no file names.'] : []),
             ],
         ];
     }
