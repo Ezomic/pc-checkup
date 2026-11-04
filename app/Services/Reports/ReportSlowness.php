@@ -54,6 +54,8 @@ final readonly class ReportSlowness
 
     private const DISK_FREE_CRITICAL_PERCENT = 5;
 
+    private const DISK_FREE_TARGET_PERCENT = 15;
+
     private const DISK_SLOW_MB_PER_SECOND = 100;
 
     private const CPU_IDLE_BUSY_PERCENT = 15;
@@ -230,7 +232,7 @@ final readonly class ReportSlowness
             return null;
         }
 
-        $advice = 'A full drive slows everything down. Delete or move big files, old downloads and photos until at least 15% is free.';
+        $advice = 'A full drive slows everything down. Delete or move big files, old downloads and photos until at least '.self::DISK_FREE_TARGET_PERCENT.'% is free.';
 
         return $free < self::DISK_FREE_CRITICAL_PERCENT
             ? $this->reason('The drive is almost full', $advice, self::HIGH)
