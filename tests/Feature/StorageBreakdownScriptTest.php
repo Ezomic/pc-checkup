@@ -95,9 +95,18 @@ function storageNear(int $actual, int $expected, int $slack = 24): bool
     return $actual >= $expected && $actual <= $expected + $slack;
 }
 
-function slowDu(string $pathEnd): string
+function slowDu(string ...$pathEnds): string
 {
-    return fakeMacBin(['du' => 'for last; do :; done; case "$last" in *'.$pathEnd.') exec sleep 30 ;; esac; exec /usr/bin/du "$@"']);
+    return fakeMacBin(['du' => 'for last; do :; done; case "$last" in *'.implode('|*', $pathEnds).') exec sleep 30 ;; esac; exec /usr/bin/du "$@"']);
+}
+
+/**
+ * A du whose whole pass is stopped by the clock and prints nothing, as a buffering du does, while
+ * measuring one folder with -d 0 works. $pathPattern limits it to the passes over matching paths.
+ */
+function lostPass(string $pathPattern = '*'): string
+{
+    return fakeMacBin(['du' => 'for last; do :; done; case " $* " in *" -d 0 "*) exec /usr/bin/du "$@" ;; esac; case "$last" in '.$pathPattern.') kill -ALRM $$ ;; esac; exec /usr/bin/du "$@"']);
 }
 
 afterEach(function () {
@@ -306,14 +315,25 @@ describe('a Mac with a separate data volume (macOS 10.15 and later)', function (
         expect(storageNear($roots['Users'], 5000))->toBeTrue();
     });
 
+    it('measures a firmlinked folder on its own when the pass over the data volume is stopped', function () {
+        $base = dataTree();
+        $result = runData($base, [], lostPass('*/data').':/usr/bin:/bin');
+        $roots = storageSizes(storageRows($result->output())['root']);
+
+        expect($result->output())->toContain('scan: partial')
+            ->and(array_keys($roots))->toBe(['Library', 'System', 'Users', 'usr'])
+            ->and(storageNear($roots['Users'], 5000))->toBeTrue()
+            ->and(storageNear($roots['Library'], 300))->toBeTrue();
+    });
+
     it('lists a firmlinked folder as not measured instead of trusting the empty one on the system volume', function () {
         $base = dataTree();
-        $result = runData($base, ['PCC_STORAGE_CAP' => '6'], slowDu('/data').':/usr/bin:/bin');
+        $result = runData($base, ['PCC_STORAGE_CAP' => '20'], slowDu('/data', '/Users').':/usr/bin:/bin');
         $rows = storageRows($result->output());
 
         expect($result->output())->toContain('scan: partial')
-            ->and(array_column($rows['root'], 0))->toBe(['System', 'usr'])
-            ->and(array_column($rows['missing'], 0))->toContain('root/Users')->toContain('root/Library');
+            ->and(array_column($rows['root'], 0))->toContain('System')->toContain('Library')->not->toContain('Users')
+            ->and(array_column($rows['missing'], 0))->toBe(['root/Users']);
     });
 });
 
@@ -362,6 +382,27 @@ describe('the time limit', function () {
             ->and($rows['root'])->not->toBe([])
             ->and($rows)->not->toHaveKey('home')->not->toHaveKey('folder')
             ->and(array_column($rows['missing'], 0))->toContain('home/Downloads')->toContain('home/Library')->toContain('library/Caches');
+    });
+
+    it('measures the well-known folders one at a time when a stopped pass printed nothing', function () {
+        $result = runStorage(storageTree(), [], lostPass().':/usr/bin:/bin');
+        $rows = storageRows($result->output());
+
+        expect($result->output())->toContain('scan: partial')
+            ->and(array_keys(storageSizes($rows['root'])))->toBe(['System', 'Users'])
+            ->and(storageNear((int) $rows['roots_total'][0][0], 1700, 48))->toBeTrue()
+            ->and(array_keys(storageSizes($rows['folder'])))->toBe(['Applications', 'Documents', 'Downloads', 'Library', 'Pictures'])
+            ->and(array_keys(storageSizes($rows['library'])))->toBe(['Application Support', 'Caches'])
+            ->and(storageNear((int) $rows['home'][0][0], 5224, 96))->toBeTrue()
+            ->and($rows)->not->toHaveKey('missing');
+    });
+
+    it('takes the whole list from the single pass when it finishes, not just the well-known folders', function () {
+        $bin = fakeMacBin(['du' => 'case " $* " in *" -d 0 "*) exit 3 ;; esac; exec /usr/bin/du "$@"']);
+        $rows = storageRows(runStorage(storageTree(), [], $bin.':/usr/bin:/bin')->output());
+
+        expect(array_keys(storageSizes($rows['root'])))->toBe(['System', 'Users', 'dir2', 'dir3', 'dir4', 'dir5'])
+            ->and((int) $rows['roots_total'][0][0])->toBeGreaterThan(3000);
     });
 
     it('falls back to the default limit for a value that is not a positive whole number', function (string $cap) {

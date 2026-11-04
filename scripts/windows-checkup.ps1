@@ -178,6 +178,14 @@ function Get-StorageSlice($Clock, [long]$EndMs, [double]$Weight, [double]$Weight
     return [long]($room * $Weight / $WeightLeft)
 }
 
+# Position of a well-known folder name in a list, ignoring case, or -1.
+function Get-StorageKnownIndex($Known, [string]$Name) {
+    for ($i = 0; $i -lt $Known.Count; $i++) {
+        if ($Known[$i] -ieq $Name) { return $i }
+    }
+    return -1
+}
+
 # Measures disk usage once, read only, and never longer than the cap (150 seconds by default).
 # The top level of the drive comes first, then the user folder, and each bucket gets its share of
 # the clock and hands back what it did not use. A bucket that runs out of time is listed as missing
@@ -222,17 +230,17 @@ function Get-StorageBreakdown {
     if ((Test-Path -LiteralPath $rootPath -PathType Container) -and (Test-StorageFixedPath $rootPath)) {
         $tops = @((New-Object System.IO.DirectoryInfo($rootPath)).GetDirectories() | Where-Object {
             -not ([int]$_.Attributes -band [int][System.IO.FileAttributes]::ReparsePoint) -and $_.Name -ne 'System Volume Information' -and $_.Name -ne '$Recycle.Bin'
-        } | Sort-Object @{ Expression = { [array]::IndexOf($known, $_.Name) } }, Name)
+        } | Sort-Object @{ Expression = { Get-StorageKnownIndex $known $_.Name } }, Name)
     }
     $phaseEnd = [long][math]::Max(1000, $capMs * 35 / 100)
     $weightLeft = [double]0
     foreach ($top in $tops) {
-        $at = [array]::IndexOf($known, $top.Name)
+        $at = Get-StorageKnownIndex $known $top.Name
         if ($at -ge 0) { $weightLeft += $knownWeights[$at] } else { $weightLeft += 1 }
     }
     $drive = New-Object System.Collections.Generic.List[object]
     foreach ($top in $tops) {
-        $at = [array]::IndexOf($known, $top.Name)
+        $at = Get-StorageKnownIndex $known $top.Name
         $weight = [double]1
         if ($at -ge 0) { $weight = [double]$knownWeights[$at] }
         $slice = Get-StorageSlice $clock $phaseEnd $weight $weightLeft
@@ -261,6 +269,8 @@ function Get-StorageBreakdown {
     $roaming = Join-Path $appData 'Roaming'
     $temp = Join-Path $local 'Temp'
     $plan = New-Object System.Collections.Generic.List[object]
+    $paths = @{ AppData = $appData }
+    $inside = $profileFull + [System.IO.Path]::DirectorySeparatorChar
     $apart = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
     $order = @{ Desktop = 1; Music = 2; Pictures = 3; Videos = 4; Downloads = 5; Documents = 10 }
     $weights = @{ Desktop = 1; Music = 1; Pictures = 2; Videos = 2; Downloads = 2; Documents = 3 }
@@ -270,6 +280,7 @@ function Get-StorageBreakdown {
             $found = [Environment]::GetFolderPath($special[$name])
             if ($found) { $path = $found }
         }
+        $paths[$name] = $path
         $plan.Add(@{ Key = $name; Path = $path; Skip = @(); Order = $order[$name]; Weight = $weights[$name] })
     }
     $plan.Add(@{ Key = 'Temp'; Path = $temp; Skip = @(); Order = 7; Weight = 1 })
@@ -304,7 +315,10 @@ function Get-StorageBreakdown {
     $homeTotal = $null
     if ($present.Count -gt 0 -and $present.Count -eq @($present | Where-Object { $null -ne $got[$_.Key] }).Count) {
         $homeTotal = [long]0
-        foreach ($item in $present) { $homeTotal += $got[$item.Key] }
+        foreach ($item in $present) {
+            $full = [System.IO.Path]::GetFullPath($item.Path).TrimEnd($separators)
+            if ($full -ieq $profileFull -or $full.StartsWith($inside, [System.StringComparison]::OrdinalIgnoreCase)) { $homeTotal += $got[$item.Key] }
+        }
     }
     $folderBytes = @{}
     foreach ($name in 'Downloads', 'Documents', 'Desktop', 'Pictures', 'Videos', 'Music') { $folderBytes[$name] = $got[$name] }
@@ -341,7 +355,7 @@ function Get-StorageBreakdown {
         if ($done) {
             $total += $bytes
             $rows.Add([pscustomobject]@{ Name = $entry.Name; Bytes = $bytes })
-        } elseif ($known -contains $entry.Raw) {
+        } elseif ((Get-StorageKnownIndex $known $entry.Raw) -ge 0) {
             $absent.Add("missing|root/$($entry.Raw)")
         }
     }
@@ -351,7 +365,7 @@ function Get-StorageBreakdown {
 
     if ($null -ne $homeTotal) { $output.Add("home|$([long][math]::Round($homeTotal / 1024.0))") }
     foreach ($name in 'Downloads', 'Documents', 'Desktop', 'Pictures', 'Videos', 'Music', 'AppData') {
-        $exists = Test-Path -LiteralPath (Join-Path $profilePath $name) -PathType Container
+        $exists = Test-Path -LiteralPath $paths[$name] -PathType Container
         if ($null -ne $folderBytes[$name]) {
             $output.Add("folder|$name|$([long][math]::Round($folderBytes[$name] / 1024.0))")
         } elseif ($exists) {
