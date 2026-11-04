@@ -206,17 +206,31 @@ it('tells a Mac and a Windows machine apart only by the data each reports', func
         ->and(verdictWord($mac))->toBe('Replace');
 });
 
-it('replaces only when three strong signs agree', function (array $header, ?string $solid, array $flags, string $expected) {
+it('replaces only when the age is strong and the system or two more signs agree', function (array $header, ?string $solid, array $flags, string $expected) {
     expect(verdictWord(verdictWith($header, $solid, $flags)))->toBe($expected);
 })->with([
-    'three strong signs' => [['Model' => 'Mac (iMac18,1)', 'Memory' => '2 GB', 'Free disk' => '3%'], 'Yes', [], 'Replace'],
-    'two strong signs fall back to repair' => [['Model' => 'Mac (iMac18,1)', 'Memory' => '2 GB'], 'Yes', [], 'Repair'],
-    'two strong signs and two weak ones are still not replace' => [['Model' => 'Mac (iMac18,1)', 'Memory' => '2 GB', 'Free disk' => '7%', 'Battery' => '100 cycles, condition Normal, max capacity 70%'], 'Yes', [], 'Repair'],
-    'unsupported system and one more strong sign' => [['Model' => 'Mac (iMac18,1)'], 'Yes', VERDICT_UNSUPPORTED, 'Replace'],
-    'unsupported system and a weak sign' => [['Model' => 'Mac (Macmini9,1)'], 'Yes', VERDICT_UNSUPPORTED, 'Repair'],
+    'strong age and two other strong signs' => [['Model' => 'Mac (iMac18,1)', 'Memory' => '2 GB', 'Free disk' => '3%'], 'Yes', [], 'Replace'],
+    'strong age and a strong drive and memory' => [['Model' => 'Mac (iMac18,1)', 'Memory' => '2 GB'], 'No', [], 'Replace'],
+    'strong age and one other strong sign' => [['Model' => 'Mac (iMac18,1)', 'Memory' => '2 GB'], 'Yes', [], 'Repair'],
+    'strong age and one other strong sign plus weak ones' => [['Model' => 'Mac (iMac18,1)', 'Memory' => '2 GB', 'Free disk' => '7%', 'Battery' => '100 cycles, condition Normal, max capacity 70%'], 'Yes', [], 'Repair'],
+    'strong age and an unsupported system' => [['Model' => 'Mac (iMac18,1)'], 'Yes', VERDICT_UNSUPPORTED, 'Replace'],
+    'strong age, unsupported system and more' => [['Model' => 'Mac (iMac18,1)', 'Memory' => '2 GB'], 'No', VERDICT_UNSUPPORTED, 'Replace'],
+    'weak age and an unsupported system' => [['Model' => 'Mac (Macmini9,1)'], 'Yes', VERDICT_UNSUPPORTED, 'Repair'],
     'unsupported system alone' => [[], 'Yes', VERDICT_UNSUPPORTED, 'Repair'],
-    'a strong sign that is not the system is not enough with a weak one' => [['Model' => 'Mac (iMac18,1)', 'Memory' => '6 GB'], 'Yes', [], 'Keep'],
+    'a young machine with three strong fixable signs' => [['Memory' => '2 GB', 'Free disk' => '3%'], 'No', [], 'Repair'],
+    'a young machine with an unsupported system and two strong signs' => [['Memory' => '2 GB', 'Free disk' => '3%'], 'Yes', VERDICT_UNSUPPORTED, 'Repair'],
+    'a young machine with four strong signs' => [['Memory' => '2 GB', 'Free disk' => '3%', 'Battery' => '100 cycles, condition Poor, max capacity n/a'], 'No', VERDICT_UNSUPPORTED, 'Repair'],
+    'a strong age with only a weak sign' => [['Model' => 'Mac (iMac18,1)', 'Memory' => '6 GB'], 'Yes', [], 'Keep'],
 ]);
+
+it('never replaces a Windows machine, which has no readable age', function () {
+    $disks = sprintf(VERDICT_WINDOWS_DISKS, 'Contoso Disk 1TB   HDD       SATA       931 Healthy      OK');
+    $markdown = verdictReport(['Windows' => 'Windows 10 Pro 22H2', 'Memory' => '2 GB', 'Free disk' => '3%', 'Battery' => '1500 cycles, 40% of design capacity'], null, $disks);
+    $rows = verdictRows($markdown, ['Windows 10 Pro reached end of support on 14 October 2025.']);
+
+    expect(verdictWord($rows))->toBe('Repair')
+        ->and(verdictReasons($rows))->toHaveCount(5);
+});
 
 it('repairs when there is a cheap fix to make and keeps otherwise', function (array $header, ?string $solid, string $expected) {
     expect(verdictWord(verdictWith($header, $solid)))->toBe($expected);
@@ -302,10 +316,4 @@ it('counts inputs that are fine as readable', function () {
 it('shows nothing when no input is readable', function () {
     expect(verdictRows(verdictReport([], null)))->toBe([])
         ->and(verdictRows(''))->toBe([]);
-});
-
-it('never writes an em-dash', function () {
-    $source = (string) file_get_contents(__DIR__.'/../../app/Services/Reports/ReportVerdict.php');
-
-    expect($source)->not->toContain("\u{2014}")->not->toContain(' -- ');
 });

@@ -24,8 +24,6 @@ final readonly class ReportVerdict
 
     private const REPLACE_STRONG_SIGNALS = 3;
 
-    private const REPLACE_STRONG_SIGNALS_WITH_OS = 2;
-
     private const REPAIR_FIXABLE_STRONG_SIGNALS = 1;
 
     private const REPAIR_FIXABLE_SIGNALS = 2;
@@ -112,9 +110,10 @@ final readonly class ReportVerdict
         $fixable = array_filter($signals, fn (array $signal): bool => $signal['fixable'] && $signal['strength'] > self::NONE);
         $fixableStrong = $this->count($fixable, self::STRONG);
         $osStrong = ($signals['os']['strength'] ?? self::NONE) === self::STRONG;
+        $ageStrong = ($signals['age']['strength'] ?? self::NONE) === self::STRONG;
 
         return match (true) {
-            $strong >= self::REPLACE_STRONG_SIGNALS || ($osStrong && $strong >= self::REPLACE_STRONG_SIGNALS_WITH_OS) => [self::VERDICT_REPLACE, 'bad'],
+            $ageStrong && ($osStrong || $strong >= self::REPLACE_STRONG_SIGNALS) => [self::VERDICT_REPLACE, 'bad'],
             $fixableStrong >= self::REPAIR_FIXABLE_STRONG_SIGNALS || count($fixable) >= self::REPAIR_FIXABLE_SIGNALS => [self::VERDICT_REPAIR, 'neutral'],
             default => [self::VERDICT_KEEP, 'good'],
         };
