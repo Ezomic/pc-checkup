@@ -15,6 +15,7 @@ import RemoteSupportSection from '@/components/machines/RemoteSupportSection.vue
 import StaleNote from '@/components/machines/StaleNote.vue';
 import StatusBadge from '@/components/machines/StatusBadge.vue';
 import StatusSection from '@/components/machines/StatusSection.vue';
+import TrendsCard from '@/components/machines/TrendsCard.vue';
 import { Button } from '@/components/ui/button';
 import { checkedOn, scannedAgo } from '@/lib/scannedAgo';
 import { index, summary } from '@/routes/machines';
@@ -29,6 +30,7 @@ import type {
     MachinePhoto,
     OwnerMachineDetails,
     ReportChanges,
+    Trend,
 } from '@/types';
 
 const props = defineProps<{
@@ -38,6 +40,7 @@ const props = defineProps<{
     report: LatestReport | null;
     changes: ReportChanges | null;
     detailCards: DetailCard[];
+    trends: Trend[];
     afterFix: AfterFixReport | null;
     benchmark: MachineBenchmark | null;
     checklist: ChecklistItem[];
@@ -176,6 +179,8 @@ defineOptions({
         </section>
 
         <DetailCards :cards="detailCards" />
+
+        <TrendsCard :trends="trends" />
 
         <div class="contents print:hidden" data-test="owner-only">
             <StatusSection :machine-id="machine.id" :status="machine.status" />

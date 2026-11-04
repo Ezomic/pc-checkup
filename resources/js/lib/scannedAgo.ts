@@ -30,6 +30,13 @@ export function scannedAgo(value: string, now: Date = new Date()): string {
     return days === 1 ? 'yesterday' : `${days} days ago`;
 }
 
+export function shortDate(value: string): string {
+    return parseUtc(value).toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+    });
+}
+
 export function checkedOn(value: string): string {
     return parseUtc(value).toLocaleDateString('en-GB', {
         day: 'numeric',

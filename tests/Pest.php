@@ -131,3 +131,23 @@ function windowsLaptopFixture(): string
 {
     return (string) file_get_contents(__DIR__.'/Fixtures/windows-checkup-laptop.md');
 }
+
+/**
+ * A Mac report holding only the lines the health trends read. A null leaves that line unreadable.
+ */
+function trendMarkdown(?float $freeGb = null, ?int $cycles = null, ?int $freePercent = null, ?int $memoryFree = null): string
+{
+    $markdown = "# Mac checkup: Trend\n\n- Format: 1\n";
+    $markdown .= '- Battery: '.($cycles ?? 'n/a')." cycles, condition Normal, max capacity n/a\n";
+    $markdown .= '- Free disk: '.($freePercent === null ? 'n/a' : "{$freePercent}%")."\n";
+
+    if ($memoryFree !== null) {
+        $markdown .= "\n## Memory pressure\n\n```\nSystem-wide memory free percentage: {$memoryFree}%\n```\n";
+    }
+
+    if ($freeGb !== null) {
+        $markdown .= sprintf("\n## Disk usage\n\n```\nFilesystem Size Used Avail Capacity\n/dev/disk1s1 500Gi %.1fGi %.1fGi 80%% /\n```\n", 500 - $freeGb, $freeGb);
+    }
+
+    return $markdown;
+}
