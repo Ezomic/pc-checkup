@@ -203,6 +203,30 @@ describe('DetailCards', () => {
         expect(values[1].text()).toBe(advice);
     });
 
+    it('stacks a row whose label and value are long together, and not one that is short', () => {
+        const wrapper = mount(DetailCards, {
+            props: {
+                cards: [
+                    card({
+                        id: 'verdict',
+                        rows: [
+                            { label: 'Verdict', value: 'Keep', tone: 'good' },
+                            {
+                                label: 'Only 2 GB of memory',
+                                value: 'Adding memory, if this model allows it, is a cheap fix.',
+                                tone: 'bad',
+                            },
+                        ],
+                    }),
+                ],
+            },
+        });
+        const labels = wrapper.findAll('dt');
+
+        expect(labels[0].classes()).not.toContain('col-span-2');
+        expect(labels[1].classes()).toContain('col-span-2');
+    });
+
     it('skips the row list for a card that only has a folder list', () => {
         const wrapper = mount(DetailCards, {
             props: {

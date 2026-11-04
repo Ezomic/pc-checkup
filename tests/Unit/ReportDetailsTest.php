@@ -16,6 +16,10 @@ function detailRows(string $markdown, array $flags = [], ?string $deviceType = '
     $cards = [];
 
     foreach ((new ReportDetails(new ReportFacts))->cards($markdown, $flags, $deviceType) as $card) {
+        if ($card['id'] === 'verdict') {
+            continue;
+        }
+
         $cards[$card['id']] = array_column($card['rows'], 'value', 'label');
     }
 

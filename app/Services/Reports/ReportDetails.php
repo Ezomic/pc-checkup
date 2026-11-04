@@ -48,6 +48,7 @@ final readonly class ReportDetails
             $this->card('security', 'Security summary', (new ReportSecurity)->rows($sections)),
             $this->card('stability', 'Stability', (new ReportStability)->rows($sections, $flags)),
             $this->card('slowness', 'Why is it slow?', (new ReportSlowness)->rows($sections, $freeDisk, $this->spinningDrive($sections))),
+            $this->card('verdict', 'Worth keeping?', (new ReportVerdict)->rows($sections, $flags, $freeDisk)),
         ]));
     }
 

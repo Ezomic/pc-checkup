@@ -11,14 +11,14 @@ const tones: Record<DetailTone, string> = {
     neutral: '',
 };
 
-const LONG_VALUE = 80;
+const LONG_ROW = 60;
 
 function toneClass(row: DetailRow): string {
     return tones[row.tone];
 }
 
 function isLong(row: DetailRow): boolean {
-    return row.value.length > LONG_VALUE;
+    return row.label.length + row.value.length > LONG_ROW;
 }
 </script>
 
