@@ -88,8 +88,15 @@ describe('the Dutch-locale Mac scan', function () {
     it('explains why the Mac is slow instead of finding nothing', function () {
         $card = dcCard('slowness', dcFixture());
 
-        expect($card['rows'][0]['value'])->toBe('Probably slow because of 2 things')
-            ->and(array_slice(array_column($card['rows'], 'label'), 1))->toBe([DC_BUSY, DC_INDEXING]);
+        expect($card['rows'][0]['value'])->toBe('Probably slow because of 1 thing')
+            ->and(array_slice(array_column($card['rows'], 'label'), 1))->toBe([DC_INDEXING]);
+    });
+
+    it('calls the processor busy when the CPU sample shows it, but not from a load of 2,11 on 4 threads', function () {
+        $sample = "\n## ".DC_SAMPLE."\n\n```\nProcesses: 400 total\nCPU usage: 60,50% user, 31,50% sys, 8,00% idle\n```\n";
+
+        expect(dcSlowTitles(dcFixture()))->not->toContain(DC_BUSY)
+            ->and(dcSlowTitles(dcFixture().$sample))->toBe([DC_BUSY, DC_INDEXING]);
     });
 
     it('does not blame swap of 328 MB, a quarter of the memory or the program list', function () {
@@ -157,17 +164,24 @@ describe('Slowness reads either decimal separator', function () {
         'single average' => [' 9:12  up 2 days, load average: 2,79', []],
     ]);
 
-    it('counts the physical cores, then the logical ones', function (string $sections, array $expected) {
+    it('counts the logical cores, then the physical ones', function (string $sections, array $expected) {
+        $chip = "MacBookAir7,2\nIntel\n4\n8 GB RAM";
         $sectionList = [DC_PERFORMANCE => 'vm.loadavg: { 1,00 2,50 1,00 }'];
-        $hardware = ['hardware' => [DC_HARDWARE => 'Total Number of Cores: 4 (2 performance and 2 efficiency)'], 'chip' => [DC_CHIP => "MacBookAir7,2\nIntel\n4\n8 GB RAM"], 'both' => [DC_HARDWARE => 'Total Number of Cores: 2', DC_CHIP => "MacBookAir7,2\nIntel\n8\n8 GB RAM"], 'zero' => [DC_HARDWARE => 'Total Number of Cores: 0', DC_CHIP => "MacBookAir7,2\nIntel\n2\n8 GB RAM"], 'none' => []];
+        $hardware = [
+            'physical only' => [DC_HARDWARE => 'Total Number of Cores: 2'],
+            'logical only' => [DC_CHIP => $chip],
+            'both' => [DC_HARDWARE => 'Total Number of Cores: 2', DC_CHIP => $chip],
+            'zero' => [DC_HARDWARE => 'Total Number of Cores: 0'],
+            'none' => [],
+        ];
 
         expect(dcSlowTitles(dcDoc($sectionList + $hardware[$sections])))->toBe($expected);
     })->with([
-        'physical only' => ['hardware', []],
-        'logical only' => ['chip', []],
-        'physical wins over logical' => ['both', [DC_BUSY]],
+        'physical used when the logical count is missing' => ['physical only', [DC_BUSY]],
+        'logical only' => ['logical only', []],
+        'logical wins over physical' => ['both', []],
+        'zero physical cores is no count' => ['zero', []],
         'no core count at all' => ['none', []],
-        'zero physical cores falls back to logical' => ['zero', [DC_BUSY]],
     ]);
 
     it('the CPU sample idle percentage', function (string $line, array $expected) {

@@ -441,13 +441,12 @@ final readonly class ReportSlowness
 
     private function cores(?string $hardware, ?string $chip): ?int
     {
-        // Physical cores win: hw.ncpu counts hyper-threads, so a dual-core Intel Mac reports 4 and never looks busy.
-        $physical = $hardware !== null && preg_match('/^\s*Total Number of Cores:\s*([1-9]\d{0,2})\b/m', $hardware, $match) === 1;
         $logical = $chip !== null && preg_match('/^(\d{1,3})$/m', $chip, $other) === 1;
+        $physical = $hardware !== null && preg_match('/^\s*Total Number of Cores:\s*([1-9]\d{0,2})\b/m', $hardware, $match) === 1;
 
         $cores = match (true) {
-            $physical => (int) $match[1],
             $logical => (int) $other[1],
+            $physical => (int) $match[1],
             default => null,
         };
 
