@@ -7,7 +7,7 @@
 # file without a byte order mark as ANSI.
 #
 # The storage step measures folder sizes and groups the user folder by kind of file, for at most
-# 90 seconds. It stores sizes and counts only, never a file name, follows no junctions or links
+# 150 seconds. It stores sizes and counts only, never a file name, follows no junctions or links
 # and leaves other disks alone. If the time runs out the report says the numbers are partial.
 #
 # Optional upload: with a token the finished report is also sent to PC Checkup. The token is
@@ -147,7 +147,11 @@ function Measure-StorageTree([string]$Path, $Clock, [long]$StopAtMs, $Stats, $Sk
                     $slot = $Stats.Kind[$kind]
                     $slot[0] += $length
                     $slot[1] += 1
-                    if ($extension -ne '') {
+                    if ($extension -eq '') {
+                        $slot = $Stats.Bare
+                        $slot[0] += $length
+                        $slot[1] += 1
+                    } else {
                         $slot = $Stats.Ext[$extension]
                         if ($null -eq $slot) {
                             if ($extension.Length -le 10 -and $extension -cmatch '^[a-z0-9]+$') { $slot = @([long]0, [long]0) } else { $slot = $false }
@@ -167,10 +171,20 @@ function Measure-StorageTree([string]$Path, $Clock, [long]$StopAtMs, $Stats, $Sk
     return [pscustomobject]@{ Bytes = $bytes; Capped = $capped }
 }
 
-# Measures disk usage once, read only, and never longer than the cap (90 seconds by default).
-# Returns the lines of the "Storage breakdown" section; progress goes to the screen.
+# How much of the time left in a phase one bucket may use: its weight's share of the weight still to come.
+function Get-StorageSlice($Clock, [long]$EndMs, [double]$Weight, [double]$WeightLeft) {
+    $room = $EndMs - $Clock.ElapsedMilliseconds
+    if ($room -le 0 -or $WeightLeft -le 0) { return [long]0 }
+    return [long]($room * $Weight / $WeightLeft)
+}
+
+# Measures disk usage once, read only, and never longer than the cap (150 seconds by default).
+# The top level of the drive comes first, then the user folder, and each bucket gets its share of
+# the clock and hands back what it did not use. A bucket that runs out of time is listed as missing
+# instead of with a number that would be too small. Returns the lines of the "Storage breakdown"
+# section; progress goes to the screen.
 function Get-StorageBreakdown {
-    $StorageCapSeconds = 90
+    $StorageCapSeconds = 150
     if ($env:PCC_STORAGE_CAP -match '^[1-9][0-9]{0,4}$') { $StorageCapSeconds = [int]$env:PCC_STORAGE_CAP }
     $clock = [System.Diagnostics.Stopwatch]::StartNew()
     $capMs = [long]$StorageCapSeconds * 1000
@@ -178,12 +192,11 @@ function Get-StorageBreakdown {
     $profilePath = $env:PCC_STORAGE_PROFILE
     $testing = [bool]$profilePath
     if (-not $profilePath) { $profilePath = $env:USERPROFILE }
-    $programs = $env:PCC_STORAGE_PROGRAMS
-    if (-not $programs) { $programs = $env:ProgramFiles }
     $rootPath = $env:PCC_STORAGE_ROOT
     if (-not $rootPath) { $rootPath = $env:SystemDrive + '\' }
+    $separators = [char[]]@('\', '/')
     $special = @{ Desktop = 'Desktop'; Documents = 'MyDocuments'; Pictures = 'MyPictures'; Videos = 'MyVideos'; Music = 'MyMusic' }
-    $stats = @{ Group = @{}; Kind = @{}; Ext = @{} }
+    $stats = @{ Group = @{}; Kind = @{}; Ext = @{}; Bare = @([long]0, [long]0) }
     $groups = [ordered]@{
         Photos    = 'jpg jpeg png gif heic heif bmp tif tiff webp raw cr2 nef arw dng'
         Videos    = 'mp4 mov avi mkv wmv m4v webm flv mpg mpeg 3gp'
@@ -198,68 +211,112 @@ function Get-StorageBreakdown {
         foreach ($extension in $groups[$kind].Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)) { $stats.Group[$extension] = $kind }
     }
 
-    $lines = New-Object System.Collections.Generic.List[string]
-    $walked = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-    $folders = New-Object System.Collections.Generic.List[object]
-    foreach ($name in 'Downloads', 'Documents', 'Desktop', 'Pictures', 'Videos', 'Music', 'AppData') {
+    Write-Host "Measuring storage (the drive, then your user folder, then file types), stopping after $StorageCapSeconds seconds at the latest..."
+    $profileFull = ''
+    if (Test-Path -LiteralPath $profilePath -PathType Container) { $profileFull = [System.IO.Path]::GetFullPath($profilePath).TrimEnd($separators) }
+
+    Write-Host '  Measuring the biggest folders on the drive...'
+    $known = @('Users', 'Windows', 'Program Files', 'Program Files (x86)', 'ProgramData')
+    $knownWeights = @(10, 6, 5, 4, 3)
+    $tops = @()
+    if ((Test-Path -LiteralPath $rootPath -PathType Container) -and (Test-StorageFixedPath $rootPath)) {
+        $tops = @((New-Object System.IO.DirectoryInfo($rootPath)).GetDirectories() | Where-Object {
+            -not ([int]$_.Attributes -band [int][System.IO.FileAttributes]::ReparsePoint) -and $_.Name -ne 'System Volume Information' -and $_.Name -ne '$Recycle.Bin'
+        } | Sort-Object @{ Expression = { [array]::IndexOf($known, $_.Name) } }, Name)
+    }
+    $phaseEnd = [long][math]::Max(1000, $capMs * 35 / 100)
+    $weightLeft = [double]0
+    foreach ($top in $tops) {
+        $at = [array]::IndexOf($known, $top.Name)
+        if ($at -ge 0) { $weightLeft += $knownWeights[$at] } else { $weightLeft += 1 }
+    }
+    $drive = New-Object System.Collections.Generic.List[object]
+    foreach ($top in $tops) {
+        $at = [array]::IndexOf($known, $top.Name)
+        $weight = [double]1
+        if ($at -ge 0) { $weight = [double]$knownWeights[$at] }
+        $slice = Get-StorageSlice $clock $phaseEnd $weight $weightLeft
+        $weightLeft -= $weight
+        $holds = $false
+        $skip = $null
+        if ($profileFull -ne '' -and $profileFull.StartsWith($top.FullName.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $holds = $true
+            $skip = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+            [void]$skip.Add($profileFull)
+        }
+        $clean = $top.Name -replace '[^A-Za-z0-9 ._()+-]', '_'
+        $entry = @{ Name = $clean.Substring(0, [math]::Min(40, $clean.Length)); Raw = $top.Name; Bytes = [long]0; Done = $false; Holds = $holds }
+        if ($slice -gt 0) {
+            $result = Measure-StorageTree $top.FullName $clock ($clock.ElapsedMilliseconds + $slice) $null $skip
+            $entry.Bytes = $result.Bytes
+            $entry.Done = -not $result.Capped
+        }
+        if (-not $entry.Done) { $capped = $true }
+        $drive.Add($entry)
+    }
+
+    Write-Host '  Measuring your user folder and the kinds of files in it...'
+    $appData = Join-Path $profilePath 'AppData'
+    $local = Join-Path $appData 'Local'
+    $roaming = Join-Path $appData 'Roaming'
+    $temp = Join-Path $local 'Temp'
+    $plan = New-Object System.Collections.Generic.List[object]
+    $apart = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $order = @{ Desktop = 1; Music = 2; Pictures = 3; Videos = 4; Downloads = 5; Documents = 10 }
+    $weights = @{ Desktop = 1; Music = 1; Pictures = 2; Videos = 2; Downloads = 2; Documents = 3 }
+    foreach ($name in 'Downloads', 'Documents', 'Desktop', 'Pictures', 'Videos', 'Music') {
         $path = Join-Path $profilePath $name
         if (-not $testing -and $special.ContainsKey($name)) {
             $found = [Environment]::GetFolderPath($special[$name])
             if ($found) { $path = $found }
         }
-        $folders.Add(@{ Name = $name; Path = $path; Types = $true })
+        $plan.Add(@{ Key = $name; Path = $path; Skip = @(); Order = $order[$name]; Weight = $weights[$name] })
     }
-    $folders.Add(@{ Name = 'Program Files'; Path = $programs; Types = $false })
+    $plan.Add(@{ Key = 'Temp'; Path = $temp; Skip = @(); Order = 7; Weight = 1 })
+    $plan.Add(@{ Key = 'Local'; Path = $local; Skip = @($temp); Order = 11; Weight = 5 })
+    $plan.Add(@{ Key = 'Roaming'; Path = $roaming; Skip = @(); Order = 6; Weight = 2 })
+    $plan.Add(@{ Key = 'AppDataRest'; Path = $appData; Skip = @($local, $roaming); Order = 8; Weight = 1 })
+    foreach ($item in $plan) {
+        if (@('Temp', 'Local', 'Roaming', 'AppDataRest') -notcontains $item.Key) { [void]$apart.Add([System.IO.Path]::GetFullPath($item.Path).TrimEnd($separators)) }
+    }
+    [void]$apart.Add([System.IO.Path]::GetFullPath($appData).TrimEnd($separators))
+    $plan.Add(@{ Key = 'Rest'; Path = $profilePath; Skip = @(); Order = 9; Weight = 2 })
 
-    Write-Host "Measuring storage (folders, then file types), stopping after $StorageCapSeconds seconds at the latest..."
-    $phaseEnd = [long][math]::Max(1000, $capMs * 35 / 100)
-    $present = @($folders | Where-Object { (Test-Path -LiteralPath $_.Path -PathType Container) -and (Test-StorageFixedPath $_.Path) })
-    $left = $present.Count
-    foreach ($folder in $present) {
-        $slice = [long](($phaseEnd - $clock.ElapsedMilliseconds) / $left)
-        $left--
-        if ($slice -le 0) { $capped = $true; continue }
-        $statsForFolder = $null
-        if ($folder.Types) {
-            $statsForFolder = $stats
-            [void]$walked.Add([System.IO.Path]::GetFullPath($folder.Path).TrimEnd('\', '/'))
+    $present = @($plan | Where-Object { (Test-Path -LiteralPath $_.Path -PathType Container) -and (Test-StorageFixedPath $_.Path) } | Sort-Object { $_.Order })
+    $got = @{}
+    $weightLeft = [double]0
+    foreach ($item in $present) { $weightLeft += $item.Weight }
+    foreach ($item in $present) {
+        $slice = Get-StorageSlice $clock $capMs $item.Weight $weightLeft
+        $weightLeft -= $item.Weight
+        $skip = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($path in $item.Skip) { [void]$skip.Add([System.IO.Path]::GetFullPath($path).TrimEnd($separators)) }
+        if ($item.Key -eq 'Rest') { foreach ($path in $apart) { [void]$skip.Add($path) } }
+        $got[$item.Key] = $null
+        if ($slice -gt 0) {
+            $result = Measure-StorageTree $item.Path $clock ($clock.ElapsedMilliseconds + $slice) $stats $skip
+            if (-not $result.Capped) { $got[$item.Key] = $result.Bytes }
         }
-        $result = Measure-StorageTree $folder.Path $clock ($clock.ElapsedMilliseconds + $slice) $statsForFolder $null
-        if ($result.Capped) { $capped = $true }
-        $lines.Add("folder|$($folder.Name)|$([long][math]::Round($result.Bytes / 1024.0))")
+        if ($null -eq $got[$item.Key]) { $capped = $true }
     }
 
-    Write-Host '  Measuring the rest of your user folder...'
-    $phaseEnd = [long][math]::Max($phaseEnd + 1000, $capMs * 55 / 100)
-    $remaining = @()
-    if (Test-Path -LiteralPath $profilePath -PathType Container) {
-        $remaining = @((New-Object System.IO.DirectoryInfo($profilePath)).GetDirectories() | Where-Object { -not ([int]$_.Attributes -band [int][System.IO.FileAttributes]::ReparsePoint) -and -not $walked.Contains($_.FullName.TrimEnd('\', '/')) })
+    $absent = New-Object System.Collections.Generic.List[string]
+    $homeTotal = $null
+    if ($present.Count -gt 0 -and $present.Count -eq @($present | Where-Object { $null -ne $got[$_.Key] }).Count) {
+        $homeTotal = [long]0
+        foreach ($item in $present) { $homeTotal += $got[$item.Key] }
     }
-    $left = $remaining.Count
-    foreach ($directory in $remaining) {
-        $slice = [long](($phaseEnd - $clock.ElapsedMilliseconds) / $left)
-        $left--
-        if ($slice -le 0) { $capped = $true; continue }
-        $result = Measure-StorageTree $directory.FullName $clock ($clock.ElapsedMilliseconds + $slice) $stats $walked
-        if ($result.Capped) { $capped = $true }
+    $folderBytes = @{}
+    foreach ($name in 'Downloads', 'Documents', 'Desktop', 'Pictures', 'Videos', 'Music') { $folderBytes[$name] = $got[$name] }
+    $appParts = @($present | Where-Object { @('Temp', 'Local', 'Roaming', 'AppDataRest') -contains $_.Key })
+    $appBytes = $null
+    if ($appParts.Count -gt 0 -and $appParts.Count -eq @($appParts | Where-Object { $null -ne $got[$_.Key] }).Count) {
+        $appBytes = [long]0
+        foreach ($item in $appParts) { $appBytes += $got[$item.Key] }
     }
-
-    Write-Host '  Measuring the biggest folders on the drive...'
-    $drive = New-Object System.Collections.Generic.List[object]
-    $tops = @()
-    if (Test-Path -LiteralPath $rootPath -PathType Container) {
-        $tops = @((New-Object System.IO.DirectoryInfo($rootPath)).GetDirectories() | Where-Object { -not ([int]$_.Attributes -band [int][System.IO.FileAttributes]::ReparsePoint) })
-    }
-    $left = $tops.Count
-    foreach ($top in $tops) {
-        $slice = [long](($capMs - $clock.ElapsedMilliseconds) / $left)
-        $left--
-        if ($slice -le 0) { $capped = $true; continue }
-        $result = Measure-StorageTree $top.FullName $clock ($clock.ElapsedMilliseconds + $slice) $null $null
-        if ($result.Capped) { $capped = $true }
-        $clean = $top.Name -replace '[^A-Za-z0-9 ._()+-]', '_'
-        $drive.Add([pscustomobject]@{ Name = $clean.Substring(0, [math]::Min(40, $clean.Length)); Bytes = $result.Bytes })
-    }
+    $folderBytes['AppData'] = $appBytes
+    $libraryBytes = @{ Temp = $got['Temp']; Roaming = $got['Roaming']; Local = $null }
+    if ($null -ne $got['Local'] -and ($null -ne $got['Temp'] -or -not $got.ContainsKey('Temp'))) { $libraryBytes['Local'] = [long]$got['Local'] + [long]$got['Temp'] }
 
     $scan = 'complete'
     if ($capped) {
@@ -270,12 +327,49 @@ function Get-StorageBreakdown {
     $output.Add("scan: $scan")
     $output.Add("seconds: $([int][math]::Floor($clock.Elapsed.TotalSeconds))")
     $output.Add("limit: $StorageCapSeconds")
-    foreach ($line in $lines) { $output.Add($line) }
-    foreach ($item in ($drive | Sort-Object Bytes -Descending | Select-Object -First 5)) { $output.Add("root|$($item.Name)|$([long][math]::Round($item.Bytes / 1024.0))") }
+    $output.Add('format: 2')
+
+    $rows = New-Object System.Collections.Generic.List[object]
+    $total = [long]0
+    foreach ($entry in $drive) {
+        $bytes = $entry.Bytes
+        $done = $entry.Done
+        if ($entry.Holds) {
+            $done = $done -and $null -ne $homeTotal
+            if ($done) { $bytes += $homeTotal }
+        }
+        if ($done) {
+            $total += $bytes
+            $rows.Add([pscustomobject]@{ Name = $entry.Name; Bytes = $bytes })
+        } elseif ($known -contains $entry.Raw) {
+            $absent.Add("missing|root/$($entry.Raw)")
+        }
+    }
+    foreach ($item in ($rows | Sort-Object @{ Expression = { $_.Bytes }; Descending = $true }, Name | Select-Object -First 6)) { $output.Add("root|$($item.Name)|$([long][math]::Round($item.Bytes / 1024.0))") }
+    if ($tops.Count -gt 0) { $output.Add("roots_total|$([long][math]::Round($total / 1024.0))") }
+    foreach ($line in $absent) { $output.Add($line) }
+
+    if ($null -ne $homeTotal) { $output.Add("home|$([long][math]::Round($homeTotal / 1024.0))") }
+    foreach ($name in 'Downloads', 'Documents', 'Desktop', 'Pictures', 'Videos', 'Music', 'AppData') {
+        $exists = Test-Path -LiteralPath (Join-Path $profilePath $name) -PathType Container
+        if ($null -ne $folderBytes[$name]) {
+            $output.Add("folder|$name|$([long][math]::Round($folderBytes[$name] / 1024.0))")
+        } elseif ($exists) {
+            $output.Add("missing|home/$name")
+        }
+    }
+    foreach ($name in 'Local', 'Roaming', 'Temp') {
+        if ($null -ne $libraryBytes[$name]) {
+            $output.Add("library|$name|$([long][math]::Round($libraryBytes[$name] / 1024.0))")
+        } elseif ($got.ContainsKey($name)) {
+            $output.Add("missing|library/$name")
+        }
+    }
     foreach ($kind in $groups.Keys) {
         if ($stats.Kind[$kind][1] -gt 0) { $output.Add("type|$kind|$([long][math]::Round($stats.Kind[$kind][0] / 1024.0))|$($stats.Kind[$kind][1])") }
     }
-    $extensions = $stats.Ext.GetEnumerator() | Where-Object { $_.Value -is [array] } | Sort-Object @{ Expression = { $_.Value[0] }; Descending = $true }, @{ Expression = { $_.Key }; Descending = $false } | Select-Object -First 8
+    if ($stats.Bare[1] -gt 0) { $output.Add("noext|$([long][math]::Round($stats.Bare[0] / 1024.0))|$($stats.Bare[1])") }
+    $extensions = $stats.Ext.GetEnumerator() | Where-Object { $_.Value -is [array] } | Sort-Object @{ Expression = { $_.Value[0] }; Descending = $true }, @{ Expression = { $_.Key }; Descending = $false } | Select-Object -First 24
     foreach ($item in $extensions) { $output.Add("ext|$($item.Key)|$([long][math]::Round($item.Value[0] / 1024.0))|$($item.Value[1])") }
     return $output.ToArray()
 }

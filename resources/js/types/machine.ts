@@ -69,6 +69,7 @@ export type DetailCard = {
     title: string;
     rows: DetailRow[];
     list: { title: string; items: DetailRow[] } | null;
+    summary?: string | null;
     bars?: DetailBarGroup[];
     notes?: string[];
 };

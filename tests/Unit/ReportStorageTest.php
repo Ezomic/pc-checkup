@@ -17,7 +17,7 @@ function storageDoc(string $body, string $title = 'Storage breakdown'): string
 }
 
 /**
- * @return array{partial: bool, folders: list<array{name: string, bytes: float, count: int|null}>, roots: list<array{name: string, bytes: float, count: int|null}>, categories: list<array{name: string, bytes: float, count: int|null}>, extensions: list<array{name: string, bytes: float, count: int|null}>}|null
+ * @return array<string, mixed>|null
  */
 function readStorage(string $body): ?array
 {
@@ -54,12 +54,12 @@ describe('a complete section', function () {
         expect($crlf)->toBe($lf);
     });
 
-    it('keeps only the five biggest drive folders and the eight biggest extensions', function () {
+    it('keeps only the six biggest drive folders and the eight biggest extensions', function () {
         $roots = implode("\n", array_map(fn (int $i): string => "root|Dir{$i}|".($i * 10), range(1, 9)));
-        $exts = implode("\n", array_map(fn (int $i): string => "ext|e{$i}|".($i * 10).'|1', range(1, 12)));
+        $exts = implode("\n", array_map(fn (int $i): string => "ext|e{$i}|".($i * 1000).'|1', range(1, 12)));
         $read = readStorage("scan: complete\n{$roots}\n{$exts}");
 
-        expect(storageNames($read['roots']))->toBe(['Dir9', 'Dir8', 'Dir7', 'Dir6', 'Dir5'])
+        expect(storageNames($read['roots']))->toBe(['Dir9', 'Dir8', 'Dir7', 'Dir6', 'Dir5', 'Dir4'])
             ->and(storageNames($read['extensions']))->toBe(['e12', 'e11', 'e10', 'e9', 'e8', 'e7', 'e6', 'e5']);
     });
 });
@@ -143,12 +143,12 @@ describe('data that cannot be used', function () {
     })->with(['n/a', '-3', '2.5', 'many', '']);
 
     it('keeps the first of two rows with the same name', function () {
-        $read = readStorage("scan: complete\nfolder|Downloads|10\nfolder|Downloads|99\nroot|Users|5\nroot|users|50\ntype|Photos|1|1\ntype|Photos|9|9\next|jpg|1|1\next|JPG|9|9");
+        $read = readStorage("scan: complete\nfolder|Downloads|10\nfolder|Downloads|99\nroot|Users|5\nroot|users|50\ntype|Photos|1|1\ntype|Photos|9|9\next|jpg|1000|1\next|JPG|9000|9");
 
         expect($read['folders'][0]['bytes'])->toBe(10240.0)
             ->and(storageNames($read['roots']))->toBe(['Users'])
             ->and($read['categories'][0]['bytes'])->toBe(1024.0)
-            ->and($read['extensions'])->toBe([['name' => 'jpg', 'bytes' => 1024.0, 'count' => 1]]);
+            ->and($read['extensions'])->toBe([['name' => 'jpg', 'bytes' => 1024000.0, 'count' => 1]]);
     });
 
     it('only accepts the well-known folder names and the seven kinds of file', function () {
@@ -159,7 +159,7 @@ describe('data that cannot be used', function () {
     });
 
     it('reads an extension only when it is up to ten letters and digits', function (string $ext, ?string $expected) {
-        $read = readStorage("scan: complete\nfolder|Downloads|1\next|{$ext}|10|1");
+        $read = readStorage("scan: complete\nfolder|Downloads|1\next|{$ext}|1000|1");
 
         expect(storageNames($read['extensions']))->toBe($expected === null ? [] : [$expected]);
     })->with([
@@ -191,5 +191,155 @@ describe('data that cannot be used', function () {
 
     it('skips a drive folder row with an extra pipe', function () {
         expect(readStorage("scan: complete\nroot|a|b|5"))->toBeNull();
+    });
+});
+
+describe('an old report from before the format line', function () {
+    it('reads as version one without a total, a home size or missing folders', function () {
+        $read = readStorage((string) file_get_contents(__DIR__.'/../Fixtures/storage-breakdown-old-mac.txt'));
+
+        expect($read['version'])->toBe(1)
+            ->and($read['partial'])->toBeTrue()
+            ->and($read['home'])->toBeNull()
+            ->and($read['rootsTotal'])->toBeNull()
+            ->and($read['missing'])->toBe([])
+            ->and($read['library'])->toBe([])
+            ->and(storageNames($read['roots']))->toBe(['Applications', 'System', 'Library'])
+            ->and(storageNames($read['folders']))->toBe(['Desktop', 'Pictures', 'Downloads', 'Music', 'Documents', 'Movies']);
+    });
+
+    it('turns the odd endings into readable ones and drops the small ones', function () {
+        $read = readStorage((string) file_get_contents(__DIR__.'/../Fixtures/storage-breakdown-old-mac.txt'));
+
+        expect($read['extensions'])->toBe([
+            ['name' => 'file', 'bytes' => 2695188.0 * 1024, 'count' => 765],
+            ['name' => 'app and system bundles', 'bytes' => 919100.0 * 1024, 'count' => 463],
+            ['name' => 'ver1', 'bytes' => 779396.0 * 1024, 'count' => 155],
+            ['name' => 'png', 'bytes' => 276636.0 * 1024, 'count' => 2199],
+            ['name' => 'db', 'bytes' => 171036.0 * 1024, 'count' => 16],
+            ['name' => 'avi', 'bytes' => 159760.0 * 1024, 'count' => 3],
+            ['name' => 'tbz', 'bytes' => 126704.0 * 1024, 'count' => 3],
+            ['name' => 'pptx', 'bytes' => 114520.0 * 1024, 'count' => 1],
+        ]);
+    });
+});
+
+const STORAGE_V2 = "scan: partial (time limit of 150 seconds reached)\nseconds: 150\nlimit: 150\nformat: 2\n"
+    ."root|Applications|13333212\nroot|System|7232700\nroots_total|20565912\n"
+    ."missing|root/Users\nmissing|home/Library\nmissing|library/Caches\n"
+    ."home|50000000\nfolder|Downloads|248540\nfolder|Applications|100\nlibrary|Application Support|900\nlibrary|Temp|5\n"
+    ."type|Other|1000|10\nnoext|500000|40\next|package|300|2\next|app|200|1\next|bundle|200|1\n";
+
+describe('the second format', function () {
+    it('reads the version, the total, the home size, the library items and the missing names', function () {
+        $read = readStorage(STORAGE_V2);
+
+        expect($read['version'])->toBe(2)
+            ->and($read['rootsTotal'])->toBe(20565912.0 * 1024)
+            ->and($read['home'])->toBe(50000000.0 * 1024)
+            ->and(storageNames($read['library']))->toBe(['Application Support', 'Temp files'])
+            ->and($read['missing'])->toBe(['Users', 'Library (in your user folder)', 'Library: Caches']);
+    });
+
+    it('names the user folders that share a name with a folder on the drive', function () {
+        $second = readStorage(STORAGE_V2);
+        $first = readStorage("scan: complete\nfolder|Applications|100\nfolder|Library|50\nfolder|Downloads|10");
+
+        expect(storageNames($second['folders']))->toBe(['Downloads', 'Applications (in your user folder)'])
+            ->and(storageNames($first['folders']))->toBe(['Applications', 'Library', 'Downloads']);
+    });
+
+    it('adds the bundle endings together and labels files without an ending', function () {
+        $read = readStorage(STORAGE_V2);
+
+        expect($read['extensions'])->toBe([
+            ['name' => 'no extension', 'bytes' => 500000.0 * 1024, 'count' => 40],
+            ['name' => 'app and system bundles', 'bytes' => 700.0 * 1024, 'count' => 4],
+        ]);
+    });
+});
+
+describe('odd data in the second format', function () {
+    it('ignores a total or home size that is not a plain non-negative number', function (string $size) {
+        $read = readStorage("scan: complete\nformat: 2\nfolder|Downloads|5\nroots_total|{$size}\nhome|{$size}");
+
+        expect($read['rootsTotal'])->toBeNull()->and($read['home'])->toBeNull();
+    })->with(['n/a', '-5', '', '1e9', '99999999999999999999', '1|2']);
+
+    it('keeps the first total and the first home size when there are two', function () {
+        $read = readStorage("scan: complete\nformat: 2\nroots_total|10\nroots_total|99\nhome|20\nhome|88");
+
+        expect($read['rootsTotal'])->toBe(10240.0)->and($read['home'])->toBe(20480.0);
+    });
+
+    it('keeps a total of zero, which means nothing could be measured', function () {
+        $read = readStorage("scan: partial\nformat: 2\nroots_total|0");
+
+        expect($read['rootsTotal'])->toBe(0.0)->and($read['folders'])->toBe([]);
+    });
+
+    it('shows a card for a section with only missing folders', function () {
+        expect(readStorage("scan: partial\nformat: 2\nmissing|root/Users")['missing'])->toBe(['Users']);
+    });
+
+    it('lists a missing name only when it is on a fixed list, once, in plain words', function (string $line, array $expected) {
+        expect(readStorage("scan: partial\nformat: 2\nroots_total|1\n{$line}")['missing'])->toBe($expected);
+    })->with([
+        'a drive folder' => ['missing|root/Users', ['Users']],
+        'a drive folder in any case' => ['missing|root/users', ['Users']],
+        'a home folder' => ['missing|home/Downloads', ['Downloads']],
+        'the home Library is told apart from the drive one' => ['missing|home/Library', ['Library (in your user folder)']],
+        'the home Applications is told apart from the drive one' => ['missing|home/Applications', ['Applications (in your user folder)']],
+        'a library item' => ['missing|library/Group Containers', ['Library: Group Containers']],
+        'a Windows library item' => ['missing|library/Local', ['Library: AppData Local']],
+        'a name without a scope' => ['missing|Users', ['Users']],
+        'a bare home name' => ['missing|Downloads', ['Downloads']],
+        'a bare library name' => ['missing|Caches', ['Library: Caches']],
+        'a made up name' => ['missing|root/Secret Project', []],
+        'a made up name without a scope' => ['missing|Secret Project', []],
+        'a made up scope' => ['missing|elsewhere/Users', []],
+        'a name from the wrong list' => ['missing|root/Downloads', []],
+        'a path' => ['missing|root/Users/me', []],
+        'an empty name' => ['missing|', []],
+        'an extra pipe' => ['missing|root/Users|5', []],
+        'a duplicate' => ["missing|root/Users\nmissing|Users", ['Users']],
+    ]);
+
+    it('treats a format line that is not a number as the first format', function (string $line) {
+        expect(readStorage("scan: complete\n{$line}\nfolder|Downloads|1")['version'])->toBe(1);
+    })->with(['format: two', 'format: ', 'format: 2.5', 'format: -2', 'format: 99999']);
+
+    it('never goes below the first format', function () {
+        expect(readStorage("scan: complete\nformat: 0\nfolder|Downloads|1")['version'])->toBe(1);
+    });
+
+    it('reads a library item only from the fixed list of names', function () {
+        $read = readStorage("scan: complete\nformat: 2\nlibrary|Caches|10\nlibrary|Secret Stuff|99\nlibrary|caches|20\nlibrary|Mobile Documents|5");
+
+        expect(storageNames($read['library']))->toBe(['Caches', 'Mobile Documents (iCloud)']);
+    });
+
+    it('skips endings under a hundred kilobytes and keeps one at exactly that', function () {
+        $read = readStorage("scan: complete\next|big|100|1\next|small|99.9|1\nnoext|99|9\nnoext|100|1");
+
+        expect(storageNames($read['extensions']))->toBe(['big']);
+    });
+
+    it('adds up bundle endings with unknown counts without inventing a count', function () {
+        $read = readStorage("scan: complete\next|package|200|n/a\next|app|200|n/a");
+
+        expect($read['extensions'])->toBe([['name' => 'app and system bundles', 'bytes' => 409600.0, 'count' => null]]);
+    });
+
+    it('ignores a no extension line that is malformed', function (string $line) {
+        expect(readStorage("scan: complete\nfolder|Downloads|1\n{$line}")['extensions'])->toBe([]);
+    })->with(['noext|n/a|5', 'noext|500', 'noext|500|5|6', 'noext|-5|5']);
+
+    it('keeps a no extension row with an unreadable count', function () {
+        expect(readStorage("scan: complete\nnoext|500|many")['extensions'])->toBe([['name' => 'no extension', 'bytes' => 512000.0, 'count' => null]]);
+    });
+
+    it('does not mistake a format line for data', function () {
+        expect(readStorage("scan: complete\nformat: 2"))->toBeNull();
     });
 });

@@ -249,7 +249,7 @@ it('gives the owner the storage breakdown card with the camelCase detailCards pr
 
     expect(array_column($details, 'id'))->toContain('storage-breakdown')
         ->and($card['title'])->toBe('Storage breakdown')
-        ->and($card['bars'][0]['items'][0]['label'])->toBe('Downloads')
+        ->and($card['bars'][0]['items'][0]['label'])->toBe('Users')
         ->and($card['notes'][0])->toContain('time limit');
 });
 

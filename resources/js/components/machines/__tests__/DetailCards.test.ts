@@ -290,6 +290,34 @@ describe('DetailCards', () => {
         );
     });
 
+    it('shows the summary sentence under the title', () => {
+        const wrapper = mount(DetailCards, {
+            props: {
+                cards: [
+                    card({
+                        summary: 'The biggest folders found are Users (50 GB).',
+                    }),
+                ],
+            },
+        });
+
+        expect(wrapper.get('[data-test="detail-summary"]').text()).toBe(
+            'The biggest folders found are Users (50 GB).',
+        );
+    });
+
+    it('draws no summary for a card without one or with an empty one', () => {
+        const without = mount(DetailCards, { props: { cards: [card()] } });
+        const empty = mount(DetailCards, {
+            props: { cards: [card({ summary: null })] },
+        });
+
+        expect(without.find('[data-test="detail-summary"]').exists()).toBe(
+            false,
+        );
+        expect(empty.find('[data-test="detail-summary"]').exists()).toBe(false);
+    });
+
     it('draws no bars or notes for a card without them', () => {
         const wrapper = mount(DetailCards, { props: { cards: [card()] } });
 

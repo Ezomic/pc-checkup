@@ -26,20 +26,22 @@ function storageTree(): string
         'Downloads/.hidden' => 4, 'Downloads/weird.a-b' => 4, 'Downloads/long.abcdefghijk' => 4,
         'Downloads/Secret Subfolder/inner.jpg' => 16, 'Documents/doc.docx' => 32,
         'Documents/song.mp3' => 128, 'Pictures/sub/pic.jpeg' => 68, 'Library/cache.bin' => 260,
+        'Library/Caches/c.dat' => 200, 'Library/Application Support/s.dat' => 100,
+        'Library/Secret Stuff/z.dat' => 300, 'Applications/App.app/bin' => 40,
     ] as $file => $kib) {
         storageFile("{$home}/{$file}", $kib);
     }
 
-    foreach (range(1, 7) as $i) {
+    foreach (range(1, 5) as $i) {
         storageFile("{$base}/root/dir{$i}/data", $i * 100);
     }
 
+    storageFile("{$base}/root/Users/u/data", 800);
+    storageFile("{$base}/root/System/data", 900);
     storageFile("{$base}/root/with space/data", 52);
     storageFile("{$base}/root/Volumes/huge", 9996);
     storageFile("{$base}/root/file.txt", 8);
-    symlink("{$base}/root/dir7", "{$base}/root/link");
-    File::ensureDirectoryExists("{$base}/apps");
-    storageFile("{$base}/apps/App.app/bin", 40);
+    symlink("{$base}/root/dir5", "{$base}/root/link");
 
     return $base;
 }
@@ -52,7 +54,8 @@ function runStorage(string $base, array $env = [], ?string $path = null): Proces
     return Process::path(base_path())->timeout(120)->env(array_filter(array_merge([
         'PCC_STORAGE_HOME' => $base.'/home',
         'PCC_STORAGE_ROOT' => $base.'/root',
-        'PCC_STORAGE_APPS' => $base.'/apps',
+        'PCC_STORAGE_DATA' => $base.'/no-data-volume',
+        'PCC_STORAGE_FIRMLINKS' => $base.'/no-firmlinks',
         'PATH' => $path,
     ], $env), fn (?string $value): bool => $value !== null))->run(['bash', '-c', 'source scripts/mac-checkup.sh; pcc_storage_report']);
 }
@@ -75,6 +78,28 @@ function storageRows(string $output): array
     return $rows;
 }
 
+/**
+ * @param  list<list<string>>  $rows
+ * @return array<string, int>
+ */
+function storageSizes(array $rows): array
+{
+    $sizes = array_column($rows, 1, 0);
+    ksort($sizes);
+
+    return array_map('intval', $sizes);
+}
+
+function storageNear(int $actual, int $expected, int $slack = 24): bool
+{
+    return $actual >= $expected && $actual <= $expected + $slack;
+}
+
+function slowDu(string $pathEnd): string
+{
+    return fakeMacBin(['du' => 'for last; do :; done; case "$last" in *'.$pathEnd.') exec sleep 30 ;; esac; exec /usr/bin/du "$@"']);
+}
+
 afterEach(function () {
     foreach (glob(sys_get_temp_dir().'/pcc-storage-*') ?: [] as $dir) {
         File::deleteDirectory($dir);
@@ -82,22 +107,40 @@ afterEach(function () {
 });
 
 describe('the Mac step on a tree with known files', function () {
-    it('measures the well-known folders, leaving out the ones that do not exist', function () {
+    it('measures the well-known folders in the user folder, leaving out the ones that do not exist', function () {
         $result = runStorage(storageTree());
-        $folders = array_column(storageRows($result->output())['folder'], 1, 0);
+        $folders = storageSizes(storageRows($result->output())['folder']);
 
         expect($result->successful())->toBeTrue()
-            ->and(array_keys($folders))->toBe(['Downloads', 'Documents', 'Pictures', 'Applications', 'Library'])
-            ->and((int) $folders['Downloads'])->toBeBetween(4096, 4096 + 32)
-            ->and((int) $folders['Documents'])->toBeBetween(160, 160 + 16)
-            ->and((int) $folders['Applications'])->toBeBetween(40, 40 + 16);
+            ->and(array_keys($folders))->toBe(['Applications', 'Documents', 'Downloads', 'Library', 'Pictures'])
+            ->and(storageNear($folders['Downloads'], 4096))->toBeTrue()
+            ->and(storageNear($folders['Documents'], 160))->toBeTrue()
+            ->and(storageNear($folders['Applications'], 40))->toBeTrue()
+            ->and(storageNear($folders['Library'], 860, 48))->toBeTrue();
     });
 
-    it('lists the five biggest folders at the top of the drive, without volumes, links and loose files', function () {
-        $roots = storageRows(runStorage(storageTree())->output())['root'];
+    it('measures the whole user folder as one number', function () {
+        $home = storageRows(runStorage(storageTree())->output())['home'];
 
-        expect(array_column($roots, 0))->toBe(['dir7', 'dir6', 'dir5', 'dir4', 'dir3'])
-            ->and((int) $roots[0][1])->toBeBetween(700, 700 + 16);
+        expect($home)->toHaveCount(1)
+            ->and(storageNear((int) $home[0][0], 5224, 96))->toBeTrue();
+    });
+
+    it('measures only the well-known folders inside Library', function () {
+        $library = storageSizes(storageRows(runStorage(storageTree())->output())['library']);
+
+        expect(array_keys($library))->toBe(['Application Support', 'Caches'])
+            ->and(storageNear($library['Caches'], 200))->toBeTrue()
+            ->and(storageNear($library['Application Support'], 100))->toBeTrue();
+    });
+
+    it('lists the six biggest folders at the top of the drive from one pass, without volumes, links and loose files', function () {
+        $rows = storageRows(runStorage(storageTree())->output());
+        $roots = $rows['root'];
+
+        expect(array_column($roots, 0))->toBe(['System', 'Users', 'dir5', 'dir4', 'dir3', 'dir2'])
+            ->and(storageNear((int) $roots[0][1], 900))->toBeTrue()
+            ->and(storageNear((int) $rows['roots_total'][0][0], 3252, 96))->toBeTrue();
     });
 
     it('groups the user folder into kinds of file with sizes and counts', function () {
@@ -110,41 +153,51 @@ describe('the Mac step on a tree with known files', function () {
             ['Documents', '100', '3'],
             ['Archives', '392', '2'],
             ['Apps', '16', '1'],
-            ['Other', '280', '5'],
+            ['Other', '920', '9'],
         ]);
     });
 
-    it('keeps the eight biggest extensions, lower case, and drops odd ones', function () {
+    it('counts files without an extension on their own line', function () {
+        expect(storageRows(runStorage(storageTree())->output())['noext'])->toBe([['52', '3']]);
+    });
+
+    it('keeps the biggest extensions, lower case, and drops odd ones', function () {
         $extensions = storageRows(runStorage(storageTree())->output())['ext'];
 
         expect($extensions)->toBe([
             ['mp4', '2048', '1'],
             ['jpg', '1040', '2'],
+            ['dat', '600', '3'],
             ['png', '512', '1'],
             ['bin', '260', '1'],
             ['zip', '256', '1'],
             ['gz', '136', '1'],
             ['mp3', '128', '1'],
             ['jpeg', '68', '1'],
+            ['pdf', '64', '1'],
+            ['docx', '32', '1'],
+            ['exe', '16', '1'],
+            ['txt', '4', '1'],
         ]);
     });
 
-    it('states the limit, how long it took and that it finished', function () {
+    it('states the limit, how long it took, the format and that it finished', function () {
         $lines = explode("\n", trim(runStorage(storageTree())->output()));
 
         expect($lines[0])->toBe('scan: complete')
             ->and($lines[1])->toMatch('/^seconds: \d+$/')
-            ->and($lines[2])->toBe('limit: 90');
+            ->and($lines[2])->toBe('limit: 150')
+            ->and($lines[3])->toBe('format: 2');
     });
 
     it('prints only the fixed kinds of line and never a file or subfolder name', function () {
         $output = runStorage(storageTree())->output();
 
         foreach (explode("\n", trim($output)) as $line) {
-            expect($line)->toMatch('/^(scan: .+|seconds: \d+|limit: \d+|folder\|[A-Za-z ]+\|\d+|root\|[A-Za-z0-9 ._()+-]{1,40}\|\d+|type\|[A-Za-z]+\|\d+\|\d+|ext\|[a-z0-9]{1,10}\|\d+\|\d+)$/');
+            expect($line)->toMatch('/^(scan: .+|seconds: \d+|limit: \d+|format: 2|home\|\d+|roots_total\|\d+|folder\|[A-Za-z]+\|\d+|library\|[A-Za-z ]+\|\d+|root\|[A-Za-z0-9 ._()+-]{1,40}\|\d+|missing\|(root|home|library)\/[A-Za-z ]+|type\|[A-Za-z]+\|\d+\|\d+|noext\|\d+\|\d+|ext\|[a-z0-9]{1,10}\|\d+\|\d+)$/');
         }
 
-        expect($output)->not->toContain('Secret')->not->toContain('inner')->not->toContain('photo')->not->toContain('report')->not->toContain('sub')->not->toContain('hidden');
+        expect($output)->not->toContain('Secret')->not->toContain('inner')->not->toContain('photo')->not->toContain('report')->not->toContain('sub')->not->toContain('hidden')->not->toContain('Stuff');
     });
 
     it('reads what the report parser expects', function () {
@@ -152,9 +205,14 @@ describe('the Mac step on a tree with known files', function () {
         $read = (new ReportStorage)->read(ReportSections::parse("## Storage breakdown\n\n```\n{$output}\n```\n"));
 
         expect($read['partial'])->toBeFalse()
-            ->and(array_column($read['folders'], 'name'))->toBe(['Downloads', 'Library', 'Documents', 'Pictures', 'Applications'])
-            ->and(array_column($read['categories'], 'name'))->toBe(['Videos', 'Photos', 'Archives', 'Other', 'Music', 'Documents', 'Apps'])
-            ->and($read['roots'])->toHaveCount(5);
+            ->and($read['version'])->toBe(2)
+            ->and(array_column($read['folders'], 'name'))->toBe(['Downloads', 'Library (in your user folder)', 'Documents', 'Pictures', 'Applications (in your user folder)'])
+            ->and(array_column($read['library'], 'name'))->toBe(['Caches', 'Application Support'])
+            ->and(array_column($read['categories'], 'name'))->toBe(['Videos', 'Photos', 'Other', 'Archives', 'Music', 'Documents', 'Apps'])
+            ->and($read['roots'])->toHaveCount(6)
+            ->and($read['missing'])->toBe([])
+            ->and($read['home'])->not->toBeNull()
+            ->and($read['rootsTotal'])->not->toBeNull();
     });
 
     it('does not follow a symbolic link out of the user folder', function () {
@@ -162,12 +220,14 @@ describe('the Mac step on a tree with known files', function () {
         storageFile("{$base}/outside/big.mp4", 8192);
         symlink("{$base}/outside", "{$base}/home/Documents/linked");
         symlink("{$base}/outside/big.mp4", "{$base}/home/Documents/linked-file.mp4");
+        File::deleteDirectory("{$base}/home/Music");
         symlink("{$base}/outside", "{$base}/home/Music");
         $rows = storageRows(runStorage($base)->output());
 
         expect($rows['type'][1])->toBe(['Videos', '2048', '1'])
-            ->and((int) array_column($rows['folder'], 1, 0)['Documents'])->toBeLessThan(1000)
-            ->and(array_column($rows['folder'], 0))->not->toContain('Music');
+            ->and(storageSizes($rows['folder'])['Documents'])->toBeLessThan(1000)
+            ->and(array_column($rows['folder'], 0))->not->toContain('Music')
+            ->and(array_column($rows['missing'] ?? [], 0))->not->toContain('home/Music');
     });
 
     it('shows progress on the screen and keeps it out of the report text', function () {
@@ -189,14 +249,71 @@ describe('the Mac step on a tree with known files', function () {
             ->and($result->output())->toContain('scan: complete');
     });
 
-    it('prints a scan with nothing in it for an empty home', function () {
+    it('prints a scan with nothing in it for an empty home and an empty drive', function () {
         $base = sys_get_temp_dir().'/pcc-storage-'.bin2hex(random_bytes(4));
         mkdir($base.'/home', 0777, true);
         mkdir($base.'/root');
-        $output = runStorage($base, ['PCC_STORAGE_APPS' => $base.'/none'])->output();
+        $rows = storageRows(runStorage($base)->output());
 
-        expect(storageRows($output))->toBe([])
-            ->and($output)->toContain('scan: complete');
+        expect(array_keys($rows))->toBe(['roots_total', 'home'])
+            ->and($rows['roots_total'])->toBe([['0']]);
+    });
+
+    it('lists what exists on the drive but could not be read as not measured', function () {
+        $base = storageTree();
+        $bin = fakeMacBin(['du' => 'exit 1']);
+        $rows = storageRows(runStorage($base, [], $bin.':/usr/bin:/bin')->output());
+
+        expect(array_column($rows['missing'], 0))->toBe(['root/System', 'root/Users', 'home/Downloads', 'home/Documents', 'home/Pictures', 'home/Library', 'home/Applications', 'library/Application Support', 'library/Caches']);
+    });
+});
+
+describe('a Mac with a separate data volume (macOS 10.15 and later)', function () {
+    function dataTree(): string
+    {
+        $base = sys_get_temp_dir().'/pcc-storage-'.bin2hex(random_bytes(4));
+        storageFile("{$base}/root/System/data", 900);
+        storageFile("{$base}/root/Users/placeholder", 4);
+        storageFile("{$base}/root/Library/placeholder", 4);
+        storageFile("{$base}/root/usr/bin/tool", 100);
+        storageFile("{$base}/data/Users/u/big", 5000);
+        storageFile("{$base}/data/Library/lib", 300);
+        File::ensureDirectoryExists("{$base}/home");
+        file_put_contents("{$base}/firmlinks", "/Users\tUsers\n/Library\tLibrary\n/usr/local\tusr/local\n");
+
+        return $base;
+    }
+
+    function runData(string $base, array $env = [], ?string $path = null): ProcessResult
+    {
+        return runStorage($base, array_merge(['PCC_STORAGE_DATA' => $base.'/data', 'PCC_STORAGE_FIRMLINKS' => $base.'/firmlinks'], $env), $path);
+    }
+
+    it('takes the folders that are firmlinked from the data volume and the rest from the system volume', function () {
+        $roots = storageSizes(storageRows(runData(dataTree())->output())['root']);
+
+        expect(array_keys($roots))->toBe(['Library', 'System', 'Users', 'usr'])
+            ->and(storageNear($roots['Users'], 5000))->toBeTrue()
+            ->and(storageNear($roots['Library'], 300))->toBeTrue()
+            ->and(storageNear($roots['System'], 900))->toBeTrue()
+            ->and(storageNear($roots['usr'], 100))->toBeTrue();
+    });
+
+    it('takes the bigger number when it cannot tell which folders are firmlinked', function () {
+        $base = dataTree();
+        $roots = storageSizes(storageRows(runData($base, ['PCC_STORAGE_FIRMLINKS' => $base.'/none'])->output())['root']);
+
+        expect(storageNear($roots['Users'], 5000))->toBeTrue();
+    });
+
+    it('lists a firmlinked folder as not measured instead of trusting the empty one on the system volume', function () {
+        $base = dataTree();
+        $result = runData($base, ['PCC_STORAGE_CAP' => '6'], slowDu('/data').':/usr/bin:/bin');
+        $rows = storageRows($result->output());
+
+        expect($result->output())->toContain('scan: partial')
+            ->and(array_column($rows['root'], 0))->toBe(['System', 'usr'])
+            ->and(array_column($rows['missing'], 0))->toContain('root/Users')->toContain('root/Library');
     });
 });
 
@@ -206,12 +323,23 @@ describe('the time limit', function () {
         $start = microtime(true);
         $result = runStorage(storageTree(), ['PCC_STORAGE_CAP' => '3'], $bin.':/usr/bin:/bin');
         $took = microtime(true) - $start;
+        $rows = storageRows($result->output());
 
         expect($took)->toBeLessThan(10)
             ->and($result->output())->toContain('scan: partial (time limit of 3 seconds reached)')
             ->and($result->output())->toContain('limit: 3')
-            ->and($result->errorOutput())->toContain('time limit')
-            ->and(storageRows($result->output()))->toBe([]);
+            ->and($result->errorOutput())->toContain('time limit')->not->toContain('Alarm clock')
+            ->and(array_keys($rows))->toBe(['roots_total', 'missing'])
+            ->and($rows['roots_total'])->toBe([['0']])
+            ->and(array_column($rows['missing'], 0))->toContain('root/Users')->toContain('home/Downloads');
+    });
+
+    it('never runs longer than the limit even when every command hangs', function () {
+        $bin = fakeMacBin(['du' => 'exec sleep 60', 'find' => 'exec sleep 60']);
+        $start = microtime(true);
+        runStorage(storageTree(), ['PCC_STORAGE_CAP' => '6'], $bin.':/usr/bin:/bin');
+
+        expect(microtime(true) - $start)->toBeLessThan(11);
     });
 
     it('keeps what it measured before the time ran out and marks the scan partial', function () {
@@ -225,12 +353,23 @@ describe('the time limit', function () {
             ->and($rows)->not->toHaveKey('type');
     });
 
+    it('lists the user folder as not measured when only that pass runs out of time', function () {
+        $base = storageTree();
+        $result = runStorage($base, ['PCC_STORAGE_CAP' => '6'], slowDu('/home').':/usr/bin:/bin');
+        $rows = storageRows($result->output());
+
+        expect($result->output())->toContain('scan: partial')
+            ->and($rows['root'])->not->toBe([])
+            ->and($rows)->not->toHaveKey('home')->not->toHaveKey('folder')
+            ->and(array_column($rows['missing'], 0))->toContain('home/Downloads')->toContain('home/Library')->toContain('library/Caches');
+    });
+
     it('falls back to the default limit for a value that is not a positive whole number', function (string $cap) {
-        expect(runStorage(storageTree(), ['PCC_STORAGE_CAP' => $cap])->output())->toContain('limit: 90');
+        expect(runStorage(storageTree(), ['PCC_STORAGE_CAP' => $cap])->output())->toContain('limit: 150');
     })->with(['abc', '0', '-5', '1.5', '']);
 
-    it('defaults to ninety seconds', function () {
-        expect((string) file_get_contents(base_path('scripts/mac-checkup.sh')))->toContain('PCC_STORAGE_CAP:-90');
+    it('defaults to a hundred and fifty seconds', function () {
+        expect((string) file_get_contents(base_path('scripts/mac-checkup.sh')))->toContain('PCC_STORAGE_CAP:-150');
     });
 });
 
@@ -269,7 +408,8 @@ describe('what the scripts contain', function () {
     it('keeps the Mac step to what bash 3.2 and macOS 10.14 have', function () use ($functions) {
         $mac = $functions('scripts/mac-checkup.sh', '/^pcc_storage_\w+\(\) \{.*?^\}/ms');
 
-        expect($mac)->not->toMatch('/declare -[Aan]|local -[An]|mapfile|readarray|\$\{[^}]*(,,|\^\^)[^}]*\}|&>>|\|&|find [^\n]*-(printf|maxdepth)|stat -c|sort -V|date -d|readlink -f|xargs -r|grep -[a-zA-Z]*P|sed -r|timeout |gawk|--max-depth|du -[a-z]*b\b|-print0/');
+        expect($mac)->not->toMatch('/declare -[Aan]|local -[An]|mapfile|readarray|\$\{[^}]*(,,|\^\^)[^}]*\}|&>>|\|&|find [^\n]*-(printf|maxdepth)|stat -c|sort -V|date -d|readlink -f|xargs -r|grep -[a-zA-Z]*P|sed -r|timeout |gawk|--max-depth|du -[a-z]*b\b|-print0|<<<|\[\[|\{[0-9]+,[0-9]*\}|asort|gensub/')
+            ->and($mac)->toContain('du -x -k -d "$depth"');
     });
 
     it('is valid bash', function () {
@@ -289,29 +429,57 @@ describe('what the scripts contain', function () {
             ->and($windows)->toContain('Stopwatch');
     });
 
-    it('uses a ninety second limit in both scripts', function () {
-        expect((string) file_get_contents(base_path('scripts/windows-checkup.ps1')))->toContain('PCC_STORAGE_CAP')->toContain('$StorageCapSeconds = 90')
+    it('uses a hundred and fifty second limit in both scripts', function () {
+        expect((string) file_get_contents(base_path('scripts/windows-checkup.ps1')))->toContain('PCC_STORAGE_CAP')->toContain('$StorageCapSeconds = 150')
             ->and((string) file_get_contents(base_path('scripts/mac-checkup.sh')))->toContain('limit: ');
+    });
+
+    it('tells the person about the longer limit before the scan starts', function () {
+        expect((string) file_get_contents(base_path('scripts/mac-checkup.sh')))->toContain('stopping after $cap seconds at the latest')
+            ->and((string) file_get_contents(base_path('scripts/windows-checkup.ps1')))->toContain('stopping after $StorageCapSeconds seconds at the latest');
     });
 });
 
 describe('the Windows step under PowerShell', function () {
     $pwsh = trim((string) shell_exec('command -v pwsh 2>/dev/null'));
 
-    it('measures a temp folder with known files', function () use ($pwsh) {
-        $base = storageTree();
+    function runWindowsStep(string $base, array $env): ProcessResult
+    {
         $script = (string) file_get_contents(base_path('scripts/windows-checkup.ps1'));
         preg_match_all('/^function (?:Get|Measure|Test)-Storage\w+.*?^\}/ms', $script, $found);
         file_put_contents($base.'/step.ps1', implode("\n", $found[0])."\nGet-StorageBreakdown\n");
 
-        $result = Process::timeout(120)->env([
-            'PCC_STORAGE_PROFILE' => $base.'/home',
-            'PCC_STORAGE_ROOT' => $base.'/root',
-            'PCC_STORAGE_PROGRAMS' => $base.'/apps',
-        ])->run([$pwsh, '-NoProfile', '-File', $base.'/step.ps1']);
+        return Process::timeout(120)->env($env)->run([trim((string) shell_exec('command -v pwsh 2>/dev/null')), '-NoProfile', '-File', $base.'/step.ps1']);
+    }
+
+    it('measures a temp folder with known files', function () {
+        $base = storageTree();
+        $result = runWindowsStep($base, ['PCC_STORAGE_PROFILE' => $base.'/home', 'PCC_STORAGE_ROOT' => $base.'/root']);
         $rows = storageRows($result->output());
 
-        expect($result->output())->toContain('scan: complete')
-            ->and($rows['type'][0])->toBe(['Photos', '1620', '4']);
+        expect($result->output())->toContain('scan: complete')->toContain('format: 2')
+            ->and($rows['type'][0])->toBe(['Photos', '1620', '4'])
+            ->and($rows['noext'])->toBe([['52', '3']])
+            ->and(array_column($rows['root'], 0))->toBe(['Volumes', 'System', 'Users', 'dir5', 'dir4', 'dir3'])
+            ->and(storageNear((int) $rows['roots_total'][0][0], 3252 + 9996, 128))->toBeTrue()
+            ->and(storageNear((int) $rows['home'][0][0], 5224, 96))->toBeTrue()
+            ->and(array_keys(storageSizes($rows['folder'])))->toBe(['Documents', 'Downloads', 'Pictures']);
+    })->skip($pwsh === '', 'PowerShell is not installed here');
+
+    it('adds the user folder to the Users folder it lives in', function () {
+        $base = storageTree();
+        storageFile("{$base}/root/Users/me/Downloads/big.bin", 1000);
+        storageFile("{$base}/root/Users/me/AppData/Local/Temp/t.tmp", 50);
+        storageFile("{$base}/root/Users/me/AppData/Local/Other/l.dat", 70);
+        storageFile("{$base}/root/Users/me/AppData/Roaming/r.dat", 30);
+        $result = runWindowsStep($base, ['PCC_STORAGE_PROFILE' => $base.'/root/Users/me', 'PCC_STORAGE_ROOT' => $base.'/root']);
+        $rows = storageRows($result->output());
+        $library = storageSizes($rows['library']);
+
+        expect(storageNear((int) storageSizes($rows['root'])['Users'], 800 + 1150, 96))->toBeTrue()
+            ->and(storageNear($library['Temp'], 50, 16))->toBeTrue()
+            ->and(storageNear($library['Local'], 120, 24))->toBeTrue()
+            ->and(storageNear($library['Roaming'], 30, 16))->toBeTrue()
+            ->and(storageNear(storageSizes($rows['folder'])['AppData'], 150, 40))->toBeTrue();
     })->skip($pwsh === '', 'PowerShell is not installed here');
 });
