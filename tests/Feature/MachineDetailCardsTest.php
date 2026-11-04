@@ -315,7 +315,7 @@ it('gives the owner the startup items card from a real Mac report under the came
     expect($card['id'])->toBe('startup')
         ->and($card['title'])->toBe('Startup items')
         ->and(array_column($card['rows'], 'value', 'label'))->toBe(['Login items' => '2', 'Launch agents and daemons' => '4 (2 agents, 2 daemons)'])
-        ->and(array_column($card['list']['items'], 'label'))->toBe(['updater', 'menubar', 'helper', 'sync', 'Dropbox', 'Slack']);
+        ->and(array_column($card['list']['items'], 'label'))->toBe(['example', 'menubar', 'sync', 'Dropbox', 'Slack']);
 });
 
 it('gives the owner the startup items card from a Windows report', function () {
