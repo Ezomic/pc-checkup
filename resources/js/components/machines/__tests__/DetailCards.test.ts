@@ -165,6 +165,44 @@ describe('DetailCards', () => {
         expect(wrapper.text()).not.toMatch(/undefined|NaN/);
     });
 
+    it('puts a long value under its label, with the tone on the label', () => {
+        const advice =
+            'Close programs and browser tabs you are not using. If it keeps happening, adding more memory would help.';
+        const wrapper = mount(DetailCards, {
+            props: {
+                cards: [
+                    card({
+                        id: 'slowness',
+                        title: 'Why is it slow?',
+                        rows: [
+                            {
+                                label: 'Verdict',
+                                value: 'Probably slow because of 1 thing',
+                                tone: 'bad',
+                            },
+                            {
+                                label: 'Memory is almost full',
+                                value: advice,
+                                tone: 'bad',
+                            },
+                        ],
+                    }),
+                ],
+            },
+        });
+        const labels = wrapper.findAll('dt');
+        const values = wrapper.findAll('dd');
+
+        expect(labels[0].classes()).not.toContain('col-span-2');
+        expect(values[0].classes()).toContain('text-red-700');
+        expect(labels[1].classes()).toContain('col-span-2');
+        expect(labels[1].classes()).toContain('text-red-700');
+        expect(labels[1].attributes('data-tone')).toBe('bad');
+        expect(values[1].classes()).toContain('col-span-2');
+        expect(values[1].classes()).not.toContain('text-red-700');
+        expect(values[1].text()).toBe(advice);
+    });
+
     it('skips the row list for a card that only has a folder list', () => {
         const wrapper = mount(DetailCards, {
             props: {
