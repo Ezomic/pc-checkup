@@ -24,9 +24,14 @@ final class ReportFacts
         }
 
         return [
-            'free_disk' => $header['free disk'] ?? null,
-            'memory' => $header['memory'] ?? null,
-            'cpu' => $header['chip/cpu'] ?? null,
+            'free_disk' => $this->known($header['free disk'] ?? null),
+            'memory' => $this->known($header['memory'] ?? null),
+            'cpu' => $this->known($header['chip/cpu'] ?? null),
         ];
+    }
+
+    private function known(?string $value): ?string
+    {
+        return $value === null || preg_match('/\A(?:n\/a%?|unknown|none|-)\z/i', $value) === 1 ? null : $value;
     }
 }
