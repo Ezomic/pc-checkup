@@ -8,6 +8,10 @@
 # --fix walks the findings it can fix, shows the exact command for each and asks y/N (No by
 # default). Everything it does is logged in the report ("Fix log") and in a text file next to it.
 #
+# The storage step measures folder sizes and groups the user folder by kind of file, for at most
+# 90 seconds. It stores sizes and counts only, never a file name, follows no links and leaves
+# other disks alone. If the time runs out the report says the numbers are partial.
+#
 # --benchmark also runs short CPU, memory, disk and network speed tests (a minute or so, with a
 # 512 MB temp file that is removed afterwards) and adds a Benchmark section to the report. The
 # network tests need a token or scan code and are skipped without one.
@@ -777,6 +781,142 @@ pcc_findmy_report() {
   pcc_findmy_status
 }
 
+pcc_storage_name() { printf '%s' "$1" | tr -c 'A-Za-z0-9 ._()+-' '_' | cut -c1-40; }
+
+pcc_storage_stop() {
+  local slice=$(($2 * $3 / 100)) stop
+  [ "$slice" -ge 1 ] || slice=1
+  stop=$((SECONDS + slice))
+  [ "$stop" -le $(($1 + $2)) ] || stop=$(($1 + $2))
+  echo "$stop"
+}
+
+# Prints the disk usage of directory $1 in KB, nothing when it is unreadable or $2 seconds run out.
+# du never follows symbolic links, and -x keeps it on the one disk.
+pcc_storage_du() {
+  perl -e 'alarm shift; exec @ARGV' "$2" du -skx "$1" 2>/dev/null | awk 'NR == 1 && $1 ~ /^[0-9]+$/ { print $1 }'
+}
+
+pcc_storage_folders() {
+  local home=$1 apps=$2 stop=$3 name dir kb
+  for name in Downloads Documents Desktop Pictures Movies Music Applications Library; do
+    dir=$home/$name
+    if [ "$name" = Applications ]; then dir=$apps; fi
+    if [ ! -d "$dir" ] || [ -L "$dir" ]; then continue; fi
+    if [ "$SECONDS" -ge "$stop" ]; then echo "capped|1"; return 0; fi
+    kb=$(pcc_storage_du "$dir" $((stop - SECONDS)))
+    if [ -n "$kb" ]; then
+      printf 'folder|%s|%s\n' "$name" "$kb"
+    elif [ "$SECONDS" -ge "$stop" ]; then
+      echo "capped|1"
+      return 0
+    fi
+  done
+}
+
+# Mounted volumes and pseudo file systems are left out, so only this disk is measured.
+pcc_storage_roots() {
+  local root=$1 stop=$2 dir name kb
+  for dir in "$root"/*; do
+    if [ ! -d "$dir" ] || [ -L "$dir" ]; then continue; fi
+    name=${dir##*/}
+    case $name in Volumes | dev | net | home | cores | Network) continue ;; esac
+    if [ "$SECONDS" -ge "$stop" ]; then echo "capped|1"; return 0; fi
+    kb=$(pcc_storage_du "$dir" $((stop - SECONDS)))
+    if [ -n "$kb" ]; then
+      printf 'root|%s|%s\n' "$(pcc_storage_name "$name")" "$kb"
+    elif [ "$SECONDS" -ge "$stop" ]; then
+      echo "capped|1"
+      return 0
+    fi
+  done
+}
+
+# File names go through awk in memory only. What comes out is a total and a count per kind of file
+# and per extension, never a name. find skips links and other disks, and cloud storage folders.
+pcc_storage_types() {
+  local home=$1 stop=$2 left rc_file rc
+  [ -d "$home" ] || return 0
+  left=$((stop - SECONDS))
+  if [ "$left" -le 0 ]; then echo "capped|1"; return 0; fi
+  rc_file=$(mktemp)
+  {
+    perl -e 'alarm shift; exec @ARGV' "$left" find "$home" -xdev -path "$home/Library/CloudStorage" -prune -o -type f -exec du -k {} + 2>/dev/null
+    echo $? > "$rc_file"
+  } | LC_ALL=C awk -F '\t' '
+    function add(list, kind,    n, parts, i) {
+      n = split(list, parts, " ")
+      for (i = 1; i <= n; i++) group[parts[i]] = kind
+    }
+    BEGIN {
+      add("jpg jpeg png gif heic heif bmp tif tiff webp raw cr2 nef arw dng", "Photos")
+      add("mp4 mov avi mkv wmv m4v webm flv mpg mpeg 3gp", "Videos")
+      add("mp3 m4a wav flac aac ogg wma aiff aif opus", "Music")
+      add("pdf doc docx xls xlsx ppt pptx txt rtf odt ods odp csv pages numbers key md epub", "Documents")
+      add("zip rar 7z tar gz tgz bz2 xz iso zst cab", "Archives")
+      add("exe msi dmg pkg app ipa apk appx msix", "Apps")
+      split("Photos Videos Music Documents Archives Apps Other", order, " ")
+    }
+    $1 ~ /^[0-9]+$/ {
+      kb = $1
+      path = substr($0, length($1) + 2)
+      parts = split(path, segments, "/")
+      pieces = split(segments[parts], dotted, ".")
+      ext = ""
+      if (pieces > 1 && !(pieces == 2 && dotted[1] == "")) ext = tolower(dotted[pieces])
+      kind = (ext != "" && ext in group) ? group[ext] : "Other"
+      kindKb[kind] += kb
+      kindN[kind]++
+      if (ext ~ /^[a-z0-9]+$/ && length(ext) <= 10) {
+        extKb[ext] += kb
+        extN[ext]++
+      }
+    }
+    END {
+      for (i = 1; i <= 7; i++) {
+        if (kindN[order[i]] > 0) print "type|" order[i] "|" kindKb[order[i]] "|" kindN[order[i]]
+      }
+      for (round = 1; round <= 8; round++) {
+        best = ""
+        for (e in extKb) {
+          if (e in shown) continue
+          if (best == "" || extKb[e] > extKb[best] || (extKb[e] == extKb[best] && e < best)) best = e
+        }
+        if (best == "") break
+        shown[best] = 1
+        print "ext|" best "|" extKb[best] "|" extN[best]
+      }
+    }'
+  rc=$(cat "$rc_file" 2>/dev/null)
+  rm -f "$rc_file"
+  if [ "$rc" = 142 ]; then echo "capped|1"; fi
+}
+
+# Measures disk usage once, read only, and never longer than the cap (90 seconds by default).
+# Progress goes to the screen and the report text goes to stdout.
+pcc_storage_report() {
+  local home=${PCC_STORAGE_HOME:-$HOME} root=${PCC_STORAGE_ROOT:-/} apps=${PCC_STORAGE_APPS:-/Applications}
+  local cap=${PCC_STORAGE_CAP:-90} start=$SECONDS folders roots types scan="complete"
+  case $cap in '' | *[!0-9]* | 0*) cap=90 ;; esac
+  echo "Measuring storage (folders, then file types), stopping after $cap seconds at the latest..." >&2
+  folders=$(pcc_storage_folders "$home" "$apps" "$(pcc_storage_stop "$start" "$cap" 25)")
+  echo "  Measuring the biggest folders on the drive..." >&2
+  roots=$(pcc_storage_roots "$root" "$(pcc_storage_stop "$start" "$cap" 40)")
+  echo "  Measuring kinds of files in your user folder..." >&2
+  types=$(pcc_storage_types "$home" "$(pcc_storage_stop "$start" "$cap" 35)")
+  if printf '%s\n%s\n%s\n' "$folders" "$roots" "$types" | grep -q '^capped|'; then
+    scan="partial (time limit of $cap seconds reached)"
+    echo "  The time limit was reached, so the storage numbers are partial." >&2
+  fi
+  echo "scan: $scan"
+  echo "seconds: $((SECONDS - start))"
+  echo "limit: $cap"
+  printf '%s\n' "$folders" | grep '^folder|'
+  printf '%s\n' "$roots" | grep '^root|' | sort -t '|' -k 3,3nr -k 2,2 | head -n 5
+  printf '%s\n' "$types" | grep -E '^(type|ext)\|'
+  return 0
+}
+
 # Sourcing this file (for tests) stops here instead of running the checkup.
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
 
@@ -826,7 +966,7 @@ section() {
 
 sh_section() { section "$1" bash -c "$2"; }
 
-echo "Running checkup, this can take a minute or two..."
+echo "Running checkup, this can take a few minutes..."
 
 # ---------- Flags ----------
 SP_HW=$(system_profiler SPHardwareDataType 2>/dev/null)
@@ -921,6 +1061,8 @@ sh_section "Charger" "pmset -g adapter 2>/dev/null; pmset -g batt"
 section "Storage (volumes)" diskutil list
 sh_section "Storage (boot volume)" "diskutil info / | grep -E 'Device Node|Volume Name|Container Total Space|Container Free Space|Solid State|SMART Status|File System|Protocol|Device / Media Name'"
 section "Disk usage" df -h
+STORAGE_BREAKDOWN=$(pcc_storage_report)
+section "Storage breakdown" echo "$STORAGE_BREAKDOWN"
 section "Memory pressure" memory_pressure
 sh_section "Top processes by CPU" "ps -Arco pid,pcpu,pmem,comm | head -12"
 sh_section "Top processes by memory" "ps -Amrco pid,pcpu,pmem,comm | head -12"

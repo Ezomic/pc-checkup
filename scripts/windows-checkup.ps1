@@ -6,6 +6,10 @@
 # do need them say "unavailable (needs admin)". Keep this file ASCII only: 5.1 reads a
 # file without a byte order mark as ANSI.
 #
+# The storage step measures folder sizes and groups the user folder by kind of file, for at most
+# 90 seconds. It stores sizes and counts only, never a file name, follows no junctions or links
+# and leaves other disks alone. If the time runs out the report says the numbers are partial.
+#
 # Optional upload: with a token the finished report is also sent to PC Checkup. The token is
 # read from, in this order: -Token, the PC_CHECKUP_TOKEN environment variable, or a file named
 # pc-checkup.token next to this script. The site is $DefaultUrl below; -Url or PC_CHECKUP_URL
@@ -92,6 +96,186 @@ function Add-Section([string]$Title, [scriptblock]$Block) {
     if (-not $text) { $text = '(nothing to show)' }
     $fence = '```'
     $Body.Add("`n## $Title`n`n$fence`n$text`n$fence")
+}
+
+function Test-StorageFixedPath([string]$Path) {
+    if ([System.IO.Path]::DirectorySeparatorChar -ne '\') { return $true }
+    try {
+        $root = [System.IO.Path]::GetPathRoot($Path)
+        if (-not $root -or $root.StartsWith('\\')) { return $false }
+        return (New-Object System.IO.DriveInfo($root)).DriveType -eq [System.IO.DriveType]::Fixed
+    } catch {
+        return $false
+    }
+}
+
+# Adds up the file sizes under a folder until $StopAtMs on $Clock. It never enters a junction or
+# symbolic link, skips files that only exist in the cloud, and with $Stats also counts the files by
+# kind and extension. File names are looked at in memory only and never kept.
+function Measure-StorageTree([string]$Path, $Clock, [long]$StopAtMs, $Stats, $Skip) {
+    $bytes = [long]0
+    $capped = $false
+    $directory = [int][System.IO.FileAttributes]::Directory
+    $reparse = [int][System.IO.FileAttributes]::ReparsePoint
+    $cloudOnly = 0x400000 -bor 0x40000 -bor 0x1000
+    $stack = New-Object 'System.Collections.Generic.Stack[System.IO.DirectoryInfo]'
+    $stack.Push((New-Object System.IO.DirectoryInfo($Path)))
+    while ($stack.Count -gt 0) {
+        if ($Clock.ElapsedMilliseconds -ge $StopAtMs) { $capped = $true; break }
+        $current = $stack.Pop()
+        try { $entries = $current.GetFileSystemInfos() } catch { continue }
+        foreach ($entry in $entries) {
+            try {
+                $attributes = [int]$entry.Attributes
+                if ($attributes -band $directory) {
+                    if (($attributes -band $reparse) -or ($Skip -and $Skip.Contains($entry.FullName))) { continue }
+                    $stack.Push($entry)
+                    continue
+                }
+                if ($attributes -band $cloudOnly) { continue }
+                $length = [long]$entry.Length
+                $bytes += $length
+                if ($Stats) {
+                    $name = $entry.Name
+                    $dot = $name.LastIndexOf('.')
+                    $extension = ''
+                    if ($dot -gt 0 -and $dot -lt $name.Length - 1) { $extension = $name.Substring($dot + 1).ToLowerInvariant() }
+                    $kind = 'Other'
+                    if ($extension -ne '' -and $Stats.Group.ContainsKey($extension)) { $kind = $Stats.Group[$extension] }
+                    $slot = $Stats.Kind[$kind]
+                    $slot[0] += $length
+                    $slot[1] += 1
+                    if ($extension -ne '') {
+                        $slot = $Stats.Ext[$extension]
+                        if ($null -eq $slot) {
+                            if ($extension.Length -le 10 -and $extension -cmatch '^[a-z0-9]+$') { $slot = @([long]0, [long]0) } else { $slot = $false }
+                            $Stats.Ext[$extension] = $slot
+                        }
+                        if ($slot -is [array]) {
+                            $slot[0] += $length
+                            $slot[1] += 1
+                        }
+                    }
+                }
+            } catch {
+                continue
+            }
+        }
+    }
+    return [pscustomobject]@{ Bytes = $bytes; Capped = $capped }
+}
+
+# Measures disk usage once, read only, and never longer than the cap (90 seconds by default).
+# Returns the lines of the "Storage breakdown" section; progress goes to the screen.
+function Get-StorageBreakdown {
+    $StorageCapSeconds = 90
+    if ($env:PCC_STORAGE_CAP -match '^[1-9][0-9]{0,4}$') { $StorageCapSeconds = [int]$env:PCC_STORAGE_CAP }
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
+    $capMs = [long]$StorageCapSeconds * 1000
+    $capped = $false
+    $profilePath = $env:PCC_STORAGE_PROFILE
+    $testing = [bool]$profilePath
+    if (-not $profilePath) { $profilePath = $env:USERPROFILE }
+    $programs = $env:PCC_STORAGE_PROGRAMS
+    if (-not $programs) { $programs = $env:ProgramFiles }
+    $rootPath = $env:PCC_STORAGE_ROOT
+    if (-not $rootPath) { $rootPath = $env:SystemDrive + '\' }
+    $special = @{ Desktop = 'Desktop'; Documents = 'MyDocuments'; Pictures = 'MyPictures'; Videos = 'MyVideos'; Music = 'MyMusic' }
+    $stats = @{ Group = @{}; Kind = @{}; Ext = @{} }
+    $groups = [ordered]@{
+        Photos    = 'jpg jpeg png gif heic heif bmp tif tiff webp raw cr2 nef arw dng'
+        Videos    = 'mp4 mov avi mkv wmv m4v webm flv mpg mpeg 3gp'
+        Music     = 'mp3 m4a wav flac aac ogg wma aiff aif opus'
+        Documents = 'pdf doc docx xls xlsx ppt pptx txt rtf odt ods odp csv pages numbers key md epub'
+        Archives  = 'zip rar 7z tar gz tgz bz2 xz iso zst cab'
+        Apps      = 'exe msi dmg pkg app ipa apk appx msix'
+        Other     = ''
+    }
+    foreach ($kind in $groups.Keys) {
+        $stats.Kind[$kind] = @([long]0, [long]0)
+        foreach ($extension in $groups[$kind].Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)) { $stats.Group[$extension] = $kind }
+    }
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $walked = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $folders = New-Object System.Collections.Generic.List[object]
+    foreach ($name in 'Downloads', 'Documents', 'Desktop', 'Pictures', 'Videos', 'Music', 'AppData') {
+        $path = Join-Path $profilePath $name
+        if (-not $testing -and $special.ContainsKey($name)) {
+            $found = [Environment]::GetFolderPath($special[$name])
+            if ($found) { $path = $found }
+        }
+        $folders.Add(@{ Name = $name; Path = $path; Types = $true })
+    }
+    $folders.Add(@{ Name = 'Program Files'; Path = $programs; Types = $false })
+
+    Write-Host "Measuring storage (folders, then file types), stopping after $StorageCapSeconds seconds at the latest..."
+    $phaseEnd = [long][math]::Max(1000, $capMs * 35 / 100)
+    $present = @($folders | Where-Object { (Test-Path -LiteralPath $_.Path -PathType Container) -and (Test-StorageFixedPath $_.Path) })
+    $left = $present.Count
+    foreach ($folder in $present) {
+        $slice = [long](($phaseEnd - $clock.ElapsedMilliseconds) / $left)
+        $left--
+        if ($slice -le 0) { $capped = $true; continue }
+        $statsForFolder = $null
+        if ($folder.Types) {
+            $statsForFolder = $stats
+            [void]$walked.Add([System.IO.Path]::GetFullPath($folder.Path).TrimEnd('\', '/'))
+        }
+        $result = Measure-StorageTree $folder.Path $clock ($clock.ElapsedMilliseconds + $slice) $statsForFolder $null
+        if ($result.Capped) { $capped = $true }
+        $lines.Add("folder|$($folder.Name)|$([long][math]::Round($result.Bytes / 1024.0))")
+    }
+
+    Write-Host '  Measuring the rest of your user folder...'
+    $phaseEnd = [long][math]::Max($phaseEnd + 1000, $capMs * 55 / 100)
+    $remaining = @()
+    if (Test-Path -LiteralPath $profilePath -PathType Container) {
+        $remaining = @((New-Object System.IO.DirectoryInfo($profilePath)).GetDirectories() | Where-Object { -not ([int]$_.Attributes -band [int][System.IO.FileAttributes]::ReparsePoint) -and -not $walked.Contains($_.FullName.TrimEnd('\', '/')) })
+    }
+    $left = $remaining.Count
+    foreach ($directory in $remaining) {
+        $slice = [long](($phaseEnd - $clock.ElapsedMilliseconds) / $left)
+        $left--
+        if ($slice -le 0) { $capped = $true; continue }
+        $result = Measure-StorageTree $directory.FullName $clock ($clock.ElapsedMilliseconds + $slice) $stats $walked
+        if ($result.Capped) { $capped = $true }
+    }
+
+    Write-Host '  Measuring the biggest folders on the drive...'
+    $drive = New-Object System.Collections.Generic.List[object]
+    $tops = @()
+    if (Test-Path -LiteralPath $rootPath -PathType Container) {
+        $tops = @((New-Object System.IO.DirectoryInfo($rootPath)).GetDirectories() | Where-Object { -not ([int]$_.Attributes -band [int][System.IO.FileAttributes]::ReparsePoint) })
+    }
+    $left = $tops.Count
+    foreach ($top in $tops) {
+        $slice = [long](($capMs - $clock.ElapsedMilliseconds) / $left)
+        $left--
+        if ($slice -le 0) { $capped = $true; continue }
+        $result = Measure-StorageTree $top.FullName $clock ($clock.ElapsedMilliseconds + $slice) $null $null
+        if ($result.Capped) { $capped = $true }
+        $clean = $top.Name -replace '[^A-Za-z0-9 ._()+-]', '_'
+        $drive.Add([pscustomobject]@{ Name = $clean.Substring(0, [math]::Min(40, $clean.Length)); Bytes = $result.Bytes })
+    }
+
+    $scan = 'complete'
+    if ($capped) {
+        $scan = "partial (time limit of $StorageCapSeconds seconds reached)"
+        Write-Host '  The time limit was reached, so the storage numbers are partial.'
+    }
+    $output = New-Object System.Collections.Generic.List[string]
+    $output.Add("scan: $scan")
+    $output.Add("seconds: $([int][math]::Floor($clock.Elapsed.TotalSeconds))")
+    $output.Add("limit: $StorageCapSeconds")
+    foreach ($line in $lines) { $output.Add($line) }
+    foreach ($item in ($drive | Sort-Object Bytes -Descending | Select-Object -First 5)) { $output.Add("root|$($item.Name)|$([long][math]::Round($item.Bytes / 1024.0))") }
+    foreach ($kind in $groups.Keys) {
+        if ($stats.Kind[$kind][1] -gt 0) { $output.Add("type|$kind|$([long][math]::Round($stats.Kind[$kind][0] / 1024.0))|$($stats.Kind[$kind][1])") }
+    }
+    $extensions = $stats.Ext.GetEnumerator() | Where-Object { $_.Value -is [array] } | Sort-Object @{ Expression = { $_.Value[0] }; Descending = $true }, @{ Expression = { $_.Key }; Descending = $false } | Select-Object -First 8
+    foreach ($item in $extensions) { $output.Add("ext|$($item.Key)|$([long][math]::Round($item.Value[0] / 1024.0))|$($item.Value[1])") }
+    return $output.ToArray()
 }
 
 function Get-UsableSerial($Value) {
@@ -317,7 +501,7 @@ if (-not $found) {
     try { $foundCode = Get-ScanCode $Code } catch { Write-Host "Upload skipped: could not read the scan code ($(One-Line $_.Exception.Message))." }
 }
 
-Write-Host 'Running checkup, this can take a minute or two...'
+Write-Host 'Running checkup, this can take a few minutes...'
 
 # ---------- Identity ----------
 $cs = (Try-Run { Get-CimInstance Win32_ComputerSystem }).Value
@@ -768,6 +952,10 @@ Add-Section 'Storage (physical disks)' {
 }
 Add-Section 'Storage (volumes and free space)' {
     $volumes | Select-Object DeviceID, VolumeName, FileSystem, @{ N = 'SizeGB'; E = { [math]::Round($_.Size / 1GB) } }, @{ N = 'FreeGB'; E = { [math]::Round($_.FreeSpace / 1GB) } }, @{ N = 'Free%'; E = { if ($_.Size) { [math]::Floor(100 * $_.FreeSpace / $_.Size) } } } | Format-Table -AutoSize
+}
+$storageBreakdown = Try-Run { Get-StorageBreakdown }
+Add-Section 'Storage breakdown' {
+    if ($storageBreakdown.Value) { $storageBreakdown.Value } else { $storageBreakdown.Note }
 }
 Add-Section 'Disk wear and errors (SMART counters, needs admin)' {
     if ($reliability.Value) { $reliability.Value | Format-Table -AutoSize } else { $reliability.Note }
