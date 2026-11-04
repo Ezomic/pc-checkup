@@ -18,7 +18,7 @@ final readonly class ReportStartup
 {
     public const LOGIN_ITEMS_HIGH = 8;
 
-    public const BACKGROUND_ITEMS_HIGH = 40;
+    public const BACKGROUND_ITEMS_HIGH = 25;
 
     public const LAUNCH_ITEMS_HIGH = 30;
 
@@ -44,19 +44,19 @@ final readonly class ReportStartup
 
     private const APPLE_STYLE = 'Apple style name, unusual place';
 
-    private const SYSTEM = '/^(?:com\.microsoft\.|securityhealth|windows|microsoft|ctfmon|msedge)/';
+    private const SYSTEM = '/^(?:com\.microsoft\.|securityhealth(?![a-z])|windows ?(?:security|defender)|microsoftedgeautolaunch|msedge(?:autolaunch)?(?![a-z])|ctfmon(?![a-z])|microsoft (?:edge|office|onenote|outlook))/';
 
     private const KNOWN = [
-        ['/onedrive/', 'OneDrive', 'Syncs OneDrive files'],
-        ['/dropbox/', 'Dropbox', 'Syncs Dropbox files'],
-        ['/spotify/', 'Spotify', 'Music app'],
+        ['/(?<![a-z])onedrive/', 'OneDrive', 'Syncs OneDrive files'],
+        ['/(?<![a-z])dropbox/', 'Dropbox', 'Syncs Dropbox files'],
+        ['/(?<![a-z])spotify/', 'Spotify', 'Music app'],
         ['/(?<![a-z])(?:ms)?teams(?![a-z])|microsoft\.?teams/', 'Teams', 'Chat and video meetings'],
         ['/(?<![a-z])zoom(?![a-z])|zoomus/', 'Zoom', 'Video meetings'],
-        ['/slack/', 'Slack', 'Chat app'],
-        ['/adobe/', 'Adobe', 'Adobe updater or helper'],
-        ['/google|keystone/', 'Google', 'Google updater or helper'],
+        ['/(?<![a-z])slack(?![a-z])/', 'Slack', 'Chat app'],
+        ['/(?<![a-z])adobe/', 'Adobe', 'Adobe updater or helper'],
+        ['/(?<![a-z])(?:google|keystone)/', 'Google', 'Google updater or helper'],
         ['/(?<![a-z])steam(?![a-z])|valvesoftware/', 'Steam', 'Game store'],
-        ['/icloud/', 'iCloud', 'Syncs iCloud files'],
+        ['/(?<![a-z])icloud/', 'iCloud', 'Syncs iCloud files'],
     ];
 
     private const WEIGHT_NOTE = 'The scan does not record how much each item slows startup, so this list puts unfamiliar names first instead of the heaviest. Names are matched by wording only: a familiar name is not proof an item is genuine.';
@@ -242,9 +242,11 @@ final readonly class ReportStartup
             $type = strtolower($record['type']);
 
             if ($type !== '' && ! str_starts_with($type, 'developer') && preg_match('/\bdisabled\b/i', $record['disposition']) !== 1) {
-                $items[] = ['raw' => $record['name'] === '(null)' ? '' : $record['name'], 'developer' => $record['developer']];
+                $items[$record['name'].'|'.$record['developer'].'|'.$type] = ['raw' => $record['name'] === '(null)' ? '' : $record['name'], 'developer' => $record['developer']];
             }
         }
+
+        $items = array_values($items);
 
         return $items === [] ? null : ['items' => $items, 'capped' => $lines >= self::BACKGROUND_LINE_CAP];
     }
@@ -309,7 +311,7 @@ final readonly class ReportStartup
 
             $name = trim(mb_substr($line, $starts[0], $starts[1] - $starts[0]));
 
-            if ($name !== '') {
+            if ($name !== '' && trim(mb_substr($line, $starts[1])) !== '') {
                 $names[] = $name;
             }
         }
@@ -422,6 +424,6 @@ final readonly class ReportStartup
     private function looksRandom(string $name): bool
     {
         return preg_match('/^[0-9a-f-]{12,}$/i', $name) === 1
-            || (mb_strlen($name) >= 8 && preg_match('/[aeiouy]/i', $name) !== 1);
+            || preg_match('/^[b-df-hj-np-tv-xz0-9]{8,}$/i', $name) === 1;
     }
 }

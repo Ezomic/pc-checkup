@@ -178,7 +178,7 @@ it('names every Mac list that is over its threshold in one sentence', function (
     $card = suCard([SU_LOGIN => $login, SU_BACKGROUND => $background, SU_LAUNCH => $plists]);
 
     expect(array_column($card['rows'], 'tone'))->toBe(['bad', 'bad', 'bad'])
-        ->and($card['notes'][0])->toStartWith('A lot starts by itself on this Mac: 9 login items, 41 background items and 31 launch agents and daemons. ');
+        ->and($card['notes'][0])->toStartWith('A lot starts by itself on this Mac: 9 login items, 26 background items and 31 launch agents and daemons. ');
 });
 
 it('words the Windows note around Task Manager and flags above the threshold', function () {
@@ -285,6 +285,37 @@ it('only treats long vowel-free names as random', function () {
     expect(array_column($card['list']['items'], 'value', 'label'))->toBe(['RTHDVCPL' => 'Odd looking name', 'GTK' => 'Not recognised']);
 });
 
+it('does not call a long non-Latin name random', function () {
+    $card = suCard([SU_LOGIN => "\u{41f}\u{440}\u{438}\u{432}\u{435}\u{442}\u{43c}\u{438}\u{440}\u{43d}\u{44b}\u{439}, \u{30b7}\u{30b9}\u{30c6}\u{30e0}\u{30a2}\u{30d7}\u{30ea}\u{30b1}"]);
+
+    expect(array_column($card['list']['items'], 'value'))->toBe(['Not recognised', 'Not recognised']);
+});
+
+it('does not rename or hide an item for merely resembling a known or system name', function (string $name) {
+    $card = suCard([SU_LOGIN => $name]);
+
+    expect($card['list']['items'])->toBe([['label' => $name, 'value' => 'Not recognised', 'tone' => 'neutral']]);
+})->with(['slacker', 'MyDropbox', 'WindowsUpdateHelper', 'microsoftfoo', 'securityhealthfake', 'ctfmonster']);
+
+it('counts a background item once when the dump lists it twice', function () {
+    $card = suCard([SU_BACKGROUND => suRecord('Dropbox').suRecord('Dropbox').suRecord('Dropbox', 'agent (0x8)')]);
+
+    expect(suRows($card))->toBe(['Background items' => '2']);
+});
+
+it('can reach the background threshold within the 150 lines the script keeps', function () {
+    $background = '';
+
+    foreach (range(1, 37) as $i) {
+        $background .= suRecord("Item{$i}");
+    }
+
+    $card = suCard([SU_BACKGROUND => $background]);
+
+    expect($card['rows'][0])->toBe(['label' => 'Background items', 'value' => '37', 'tone' => 'bad'])
+        ->and($card['notes'][0])->toStartWith('A lot starts by itself on this Mac: 37 background items.');
+});
+
 it('cleans control characters, quotes, pipes, markup and over-long names', function () {
     $card = suCard([SU_LOGIN => "Foo\x07Bar, Pipe|Name, <script>alert1, \"Quote'd\", Caf\u{e9} Sync, \u{65e5}\u{672c}\u{8a9e}\u{30a2}\u{30d7}\u{30ea}"]);
 
@@ -366,6 +397,12 @@ it('skips wrapped continuation lines and handles Windows names with spaces and p
     expect(suRows($card))->toBe(['Startup programs' => '3'])
         ->and(suLabels($card))->toBe(['foo', 'Mystery Tool', 'OneDrive'])
         ->and($card['notes'])->toBe(['The scan does not record how much each item slows startup, so this list puts unfamiliar names first instead of the heaviest. Names are matched by wording only: a familiar name is not proof an item is genuine.']);
+});
+
+it('does not read the tail of a wrapped long name as another program', function () {
+    $card = suCard([SU_PROGRAMS => suTable([['A very long startup entry nam', 'x', 'HKU\Run'], ['Plain', 'x', 'HKU\Run']])."\ne that wrapped"]);
+
+    expect(suLabels($card))->toBe(['A very long startup entry nam', 'Plain']);
 });
 
 it('reads Windows unicode names without misaligning the columns', function () {

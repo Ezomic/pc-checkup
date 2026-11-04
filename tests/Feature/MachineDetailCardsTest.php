@@ -97,7 +97,7 @@ it('survives huge counts and markup in the new sections', function () {
 
     expect($rows['Login items'])->toBe('2')
         ->and($rows['Background startup items'])->toBe('4')
-        ->and($encoded)->not->toContain('<img')->not->toContain('undefined')->not->toContain('NaN');
+        ->and($encoded)->not->toContain('<')->not->toContain('undefined')->not->toContain('NaN');
 });
 
 it('agrees with the free disk fact tile', function () {
