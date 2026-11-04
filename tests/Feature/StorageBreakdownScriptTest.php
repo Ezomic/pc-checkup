@@ -129,7 +129,7 @@ describe('the Mac step on a tree with known files', function () {
     });
 
     it('measures the whole user folder as one number', function () {
-        $home = storageRows(runStorage(storageTree())->output())['home'];
+        $home = array_values(array_filter(storageRows(runStorage(storageTree())->output())['home'], fn (array $row): bool => count($row) === 1));
 
         expect($home)->toHaveCount(1)
             ->and(storageNear((int) $home[0][0], 5224, 96))->toBeTrue();
@@ -199,14 +199,16 @@ describe('the Mac step on a tree with known files', function () {
             ->and($lines[3])->toBe('format: 2');
     });
 
-    it('prints only the fixed kinds of line and never a file or subfolder name', function () {
+    it('prints only the fixed kinds of line, with folder names in the user folder and never a file name', function () {
         $output = runStorage(storageTree())->output();
+        $name = '[^|\/\\\\\x00-\x1f\x7f]{1,60}';
 
         foreach (explode("\n", trim($output)) as $line) {
-            expect($line)->toMatch('/^(scan: .+|seconds: \d+|limit: \d+|format: 2|home\|\d+|roots_total\|\d+|folder\|[A-Za-z]+\|\d+|library\|[A-Za-z ]+\|\d+|root\|[A-Za-z0-9 ._()+-]{1,40}\|\d+|missing\|(root|home|library)\/[A-Za-z ]+|type\|[A-Za-z]+\|\d+\|\d+|noext\|\d+\|\d+|ext\|[a-z0-9]{1,10}\|\d+\|\d+)$/');
+            expect($line)->toMatch('/^(scan: .+|seconds: \d+|limit: \d+|format: 2|home\|\d+|home\|'.$name.'\|[1-9]\d*|sub\|'.$name.'\|'.$name.'\|[1-9]\d*|roots_total\|\d+|folder\|[A-Za-z]+\|\d+|library\|[A-Za-z ]+\|\d+|root\|[A-Za-z0-9 ._()+-]{1,40}\|\d+|missing\|(root|home|library)\/[A-Za-z ]+|type\|[A-Za-z]+\|\d+\|\d+|noext\|\d+\|\d+|ext\|[a-z0-9]{1,10}\|\d+\|\d+)$/u');
         }
 
-        expect($output)->not->toContain('Secret')->not->toContain('inner')->not->toContain('photo')->not->toContain('report')->not->toContain('sub')->not->toContain('hidden')->not->toContain('Stuff');
+        expect($output)->not->toContain('inner')->not->toContain('photo')->not->toContain('report')->not->toContain('hidden')->not->toContain('.dat')->not->toContain('.jpg')
+            ->toContain('sub|Downloads|Secret Subfolder|')->toContain('sub|Library|Secret Stuff|');
     });
 
     it('reads what the report parser expects', function () {
@@ -330,7 +332,6 @@ describe('a Mac with a separate data volume (macOS 10.15 and later)', function (
         $base = dataTree();
         $result = runData($base, ['PCC_STORAGE_CAP' => '20'], slowDu('/data', '/Users').':/usr/bin:/bin');
         $rows = storageRows($result->output());
-
         expect($result->output())->toContain('scan: partial')
             ->and(array_column($rows['root'], 0))->toContain('System')->toContain('Library')->not->toContain('Users')
             ->and(array_column($rows['missing'], 0))->toBe(['root/Users']);
@@ -411,6 +412,241 @@ describe('the time limit', function () {
 
     it('defaults to a hundred and fifty seconds', function () {
         expect((string) file_get_contents(base_path('scripts/mac-checkup.sh')))->toContain('PCC_STORAGE_CAP:-150');
+    });
+});
+
+function namedHomeTree(): string
+{
+    $base = sys_get_temp_dir().'/pcc-storage-'.bin2hex(random_bytes(4));
+    $home = $base.'/home';
+
+    foreach ([
+        'Library/Application Support/big.dat' => 3000, 'Library/Caches/c.dat' => 600, 'Library/Logs/l.dat' => 100,
+        'Library/Containers/c.dat' => 90, 'Library/Mail/m.dat' => 80, 'Library/Safari/s.dat' => 70, 'Library/Fonts/f.dat' => 60,
+        'Projects/app/node_modules/x.js' => 1500, 'Projects/app/src/a.js' => 20, 'Projects/site/index.html' => 300,
+        '.cache/pip/w.whl' => 700, 'Downloads/old/o.bin' => 400, 'Documents/d.pdf' => 300, 'Movies/m.mov' => 200,
+        'Music/s.mp3' => 150, 'Pictures/p.jpg' => 120, 'Desktop/x.txt' => 50, '.Trash/old.bin' => 20,
+    ] as $file => $kib) {
+        storageFile("{$home}/{$file}", $kib);
+    }
+
+    storageFile("{$base}/root/Users/u/data", 100);
+
+    return $base;
+}
+
+/**
+ * @param  array<string, list<list<string>>>  $rows
+ * @return array<string, int>
+ */
+function namedHome(array $rows): array
+{
+    return array_map('intval', array_column(array_filter($rows['home'] ?? [], fn (array $row): bool => count($row) === 2), 1, 0));
+}
+
+/**
+ * @param  array<string, list<list<string>>>  $rows
+ * @return array<string, int>
+ */
+function namedSub(array $rows, string $parent): array
+{
+    return array_map('intval', array_column(array_map(fn (array $row): array => [$row[1], $row[2]], array_filter($rows['sub'] ?? [], fn (array $row): bool => $row[0] === $parent)), 1, 0));
+}
+
+/**
+ * @param  array<string, int|string>  $folders  directory name => size in KiB
+ */
+function oddNamesTree(array $folders): string
+{
+    $base = sys_get_temp_dir().'/pcc-storage-'.bin2hex(random_bytes(4));
+
+    foreach ($folders as $name => $kib) {
+        storageFile("{$base}/home/{$name}/file.dat", (int) $kib);
+    }
+
+    File::ensureDirectoryExists("{$base}/root");
+
+    return $base;
+}
+
+function lostDeepPass(): string
+{
+    return fakeMacBin(['du' => 'case " $* " in *" -d 2 "*) kill -ALRM $$ ;; esac; exec /usr/bin/du "$@"']);
+}
+
+describe('the biggest folders in the user folder (Mac)', function () {
+    it('lists the eight biggest folders by name, hidden ones and Library included, with their sizes', function () {
+        $rows = storageRows(runStorage(namedHomeTree())->output());
+        $named = namedHome($rows);
+
+        expect(array_keys($named))->toBe(['Library', 'Projects', '.cache', 'Downloads', 'Documents', 'Movies', 'Music', 'Pictures'])
+            ->and(storageNear($named['Library'], 4000, 64))->toBeTrue()
+            ->and(storageNear($named['Projects'], 1820, 32))->toBeTrue()
+            ->and(storageNear($named['.cache'], 700, 16))->toBeTrue()
+            ->and(storageNear($named['Pictures'], 120, 16))->toBeTrue();
+    });
+
+    it('lists the folders inside only the two biggest, five each, biggest first', function () {
+        $rows = storageRows(runStorage(namedHomeTree())->output());
+        $library = namedSub($rows, 'Library');
+        $projects = namedSub($rows, 'Projects');
+
+        expect(array_keys($library))->toBe(['Application Support', 'Caches', 'Logs', 'Containers', 'Mail'])
+            ->and(storageNear($library['Application Support'], 3000, 16))->toBeTrue()
+            ->and(array_keys($projects))->toBe(['app', 'site'])
+            ->and(storageNear($projects['app'], 1520, 24))->toBeTrue()
+            ->and(array_values(array_unique(array_column($rows['sub'], 0))))->toBe(['Library', 'Projects']);
+    });
+
+    it('prints the user folder total before the names, and the old kinds of line unchanged', function () {
+        $rows = storageRows(runStorage(namedHomeTree())->output());
+
+        expect($rows['home'][0])->toHaveCount(1)
+            ->and(storageNear((int) $rows['home'][0][0], 7760, 200))->toBeTrue()
+            ->and(array_column($rows['library'], 0))->toBe(['Application Support', 'Caches', 'Containers', 'Mail', 'Logs', 'Safari'])
+            ->and($rows)->toHaveKey('type');
+    });
+
+    it('is read by the report parser into the same names', function () {
+        $output = runStorage(namedHomeTree())->output();
+        $read = (new ReportStorage)->read(ReportSections::parse("## Storage breakdown\n\n```\n{$output}\n```\n"));
+
+        expect(array_column($read['homeFolders'], 'name'))->toBe(['Library', 'Projects', '.cache', 'Downloads', 'Documents', 'Movies', 'Music', 'Pictures'])
+            ->and(array_column($read['homeInside'], 'parent'))->toBe(['Library', 'Projects'])
+            ->and(array_column($read['homeInside'][0]['items'], 'name'))->toBe(['Application Support', 'Caches', 'Logs', 'Containers', 'Mail']);
+    });
+
+    it('does not follow or list a symbolic link', function () {
+        $base = namedHomeTree();
+        storageFile("{$base}/outside/big.dat", 9000);
+        symlink("{$base}/outside", "{$base}/home/linked");
+        symlink("{$base}/outside", "{$base}/home/Projects/linked-inside");
+        $rows = storageRows(runStorage($base)->output());
+
+        expect(array_keys(namedHome($rows)))->not->toContain('linked')
+            ->and(array_keys(namedSub($rows, 'Projects')))->not->toContain('linked-inside')
+            ->and(namedHome($rows)['Projects'])->toBeLessThan(2000);
+    });
+
+    it('is quiet about a folder it cannot read and still names it', function () {
+        $base = namedHomeTree();
+        mkdir("{$base}/home/Locked");
+        chmod("{$base}/home/Locked", 0);
+        $result = runStorage($base);
+        chmod("{$base}/home/Locked", 0755);
+
+        expect($result->output())->toContain('scan: complete')->not->toContain('denied')
+            ->and($result->errorOutput())->not->toContain('denied');
+    });
+
+    it('cleans names of pipes, separators, tabs, control characters and runs of spaces, and cuts them at sixty bytes', function () {
+        $base = oddNamesTree([
+            'pipe|name' => 190, "tab\tname" => 180, "ctl\x01\x07x" => 170, '-dash' => 160, '"quote" \'x\'' => 150,
+            "Fotos de Mu\u{00f1}oz \u{1F334}" => 140, str_repeat('L', 200) => 130, '  spaced    out  ' => 120,
+        ]);
+        $named = namedHome(storageRows(runStorage($base)->output()));
+
+        expect(array_keys($named))->toBe(['pipename', 'tab name', 'ctlx', '-dash', '"quote" \'x\'', "Fotos de Mu\u{00f1}oz \u{1F334}", str_repeat('L', 60), 'spaced out']);
+    });
+
+    it('never cuts a multi byte character in half', function () {
+        $base = oddNamesTree(['a'.str_repeat("\u{00e9}", 40) => 190, 'ab'.str_repeat("\u{1F600}", 20) => 150]);
+        $names = array_keys(namedHome(storageRows(runStorage($base)->output())));
+
+        expect($names)->toBe(['a'.str_repeat("\u{00e9}", 29), 'ab'.str_repeat("\u{1F600}", 14)])
+            ->and(mb_check_encoding(implode('', $names), 'UTF-8'))->toBeTrue();
+    });
+
+    it('drops names that are empty once cleaned and keeps the bigger of two that clean to the same name', function () {
+        $base = oddNamesTree([
+            '|||' => 190, '   ' => 180, 'dup|' => 150, 'dup' => 160, 'back\\slash' => 140, 'C:\\Users\\x' => 130, '...' => 120, 'a..b' => 110,
+        ]);
+        $named = namedHome(storageRows(runStorage($base)->output()));
+
+        expect(array_keys($named))->toBe(['dup', 'backslash', 'C:Usersx', '...', 'a..b'])
+            ->and(storageNear($named['dup'], 160, 8))->toBeTrue();
+    });
+
+    it('never prints a malformed line for a folder name with a newline or a leading dot', function () {
+        $base = oddNamesTree(["new\nline" => 190, '.hidden' => 180, '..x' => 170]);
+        $output = runStorage($base)->output();
+
+        foreach (explode("\n", trim($output)) as $line) {
+            expect($line)->toMatch('/^(scan: .+|seconds: \d+|limit: \d+|format: 2|home\|\d+|home\|[^|\/\\\\\x00-\x1f\x7f]{1,60}\|[1-9]\d*|sub\|[^|\/\\\\\x00-\x1f\x7f]{1,60}\|[^|\/\\\\\x00-\x1f\x7f]{1,60}\|[1-9]\d*|roots_total\|\d+|folder\|[A-Za-z]+\|\d+|library\|[A-Za-z ]+\|\d+|missing\|.+|type\|[A-Za-z]+\|\d+\|\d+|noext\|\d+\|\d+|ext\|[a-z0-9]{1,10}\|\d+\|\d+)$/u');
+        }
+
+        expect(array_keys(namedHome(storageRows($output))))->toContain('.hidden')->toContain('..x');
+    });
+
+    it('skips a folder inside a folder whose name holds the character awk joins keys with', function () {
+        $base = namedHomeTree();
+        storageFile("{$base}/home/Projects/we\x1Cird/f", 50);
+        $rows = storageRows(runStorage($base)->output());
+
+        expect(array_keys(namedSub($rows, 'Projects')))->toBe(['app', 'site']);
+    });
+
+    it('keeps the cleaned names out of every path: no full path is printed', function () {
+        $output = runStorage(namedHomeTree())->output();
+
+        expect($output)->not->toContain('/home')->not->toContain('/tmp')->not->toContain(sys_get_temp_dir());
+    });
+
+    it('does not list a folder with no size', function () {
+        $base = namedHomeTree();
+        File::ensureDirectoryExists("{$base}/home/Empty");
+
+        expect(array_keys(namedHome(storageRows(runStorage($base)->output()))))->not->toContain('Empty');
+    });
+
+    it('prints no names for an empty user folder', function () {
+        $base = sys_get_temp_dir().'/pcc-storage-'.bin2hex(random_bytes(4));
+        mkdir($base.'/home', 0777, true);
+        mkdir($base.'/root');
+        $rows = storageRows(runStorage($base)->output());
+
+        expect(namedHome($rows))->toBe([])->and($rows)->not->toHaveKey('sub');
+    });
+
+    it('measures the folders one at a time when the pass over the user folder prints nothing', function () {
+        $result = runStorage(namedHomeTree(), [], lostDeepPass().':/usr/bin:/bin');
+        $rows = storageRows($result->output());
+        $named = namedHome($rows);
+
+        expect($result->output())->toContain('scan: partial')
+            ->and(array_keys($named))->toBe(['Library', 'Projects', '.cache', 'Downloads', 'Documents', 'Movies', 'Music', 'Pictures'])
+            ->and(storageNear($named['Library'], 4000, 64))->toBeTrue()
+            ->and(array_keys(namedSub($rows, 'Library')))->toBe(['Application Support', 'Caches', 'Logs', 'Containers', 'Mail'])
+            ->and(array_keys(namedSub($rows, 'Projects')))->toBe(['app', 'site'])
+            ->and(array_column(array_filter($rows['home'], fn (array $row): bool => count($row) === 1), 0))->not->toBe([]);
+    });
+
+    it('shows what it measured and stops at the limit when the user folder is slow', function () {
+        $bin = fakeMacBin(['du' => 'case "$*" in *home*) exec sleep 30 ;; esac; exec /usr/bin/du "$@"', 'find' => 'exec sleep 30']);
+        $start = microtime(true);
+        $result = runStorage(namedHomeTree(), ['PCC_STORAGE_CAP' => '8'], $bin.':/usr/bin:/bin');
+        $rows = storageRows($result->output());
+
+        expect(microtime(true) - $start)->toBeLessThan(14)
+            ->and($result->output())->toContain('scan: partial (time limit of 8 seconds reached)')
+            ->and(namedHome($rows))->toBe([])
+            ->and($rows['root'])->not->toBe([])
+            ->and(array_column($rows['missing'], 0))->toContain('home/Downloads');
+    });
+
+    it('measures the big folders it can reach and leaves out the one that hangs', function () {
+        $bin = fakeMacBin(['du' => 'for last; do :; done; case "$last" in *home) kill -ALRM $$ ;; *home/Library) exec sleep 60 ;; esac; exec /usr/bin/du "$@"']);
+        $result = runStorage(namedHomeTree(), ['PCC_STORAGE_CAP' => '30'], $bin.':/usr/bin:/bin');
+        $named = namedHome(storageRows($result->output()));
+
+        expect($result->output())->toContain('scan: partial')
+            ->and($named)->toHaveKey('Projects')->toHaveKey('Downloads')->not->toHaveKey('Library');
+    });
+
+    it('keeps the limit at a hundred and fifty seconds and gives the user folder a bigger share of it', function () {
+        $script = (string) file_get_contents(base_path('scripts/mac-checkup.sh'));
+
+        expect($script)->toContain('PCC_STORAGE_CAP:-150')->and($script)->toContain('pcc_storage_stop "$start" "$cap" 40');
     });
 });
 
@@ -522,5 +758,35 @@ describe('the Windows step under PowerShell', function () {
             ->and(storageNear($library['Local'], 120, 24))->toBeTrue()
             ->and(storageNear($library['Roaming'], 30, 16))->toBeTrue()
             ->and(storageNear(storageSizes($rows['folder'])['AppData'], 150, 40))->toBeTrue();
+    })->skip($pwsh === '', 'PowerShell is not installed here');
+
+    it('lists the eight biggest folders in the profile by name and the five biggest inside the two biggest', function () {
+        $base = namedHomeTree();
+        $rows = storageRows(runWindowsStep($base, ['PCC_STORAGE_PROFILE' => $base.'/home', 'PCC_STORAGE_ROOT' => $base.'/root'])->output());
+
+        expect(array_keys(namedHome($rows)))->toBe(['Library', 'Projects', '.cache', 'Downloads', 'Documents', 'Movies', 'Music', 'Pictures'])
+            ->and(storageNear(namedHome($rows)['Library'], 4000, 64))->toBeTrue()
+            ->and(array_keys(namedSub($rows, 'Library')))->toBe(['Application Support', 'Caches', 'Logs', 'Containers', 'Mail'])
+            ->and(array_keys(namedSub($rows, 'Projects')))->toBe(['app', 'site'])
+            ->and(array_values(array_unique(array_column($rows['sub'], 0))))->toBe(['Library', 'Projects']);
+    })->skip($pwsh === '', 'PowerShell is not installed here');
+
+    it('cleans the names the same way as the Mac step', function () {
+        $base = oddNamesTree([
+            'pipe|name' => 190, "tab\tname" => 180, "ctl\x01\x07x" => 170, '-dash' => 160, '"quote" \'x\'' => 150,
+            "Fotos de Mu\u{00f1}oz \u{1F334}" => 140, str_repeat('L', 200) => 130, '  spaced    out  ' => 120,
+        ]);
+        $rows = storageRows(runWindowsStep($base, ['PCC_STORAGE_PROFILE' => $base.'/home', 'PCC_STORAGE_ROOT' => $base.'/root'])->output());
+
+        expect(array_keys(namedHome($rows)))->toBe(['pipename', 'tab name', 'ctlx', '-dash', '"quote" \'x\'', "Fotos de Mu\u{00f1}oz \u{1F334}", str_repeat('L', 60), 'spaced out']);
+    })->skip($pwsh === '', 'PowerShell is not installed here');
+
+    it('does not follow a link out of the profile or list it', function () {
+        $base = namedHomeTree();
+        storageFile("{$base}/outside/big.dat", 9000);
+        symlink("{$base}/outside", "{$base}/home/linked");
+        $rows = storageRows(runWindowsStep($base, ['PCC_STORAGE_PROFILE' => $base.'/home', 'PCC_STORAGE_ROOT' => $base.'/root'])->output());
+
+        expect(array_keys(namedHome($rows)))->not->toContain('linked');
     })->skip($pwsh === '', 'PowerShell is not installed here');
 });

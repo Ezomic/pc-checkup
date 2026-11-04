@@ -10,7 +10,8 @@ use Illuminate\Support\Str;
 
 /**
  * @phpstan-type Row array{label: string, value: string, tone: 'good'|'bad'|'neutral'}
- * @phpstan-type Bar array{label: string, value: string, detail: string|null, share: int}
+ * @phpstan-type PlainBar array{label: string, value: string, detail: string|null, share: int}
+ * @phpstan-type Bar array{label: string, value: string, detail: string|null, share: int, inside?: array{title: string, items: list<PlainBar>}}
  * @phpstan-type Card array{id: string, title: string, rows: list<Row>, list: array{title: string, items: list<Row>}|null, summary?: string|null, bars?: list<array{title: string, items: list<Bar>}>, notes?: list<string>}
  *
  * @phpstan-import-type Breakdown from ReportStorage
@@ -24,6 +25,10 @@ final readonly class ReportDetails
     private const SPINNING_DRIVE = 'Spinning hard drive';
 
     private const MINIMUM_SHARE = 1;
+
+    private const NAMED_SHARE = 20;
+
+    private const HOME_TITLE = 'Biggest folders in your user folder';
 
     private const UNITS = ['B' => 1, 'K' => 1024, 'M' => 1024 ** 2, 'G' => 1024 ** 3, 'T' => 1024 ** 4, 'P' => 1024 ** 5];
 
@@ -135,7 +140,7 @@ final readonly class ReportDetails
         $capacity = $this->capacity($sections);
         $health = $this->macHealth($sections->text('Storage (boot volume)')) ?? $this->windowsHealth($sections->text('Storage (physical disks)'));
         $breakdown = (new ReportStorage)->read($sections);
-        $explained = $breakdown !== null && $breakdown['version'] >= 2 && ($breakdown['home'] !== null || $breakdown['folders'] !== []);
+        $explained = $breakdown !== null && $breakdown['version'] >= 2 && ($breakdown['home'] !== null || $breakdown['folders'] !== [] || $breakdown['homeFolders'] !== []);
 
         return $this->card('storage', 'Storage', [
             $this->row('Free', $this->freeText($capacity, $this->capture('/^(\d{1,3})%$/', $freeDisk))),
@@ -172,6 +177,7 @@ final readonly class ReportDetails
         $mine = $read['home'] === null ? $read['folders'] : [['name' => 'Everything in your user folder', 'bytes' => $read['home'], 'count' => null], ...$read['folders']];
         $groups = [
             ['Biggest folders on the drive', $drive, $used, 'used space', false],
+            [self::HOME_TITLE, $read['homeFolders'], $used, 'used space', false],
             ['Your folders', $mine, $used, 'used space', false],
             ['Library and AppData', $read['library'], $used, 'used space', false],
             ['Kinds of files in your user folder', $read['categories'], $counted, 'what was counted', true],
@@ -181,7 +187,8 @@ final readonly class ReportDetails
 
         foreach ($groups as [$title, $items, $whole, $of, $withCount]) {
             if ($items !== []) {
-                $bars[] = ['title' => $title, 'items' => $this->bars($items, $whole, $of, $withCount, $title === 'Biggest file endings')];
+                $drawn = $this->bars($items, $whole, $of, $withCount, $title === 'Biggest file endings');
+                $bars[] = ['title' => $title, 'items' => $title === self::HOME_TITLE ? $this->withInside($drawn, $read) : $drawn];
             }
         }
 
@@ -216,14 +223,19 @@ final readonly class ReportDetails
     private function summary(array $read, float $used, ?float $notMeasured): ?string
     {
         $top = array_slice($read['roots'], 0, 3);
+        $named = $this->biggestHomeFolder($read, $used);
         $sentence = null;
 
         if ($top !== []) {
             $names = array_map(fn (array $item): string => $item['name'].' ('.$this->format($item['bytes']).')', $top);
             $lead = array_sum(array_column($top, 'bytes')) * 2 >= $used && $used > 0 ? 'Most of the space is used by' : 'The biggest folders found are';
             $sentence = "{$lead} ".(count($names) > 1 ? implode(', ', array_slice($names, 0, -1)).' and '.end($names) : $names[0]).'.';
-        } elseif ($read['home'] !== null) {
+        } elseif ($read['home'] !== null && $named === null) {
             $sentence = 'Your user folder uses '.$this->format($read['home']).'.';
+        }
+
+        if ($named !== null) {
+            $sentence = trim("{$sentence} {$named}");
         }
 
         if ($notMeasured !== null) {
@@ -235,24 +247,64 @@ final readonly class ReportDetails
 
     /**
      * @param  Breakdown  $read
+     */
+    private function biggestHomeFolder(array $read, float $used): ?string
+    {
+        $folder = $read['homeFolders'][0] ?? null;
+        $whole = $used > 0 ? $used : (float) $read['home'];
+
+        if ($folder === null || $whole <= 0 || $whole * self::NAMED_SHARE > $folder['bytes'] * 100) {
+            return null;
+        }
+
+        $biggest = "{$folder['name']} (".$this->format($folder['bytes']).')';
+
+        return $read['home'] === null
+            ? "The biggest folder in your user folder is {$biggest}."
+            : 'Your user folder uses '.$this->format($read['home'])."; the biggest part is {$biggest}.";
+    }
+
+    /**
+     * @param  list<PlainBar>  $drawn
+     * @param  Breakdown  $read
+     * @return list<Bar>
+     */
+    private function withInside(array $drawn, array $read): array
+    {
+        $bars = [];
+
+        foreach ($drawn as $index => $bar) {
+            $folder = $read['homeFolders'][$index] ?? null;
+            $items = array_column($read['homeInside'], 'items', 'parent')[$folder['name'] ?? ''] ?? [];
+            $bars[] = $items === [] || $folder === null ? $bar : [...$bar, 'inside' => ['title' => "Inside {$folder['name']}", 'items' => $this->bars($items, $folder['bytes'], $folder['name'], false, false)]];
+        }
+
+        return $bars;
+    }
+
+    /**
+     * @param  Breakdown  $read
      * @return list<string>
      */
     private function breakdownNotes(array $read, bool $hasNotMeasured): array
     {
         $both = in_array('Applications (in your user folder)', array_column($read['folders'], 'name'), true) && in_array('Applications', array_column($read['roots'], 'name'), true);
+        $named = $read['homeFolders'] !== [];
 
         return [
             ...($read['partial'] ? ['The scan stopped at its time limit, so these sizes are a minimum and the real numbers may be bigger.'] : []),
+            ...($read['partial'] && $named ? ['The scan stopped at its time limit, so a big folder may be missing from the folders in your user folder.'] : []),
             ...($read['missing'] === [] ? [] : [($read['partial'] ? 'Not measured before the time ran out: ' : 'Could not be read: ').implode(', ', $read['missing']).'.']),
             ...($hasNotMeasured ? ['Not measured is used space that the folders above do not add up to, such as hidden system files, snapshots and anything the scan could not read.'] : []),
             ...($both ? ['Applications in your user folder is a separate folder from the Applications folder on the drive.'] : []),
-            ...($read['categories'] !== [] || $read['extensions'] !== [] ? ['Kinds of files count your own user folder only. Only sizes and counts were recorded, no file names.'] : []),
+            ...($named ? ['The names and sizes of the biggest folders in your user folder were recorded so this card can say what takes the space. Only you see them: they are not on the pages you share with clients.'] : []),
+            ...($read['categories'] !== [] || $read['extensions'] !== [] ? ['Kinds of files count your own user folder only. '.($named ? 'For them only sizes and counts were recorded, never file names.' : 'Only sizes and counts were recorded, no file names.')] : []),
         ];
     }
 
     /**
      * @param  list<array{name: string, bytes: float, count: int|null}>  $items
-     * @return list<Bar>
+     * @return list<PlainBar>
      */
     private function bars(array $items, float $whole, string $of, bool $withCount, bool $endings): array
     {
