@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\FlagSeverity;
 use App\Services\Flags\FlagAdvisor;
 use App\Services\Reports\ReportFacts;
 use App\Services\Reports\ReportParser;
@@ -402,5 +403,27 @@ describe('reports from before the new checks', function () {
                 'Remote Desktop (RDP) is enabled, so people on the network can try to sign in to this PC.',
                 'The last backup was 40 days ago (File History).',
             ])->and((new ReportFacts)->from($markdown)['free_disk'])->toBe('40%');
+    });
+});
+
+describe('macOS support cut-off', function () {
+    it('flags a major older than the oldest supported release, in the text the advisor matches', function (string $version) {
+        $flags = runMacCheck(fakeMacBin([]), 'pcc_os_check '.escapeshellarg($version))['flags'];
+
+        expect($flags)->toBe(['macOS '.$version.' is old and likely out of security support.'])
+            ->and($flags[0])->toMatch(FlagAdvisor::UNSUPPORTED_OS);
+
+        $advice = (new FlagAdvisor)->advise($flags[0]);
+
+        expect($advice->severity)->toBe(FlagSeverity::High)
+            ->and($advice->headline)->toBe('The operating system is no longer supported');
+    })->with(['10.14.6', '12.7', '13.6', '13.0.1']);
+
+    it('stays quiet for supported, unparseable and empty versions', function (string $version) {
+        expect(runMacCheck(fakeMacBin([]), 'pcc_os_check '.escapeshellarg($version)))->toBe(['flags' => [], 'facts' => '']);
+    })->with(['14.0', '14.7.1', '15.1', '26.0.1', '', 'garbage', 'beta', '14abc', '.5']);
+
+    it('keeps the cut-off in one named variable', function () {
+        expect(runMacCheck(fakeMacBin([]), 'echo $PCC_OLDEST_SUPPORTED_MACOS')['facts'])->toBe('14');
     });
 });
