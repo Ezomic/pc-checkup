@@ -48,6 +48,14 @@ class User extends Authenticatable implements PasskeyUser
     }
 
     /**
+     * @return HasMany<PriceItem, $this>
+     */
+    public function priceItems(): HasMany
+    {
+        return $this->hasMany(PriceItem::class)->orderBy('sort_order')->orderBy('id');
+    }
+
+    /**
      * @return HasMany<LoginLink, $this>
      */
     public function loginLinks(): HasMany

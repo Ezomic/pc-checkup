@@ -16,11 +16,14 @@ use App\Services\Checklist\ChecklistResolver;
 use App\Services\Flags\FlagAdvice;
 use App\Services\Flags\FlagAdvisor;
 use App\Services\NeedsAttention;
+use App\Services\Quote\EstimateContext;
+use App\Services\Quote\EuroAmount;
 use App\Services\Reports\ReportDetails;
 use App\Services\Reports\ReportFacts;
 use App\Services\Reports\ReportFreshness;
 use App\Services\Reports\ReportScriptVersion;
 use App\Services\Reports\ReportTrends;
+use App\Services\Warranty\WarrantyLink;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;
@@ -105,11 +108,12 @@ final class MachineController extends Controller
         ]);
     }
 
-    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts, BuildReportInsights $insights, ReportFreshness $freshness, CompareLatestReports $changes, ReportDetails $details, ReportTrends $trends, ReportScriptVersion $scriptVersion): Response
+    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts, BuildReportInsights $insights, ReportFreshness $freshness, CompareLatestReports $changes, ReportDetails $details, ReportTrends $trends, ReportScriptVersion $scriptVersion, WarrantyLink $warranty, EstimateContext $estimate): Response
     {
         $this->authorize('view', $machine);
 
         $report = $machine->latestReport();
+        $cards = $report === null ? [] : $details->cards($report->markdown, $report->flags, $machine->device_type);
 
         return Inertia::render('machines/Show', [
             'machine' => $machine->only(['id', 'name', 'serial', 'hardware_uuid', 'os', 'device_type', 'model', 'rustdesk_id', 'status']),
@@ -123,7 +127,11 @@ final class MachineController extends Controller
                 'markdown' => $report->markdown,
             ],
             'changes' => $changes->handle($machine),
-            'detailCards' => $report === null ? [] : $details->cards($report->markdown, $report->flags, $machine->device_type),
+            'detailCards' => $cards,
+            'warranty' => $report === null ? null : $warranty->for($report->markdown),
+            'estimate' => $estimate->from($cards),
+            'priceItems' => $machine->user?->priceItems()->get(['id', 'name', 'price_cents', 'unit']) ?? [],
+            'vatPercent' => EuroAmount::VAT_PERCENT,
             'trends' => $trends->forMachine($machine),
             'client' => $machine->client?->only(['id', 'name']),
             'clients' => Client::query()->where('user_id', $machine->user_id)->orderBy('name')->orderBy('id')->get(['id', 'name']),

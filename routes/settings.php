@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Settings\ApiTokenController;
+use App\Http\Controllers\Settings\PriceItemController;
 use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\Settings\SecurityController;
 use App\Http\Middleware\RequirePasswordInWorkflowMode;
@@ -31,6 +32,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::put('settings/password', [SecurityController::class, 'update'])
         ->middleware('throttle:6,1')
         ->name('user-password.update');
+
+    Route::get('settings/price-list', [PriceItemController::class, 'index'])->name('price-items.index');
+    Route::post('settings/price-list', [PriceItemController::class, 'store'])->name('price-items.store');
+    Route::put('settings/price-list/{priceItem}', [PriceItemController::class, 'update'])
+        ->whereNumber('priceItem')->name('price-items.update');
+    Route::delete('settings/price-list/{priceItem}', [PriceItemController::class, 'destroy'])
+        ->whereNumber('priceItem')->name('price-items.destroy');
 
     Route::get('settings/appearance', fn () => Inertia::render('settings/Appearance'))->name('appearance.edit');
 
