@@ -19,16 +19,16 @@ final class ShareLocaleResolver
 
     private const int MAX_TOKEN_LENGTH = 64;
 
-    public function apply(Request $request): ShareLocale
+    public function apply(Request $request, bool $lookUpClient = true): ShareLocale
     {
-        $locale = $this->resolve($request);
+        $locale = $this->resolve($request, $lookUpClient);
 
         app()->setLocale($locale->value);
 
         return $locale;
     }
 
-    private function resolve(Request $request): ShareLocale
+    private function resolve(Request $request, bool $lookUpClient): ShareLocale
     {
         $chosen = $this->parse($request->query(self::QUERY));
 
@@ -39,7 +39,7 @@ final class ShareLocaleResolver
         }
 
         return $this->parse($request->cookie(self::COOKIE))
-            ?? $this->forClientOf($request)
+            ?? ($lookUpClient ? $this->forClientOf($request) : null)
             ?? ShareLocale::default();
     }
 

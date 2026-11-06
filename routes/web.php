@@ -35,7 +35,7 @@ Route::get('scripts/{script}', CheckupScriptController::class)->name('scripts.do
 Route::get('tools/rustdesk/windows', RustDeskInstallerController::class)
     ->middleware('throttle:20,1')->name('tools.rustdesk.download');
 
-Route::middleware([SetShareLocale::class, HardenSharePage::class, 'throttle:share'])->prefix('c/{token}')->group(function () {
+Route::middleware(['throttle:share', SetShareLocale::class, HardenSharePage::class])->prefix('c/{token}')->group(function () {
     Route::get('/', [SharedClientController::class, 'show'])->name('share.show');
     Route::get('machines/{machine}', [SharedClientController::class, 'machine'])->name('share.machine');
 });

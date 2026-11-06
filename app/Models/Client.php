@@ -18,7 +18,7 @@ use Illuminate\Support\Carbon;
  * @property int $id
  * @property int $user_id
  * @property string $name
- * @property ShareLocale $locale
+ * @property ShareLocale|null $locale
  * @property string|null $share_token
  * @property Carbon|null $last_viewed_at
  * @property int|null $machines_count

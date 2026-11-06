@@ -9,6 +9,7 @@ use App\Models\Machine;
 use App\Models\Report;
 use App\Services\Flags\FlagAdvisor;
 use App\Services\Share\ShareLocaleResolver;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Lang;
 
 use function Pest\Laravel\actingAs;
@@ -210,8 +211,24 @@ describe('picking the language', function () {
 
         $this->get("/c/{$client->share_token}/machines/999999")->assertNotFound()
             ->assertInertia(fn ($page) => $page->component('share/Unavailable')->where('locale', 'en'));
+    });
+
+    it('does not look the client up for a path no route matches', function () {
+        $client = dutchClient(ShareLocale::English);
+
+        DB::enableQueryLog();
         $this->get("/c/{$client->share_token}/nothing-here")->assertNotFound()
-            ->assertInertia(fn ($page) => $page->component('share/Unavailable')->where('locale', 'en'));
+            ->assertInertia(fn ($page) => $page->component('share/Unavailable')->where('locale', 'nl'));
+
+        expect(collect(DB::getQueryLog())->pluck('query')->filter(fn (string $sql): bool => str_contains($sql, 'clients')))->toBeEmpty();
+    });
+
+    it('still renders a Dutch error page when a client has no stored language', function () {
+        $client = dutchClient();
+        DB::table('clients')->where('id', $client->id)->update(['locale' => null]);
+
+        $this->get("/c/{$client->share_token}")->assertInertia(fn ($page) => $page->where('locale', 'nl'));
+        actingAs($client->user)->get("/clients/{$client->id}")->assertInertia(fn ($page) => $page->where('client.locale', 'nl'));
     });
 
     it('survives an overlong link token without a lookup', function () {

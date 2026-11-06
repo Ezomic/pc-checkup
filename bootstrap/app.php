@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\ShareLocale;
 use App\Http\Middleware\AuthenticateBenchmarkClient;
 use App\Http\Middleware\BlockLocalCredentials;
 use App\Http\Middleware\HandleAppearance;
@@ -74,7 +75,9 @@ return Application::configure(basePath: dirname(__DIR__))
 
             // A share link is opened by someone with no account, so its errors must not point at the owner app.
             if ($request->is('c/*')) {
-                $locale = app(ShareLocaleResolver::class)->apply($request);
+                $locale = $request->route() === null
+                    ? app(ShareLocaleResolver::class)->apply($request, lookUpClient: false)
+                    : (ShareLocale::tryFrom(app()->getLocale()) ?? ShareLocale::default());
 
                 return Inertia::render('share/Unavailable', ['status' => $response->getStatusCode(), 'locale' => $locale->value])
                     ->toResponse($request)

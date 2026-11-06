@@ -8,6 +8,7 @@ use App\Actions\Clients\CreateClient;
 use App\Actions\Clients\DeleteClient;
 use App\Actions\Clients\RenameClient;
 use App\Actions\Clients\SetClientLocale;
+use App\Enums\ShareLocale;
 use App\Http\Requests\Clients\SaveClientRequest;
 use App\Models\Client;
 use App\Models\Machine;
@@ -68,7 +69,7 @@ final class ClientController extends Controller
             'client' => [
                 'id' => $client->id,
                 'name' => $client->name,
-                'locale' => $client->locale->value,
+                'locale' => ($client->locale ?? ShareLocale::default())->value,
                 'share_url' => $client->share_token === null ? null : route('share.show', $client->share_token),
                 'last_viewed_at' => $client->last_viewed_at,
                 'created_at' => $client->created_at,
