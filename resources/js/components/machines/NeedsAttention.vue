@@ -1,12 +1,24 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
 import { CircleCheck } from '@lucide/vue';
+import { computed } from 'vue';
 import { index, show } from '@/routes/machines';
 import type { AttentionLevel, NeedsAttentionOverview } from '@/types';
 
-defineProps<{
+const props = defineProps<{
     overview: NeedsAttentionOverview;
 }>();
+
+const filters = computed(() =>
+    props.overview.filters.filter(
+        (filter) => filter.count > 0 || filter.key === props.overview.filter,
+    ),
+);
+
+const chip =
+    'rounded-full border px-3 py-1 text-sm font-medium transition-colors';
+const chipActive = 'border-primary bg-primary text-primary-foreground';
+const chipIdle = 'border-border hover:bg-muted';
 
 const labels: Record<AttentionLevel, string> = {
     urgent: 'Urgent',
@@ -35,8 +47,51 @@ const colours: Record<AttentionLevel, string> = {
             </p>
         </div>
 
+        <nav
+            v-if="filters.length > 0"
+            aria-label="Filter by reason"
+            class="flex flex-wrap gap-2"
+            data-test="attention-filters"
+        >
+            <Link
+                :href="index()"
+                :class="[
+                    chip,
+                    overview.filter === null ? chipActive : chipIdle,
+                ]"
+                :aria-current="overview.filter === null ? 'true' : undefined"
+                data-test="attention-filter"
+                preserve-scroll
+            >
+                All
+            </Link>
+            <Link
+                v-for="filter in filters"
+                :key="filter.key"
+                :href="index({ query: { reason: filter.key } })"
+                :class="[
+                    chip,
+                    overview.filter === filter.key ? chipActive : chipIdle,
+                ]"
+                :aria-current="
+                    overview.filter === filter.key ? 'true' : undefined
+                "
+                data-test="attention-filter"
+                preserve-scroll
+            >
+                {{ filter.label }} ({{ filter.count }})
+            </Link>
+        </nav>
+
         <p
-            v-if="overview.total === 0"
+            v-if="overview.total === 0 && overview.filter !== null"
+            class="text-sm text-muted-foreground"
+            data-test="attention-no-match"
+        >
+            No machine has this reason right now.
+        </p>
+        <p
+            v-else-if="overview.total === 0"
             class="flex items-center gap-2 text-sm text-muted-foreground"
             data-test="attention-empty"
         >
@@ -98,7 +153,9 @@ const colours: Record<AttentionLevel, string> = {
             v-if="
                 !overview.showing_all && overview.total > overview.rows.length
             "
-            :href="index({ query: { attention: 'all' } })"
+            :href="
+                index({ query: { attention: 'all', reason: overview.filter } })
+            "
             class="self-start text-sm font-medium text-primary underline-offset-4 hover:underline"
             data-test="attention-show-all"
             preserve-scroll
@@ -107,7 +164,7 @@ const colours: Record<AttentionLevel, string> = {
         </Link>
         <Link
             v-else-if="overview.showing_all"
-            :href="index()"
+            :href="index({ query: { reason: overview.filter } })"
             class="self-start text-sm font-medium text-primary underline-offset-4 hover:underline"
             data-test="attention-show-fewer"
             preserve-scroll

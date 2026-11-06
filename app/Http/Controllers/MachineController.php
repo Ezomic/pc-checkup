@@ -8,6 +8,7 @@ use App\Actions\Machines\BuildReportInsights;
 use App\Actions\Machines\CompareLatestReports;
 use App\Actions\Machines\CreateManualMachine;
 use App\Actions\Machines\ForgetMachine;
+use App\Enums\AttentionFilter;
 use App\Http\Requests\Machines\StoreMachineRequest;
 use App\Models\Client;
 use App\Models\Machine;
@@ -38,8 +39,10 @@ final class MachineController extends Controller
         $user = $request->user();
         abort_unless($user instanceof User, 403);
 
+        $reason = $request->query('reason');
+
         return Inertia::render('machines/Index', [
-            'needsAttention' => $attention->handle($user, $request->query('attention') === 'all'),
+            'needsAttention' => $attention->handle($user, $request->query('attention') === 'all', is_string($reason) ? AttentionFilter::tryFrom($reason) : null),
             'machines' => $user->machines()
                 ->with('newestReport')
                 ->withCount('reports')

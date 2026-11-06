@@ -1,7 +1,11 @@
 import { mount } from '@vue/test-utils';
 import { describe, expect, it, vi } from 'vitest';
 import NeedsAttention from '@/components/machines/NeedsAttention.vue';
-import type { AttentionRow, NeedsAttentionOverview } from '@/types';
+import type {
+    AttentionFilter,
+    AttentionRow,
+    NeedsAttentionOverview,
+} from '@/types';
 
 vi.mock('@inertiajs/vue3', () => ({
     Link: { props: ['href'], template: '<a :href="href"><slot /></a>' },
@@ -9,10 +13,32 @@ vi.mock('@inertiajs/vue3', () => ({
 
 // Wayfinder generates @/routes at build time, so the spec stubs it.
 vi.mock('@/routes/machines', () => ({
-    index: (options?: { query?: { attention?: string } }) =>
-        options?.query?.attention ? '/machines?attention=all' : '/machines',
+    index: (options?: { query?: Record<string, string | null> }) => {
+        const query = new URLSearchParams(
+            Object.entries(options?.query ?? {}).filter(
+                (entry): entry is [string, string] => entry[1] !== null,
+            ),
+        ).toString();
+
+        return query === '' ? '/machines' : `/machines?${query}`;
+    },
     show: (id: number) => `/machines/${id}`,
 }));
+
+const noFilters: AttentionFilter[] = [
+    { key: 'os', label: 'No security updates', count: 0 },
+    { key: 'drive', label: 'Drive problems', count: 0 },
+    { key: 'age', label: '7+ years old', count: 0 },
+    { key: 'backup', label: 'No recent backup', count: 0 },
+    { key: 'stale', label: 'Not scanned in 6 months', count: 0 },
+];
+
+function filters(counts: Partial<Record<string, number>>): AttentionFilter[] {
+    return noFilters.map((filter) => ({
+        ...filter,
+        count: counts[filter.key] ?? 0,
+    }));
+}
 
 function row(overrides: Partial<AttentionRow> = {}): AttentionRow {
     return {
@@ -37,6 +63,8 @@ function render(overrides: Partial<NeedsAttentionOverview> = {}) {
                 urgent: 1,
                 rows: [row()],
                 showing_all: false,
+                filter: null,
+                filters: noFilters,
                 ...overrides,
             },
         },
@@ -126,6 +154,74 @@ describe('NeedsAttention', () => {
         expect(wrapper.find('[data-test="attention-show-all"]').exists()).toBe(
             false,
         );
+    });
+
+    it('hides the filters when no machine has a filterable reason', () => {
+        expect(render().find('[data-test="attention-filters"]').exists()).toBe(
+            false,
+        );
+    });
+
+    it('offers a filter only for reasons some machine has, with its count', () => {
+        const chips = render({
+            filters: filters({ os: 2, age: 1 }),
+        }).findAll('[data-test="attention-filter"]');
+
+        expect(chips.map((chip) => chip.text())).toEqual([
+            'All',
+            'No security updates (2)',
+            '7+ years old (1)',
+        ]);
+        expect(chips.map((chip) => chip.attributes('href'))).toEqual([
+            '/machines',
+            '/machines?reason=os',
+            '/machines?reason=age',
+        ]);
+        expect(chips[0].attributes('aria-current')).toBe('true');
+        expect(chips[1].attributes('aria-current')).toBeUndefined();
+    });
+
+    it('marks the chosen filter and keeps it when there is nothing left', () => {
+        const wrapper = render({
+            total: 0,
+            urgent: 0,
+            rows: [],
+            filter: 'backup',
+            filters: filters({ os: 1 }),
+        });
+        const chips = wrapper.findAll('[data-test="attention-filter"]');
+
+        expect(chips.map((chip) => chip.text())).toEqual([
+            'All',
+            'No security updates (1)',
+            'No recent backup (0)',
+        ]);
+        expect(chips[2].attributes('aria-current')).toBe('true');
+        expect(chips[0].attributes('aria-current')).toBeUndefined();
+        expect(wrapper.get('[data-test="attention-no-match"]').text()).toBe(
+            'No machine has this reason right now.',
+        );
+        expect(wrapper.find('[data-test="attention-empty"]').exists()).toBe(
+            false,
+        );
+    });
+
+    it('keeps the filter when showing all or fewer', () => {
+        expect(
+            render({ total: 23, filter: 'age', filters: filters({ age: 23 }) })
+                .get('[data-test="attention-show-all"]')
+                .attributes('href'),
+        ).toBe('/machines?attention=all&reason=age');
+        expect(
+            render({
+                total: 23,
+                showing_all: true,
+                filter: 'age',
+                filters: filters({ age: 23 }),
+            })
+                .get('[data-test="attention-show-fewer"]')
+                .attributes('href'),
+        ).toBe('/machines?reason=age');
     });
 
     it('lets long names wrap so a phone does not scroll sideways', () => {
