@@ -11,6 +11,7 @@ export type ClientSummary = {
 export type ClientDetails = {
     id: number;
     name: string;
+    locale: 'nl' | 'en';
     share_url: string | null;
     last_viewed_at: string | null;
     created_at: string;

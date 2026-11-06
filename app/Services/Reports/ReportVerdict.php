@@ -110,10 +110,11 @@ final readonly class ReportVerdict
         $fixable = array_filter($signals, fn (array $signal): bool => $signal['fixable'] && $signal['strength'] > self::NONE);
         $fixableStrong = $this->count($fixable, self::STRONG);
         $osStrong = ($signals['os']['strength'] ?? self::NONE) === self::STRONG;
-        $ageStrong = ($signals['age']['strength'] ?? self::NONE) === self::STRONG;
+        $osStuck = $osStrong && ! $signals['os']['fixable'];
+        $tooOld = ($signals['age']['strength'] ?? self::NONE) === self::STRONG || $osStuck;
 
         return match (true) {
-            $ageStrong && ($osStrong || $strong >= self::REPLACE_STRONG_SIGNALS) => [self::VERDICT_REPLACE, 'bad'],
+            $tooOld && ($osStrong || $strong >= self::REPLACE_STRONG_SIGNALS) => [self::VERDICT_REPLACE, 'bad'],
             $fixableStrong >= self::REPAIR_FIXABLE_STRONG_SIGNALS || count($fixable) >= self::REPAIR_FIXABLE_SIGNALS => [self::VERDICT_REPAIR, 'neutral'],
             default => [self::VERDICT_KEEP, 'good'],
         };
@@ -153,7 +154,11 @@ final readonly class ReportVerdict
 
         $unsupported = array_filter($flags, fn (string $flag): bool => preg_match(FlagAdvisor::UNSUPPORTED_OS, $flag) === 1) !== [];
 
+        $newest = MacNewestOs::forModel($sections->header('model'));
+        $stuck = $newest !== null && ! MacNewestOs::isSupportedByApple($newest);
+
         return match (true) {
+            $unsupported && $stuck => $this->signal(self::STRONG, 'The operating system no longer gets security updates', 'No macOS that still gets security updates runs on this Mac, so it is time to replace it.', false),
             $unsupported => $this->signal(self::STRONG, 'The operating system no longer gets security updates', 'Update it if the machine allows, otherwise it is time to replace it.', true),
             $known !== null => $this->none(),
             default => null,

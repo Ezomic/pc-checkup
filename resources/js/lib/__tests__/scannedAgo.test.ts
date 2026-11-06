@@ -39,3 +39,15 @@ describe('checkedOn', () => {
         expect(checkedOn('2026-11-03 12:00:00')).toBe('3 November 2026');
     });
 });
+
+describe('scannedAgo in Dutch', () => {
+    it.each([
+        ['2026-11-02 11:59:30', 'zojuist'],
+        ['2026-11-02 11:15:00', '45 min geleden'],
+        ['2026-11-02 09:00:00', '3 uur geleden'],
+        ['2026-11-01 09:00:00', 'gisteren'],
+        ['2026-10-28 12:00:00', '5 dagen geleden'],
+    ])('reads %s as %s', (value, expected) => {
+        expect(scannedAgo(value, now, 'nl')).toBe(expected);
+    });
+});

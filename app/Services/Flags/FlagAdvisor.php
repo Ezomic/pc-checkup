@@ -10,72 +10,73 @@ final class FlagAdvisor
 {
     public const UNSUPPORTED_OS = '/end of support|out of security support/';
 
-    private const DISK_FULL = 'A full drive slows the machine down and can stop updates. Free up space or move files elsewhere.';
-
-    private const FIREWALL = 'Turn it on so unwanted connections are blocked.';
-
-    private const ENCRYPTION = 'If the machine is lost or stolen, anyone can read its files. Turn disk encryption on.';
-
     /**
-     * The first matching rule wins. Headlines are templates where {1}, {2} stand for the pattern's capture groups.
+     * The first matching rule wins. The third entry is the key of its texts in lang/{locale}/flags.php, the fourth names the pattern's capture groups as placeholders in those texts.
      *
-     * @var list<array{0: string, 1: FlagSeverity, 2: string, 3: string}>
+     * @var list<array{0: string, 1: FlagSeverity, 2: string, 3: list<string>}>
      */
     private const RULES = [
-        ['/^Disk (?:SMART status|.+? (?:health|status)) is /', FlagSeverity::High, 'A disk is reporting problems', 'Back up your files now, then have the drive checked or replaced.'],
-        ['/disk error event/', FlagSeverity::High, 'Disk errors were logged', 'Bad blocks or controller errors can mean the drive is failing. Back up your files and check the drive.'],
-        ['/SSD wear is (\d+)%/', FlagSeverity::High, 'An SSD is {1}% worn out', 'It is near the end of its life. Back up your files and plan a replacement.'],
-        ['/^(\d+) unexpected shutdown/', FlagSeverity::High, 'Crashed or lost power {1} times this month', 'Check the power supply, temperatures and memory. Repeated crashes often point to failing hardware.'],
-        ['/^(\d+) kernel panic/', FlagSeverity::High, 'The Mac crashed {1} times', 'Repeated kernel panics usually mean a hardware or driver fault.'],
-        ['/^Only about (\d+)% of drive (\S+) is free/', FlagSeverity::High, 'Drive {2} is almost full, only {1}% left', self::DISK_FULL],
-        ['/^Only about (\d+)% of disk is free/', FlagSeverity::High, 'The disk is almost full, only {1}% left', self::DISK_FULL],
-        ['/Defender real-time protection is OFF/', FlagSeverity::High, 'No antivirus is protecting this PC', 'Turn on real-time protection in Windows Security, or install an antivirus.'],
-        [self::UNSUPPORTED_OS, FlagSeverity::High, 'The operating system is no longer supported', 'It no longer gets free security updates. Upgrade it or replace the machine.'],
-        ['/System Integrity Protection is DISABLED/', FlagSeverity::High, 'A core macOS protection is turned off', 'Turn System Integrity Protection back on unless you disabled it on purpose.'],
-        ['/Gatekeeper is DISABLED/', FlagSeverity::High, 'macOS is not checking apps before they run', 'Turn Gatekeeper back on in Privacy and Security.'],
-        ['/^SMBv1 is enabled/', FlagSeverity::High, 'An outdated file sharing feature is on', 'SMBv1 is decades old and ransomware has used it to spread. Turn it off in Windows Features unless an old device needs it.'],
-        ['/^Remote Desktop \(RDP\) is enabled/', FlagSeverity::High, 'Remote Desktop is turned on', 'It lets people sign in to this PC over the network. Turn it off in Settings under System, Remote Desktop, unless you use it.'],
-        ['/^(\d+) enabled account\(s\) are not required to have a password/', FlagSeverity::Medium, 'Some accounts need no password', 'These accounts are allowed to have an empty password. Make sure each one has a password.'],
-        ['/^Windows is not activated/', FlagSeverity::Medium, 'Windows is not activated', 'Activate it with a valid licence to get every feature and update.'],
-        ['/^BitLocker is (?:not protecting|OFF)/', FlagSeverity::Medium, 'Disk encryption is off', self::ENCRYPTION],
-        ['/^FileVault is OFF/', FlagSeverity::Medium, 'Disk encryption is off', self::ENCRYPTION],
-        ['/^Secure Boot is (?:OFF|not available)/', FlagSeverity::Medium, 'Secure Boot is off', 'It blocks malware that starts before Windows. Turn it on in the BIOS or UEFI settings.'],
-        ['/^No TPM found/', FlagSeverity::Medium, 'No TPM found', 'Windows 11 needs TPM 2.0. Look for fTPM or PTT in the BIOS, or this machine cannot officially run Windows 11.'],
-        ['/^TPM is present but not ready/', FlagSeverity::Medium, 'The TPM is not ready', 'Initialise it in Windows Security under Device security.'],
-        ['/firewall is off/i', FlagSeverity::Medium, 'The firewall is off', self::FIREWALL],
-        ['/^Defender signatures are (\d+) days old/', FlagSeverity::Medium, 'Virus definitions are {1} days old', 'Run Windows Update so protection stays current.'],
-        ['/^Windows updates are pending.*?(\d+)\.$/', FlagSeverity::Medium, '{1} Windows updates are waiting', 'Install them. Updates carry security fixes.'],
-        ['/^Software updates are pending/', FlagSeverity::Medium, 'Software updates are waiting', 'Install them. Updates carry security fixes.'],
-        ['/^Only (\d+) GB of RAM/', FlagSeverity::Medium, 'Only {1} GB of RAM', 'Adding memory is the cheapest speed-up for an older machine.'],
-        ['/of memory is (?:available|free)|short on RAM/', FlagSeverity::Medium, 'The machine is short on memory', 'Close heavy apps or add RAM.'],
-        ['/spinning hard drives/', FlagSeverity::Medium, 'It only has a spinning hard drive', 'An SSD makes an older machine feel much faster.'],
-        ['/^(\d+) device\(s\) report a driver problem/', FlagSeverity::Medium, '{1} devices have driver problems', 'Open Device Manager and update or reinstall the drivers.'],
-        ['/^Battery /', FlagSeverity::Medium, 'The battery is worn', 'It holds less charge than when it was new. Consider a replacement.'],
-        ['/^Activation Lock is ENABLED/', FlagSeverity::Medium, 'Activation Lock is on', 'The previous owner\'s Apple ID must be removed before this Mac can be reset or sold.'],
-        ['/^Remote Login \(SSH\) is on/', FlagSeverity::Medium, 'Remote Login is turned on', 'Other computers can try to sign in to this Mac. Turn it off in System Settings under General, Sharing, unless you use it.'],
-        ['/^Screen Sharing is on/', FlagSeverity::Medium, 'Screen Sharing is turned on', 'Other people on the network can ask to see or control this Mac. Turn it off in System Settings under General, Sharing, unless you use it.'],
-        ['/^Automatic sign-in is on/', FlagSeverity::Medium, 'The computer signs in by itself', 'Anyone who switches it on can open your files. Turn automatic sign-in off unless this is a shared machine on purpose.'],
-        ['/^No backup was found/', FlagSeverity::Medium, 'No backup was found', 'If the drive fails or the machine is lost, the files are gone. Set up a backup to an external drive or the cloud.'],
-        ['/^The last backup was (\d+) days ago/', FlagSeverity::Medium, 'The last backup was {1} days ago', 'Connect the backup drive or check that the backup still runs, so recent files are covered.'],
-        ['/^No (?:Windows|macOS) update has been installed for (\d+) days/', FlagSeverity::Medium, 'No updates installed for {1} days', 'Install the available updates. They carry security fixes.'],
-        ['/^(\d+) accounts have administrator rights/', FlagSeverity::Low, '{1} accounts have administrator rights', 'Fewer administrators means less damage if one account is taken over. Make everyday accounts standard users.'],
-        ['/^The BIOS \(firmware\) is (\d+) years old/', FlagSeverity::Low, 'The BIOS is {1} years old', 'Check the maker\'s website for a firmware update. Newer versions fix security and stability problems.'],
-        ['/tamper protection is off/', FlagSeverity::Low, 'Tamper protection is off', 'Turn it on in Windows Security so malware cannot switch protection off.'],
-        ['/^A restart is pending/', FlagSeverity::Low, 'A restart is pending', 'Restart to finish installing updates.'],
-        ['/^(?:Up for|Not restarted for) (\d+) days/', FlagSeverity::Low, 'Not restarted in {1} days', 'Restarting now and then clears out problems and applies updates.'],
-        ['/^(\d+) programs start with Windows/', FlagSeverity::Low, '{1} apps start with Windows', 'Turn off the ones you do not need in Task Manager under Startup.'],
-        ['/agents running/', FlagSeverity::Low, 'Remote access or management software is running', 'Make sure you recognise it. Some tools let other people control the machine.'],
-        ['/managed by an organisation|usually an organisation|Configuration profiles|Custom admin-trusted|Enrolled via/', FlagSeverity::Low, 'It looks managed by an organisation', 'Work or school policies may limit what you can change.'],
-        ['/load average|thermally throttled|Low Power Mode|Background indexing/', FlagSeverity::Low, 'It is running slowly right now', 'Heavy load, low-power mode or heat is slowing it down. Check again later.'],
+        ['/^Disk (?:SMART status|.+? (?:health|status)) is /', FlagSeverity::High, 'disk_problem', []],
+        ['/disk error event/', FlagSeverity::High, 'disk_errors', []],
+        ['/SSD wear is (\d+)%/', FlagSeverity::High, 'ssd_wear', ['percent']],
+        ['/^(\d+) unexpected shutdown/', FlagSeverity::High, 'unexpected_shutdowns', ['count']],
+        ['/^(\d+) kernel panic/', FlagSeverity::High, 'kernel_panics', ['count']],
+        ['/^Only about (\d+)% of drive (\S+) is free/', FlagSeverity::High, 'drive_full', ['percent', 'drive']],
+        ['/^Only about (\d+)% of disk is free/', FlagSeverity::High, 'disk_full', ['percent']],
+        ['/Defender real-time protection is OFF/', FlagSeverity::High, 'no_antivirus', []],
+        [self::UNSUPPORTED_OS, FlagSeverity::High, 'unsupported_os', []],
+        ['/System Integrity Protection is DISABLED/', FlagSeverity::High, 'sip_disabled', []],
+        ['/Gatekeeper is DISABLED/', FlagSeverity::High, 'gatekeeper_disabled', []],
+        ['/^SMBv1 is enabled/', FlagSeverity::High, 'smbv1', []],
+        ['/^Remote Desktop \(RDP\) is enabled/', FlagSeverity::High, 'rdp', []],
+        ['/^(\d+) enabled account\(s\) are not required to have a password/', FlagSeverity::Medium, 'no_password_accounts', ['count']],
+        ['/^Windows is not activated/', FlagSeverity::Medium, 'windows_not_activated', []],
+        ['/^BitLocker is (?:not protecting|OFF)/', FlagSeverity::Medium, 'encryption_off', []],
+        ['/^FileVault is OFF/', FlagSeverity::Medium, 'encryption_off', []],
+        ['/^Secure Boot is (?:OFF|not available)/', FlagSeverity::Medium, 'secure_boot', []],
+        ['/^No TPM found/', FlagSeverity::Medium, 'no_tpm', []],
+        ['/^TPM is present but not ready/', FlagSeverity::Medium, 'tpm_not_ready', []],
+        ['/firewall is off/i', FlagSeverity::Medium, 'firewall_off', []],
+        ['/^Defender signatures are (\d+) days old/', FlagSeverity::Medium, 'defender_old', ['days']],
+        ['/^Windows updates are pending.*?(\d+)\.$/', FlagSeverity::Medium, 'windows_updates_pending', ['count']],
+        ['/^Software updates are pending/', FlagSeverity::Medium, 'software_updates_pending', []],
+        ['/^Only (\d+) GB of RAM/', FlagSeverity::Medium, 'low_ram', ['gb']],
+        ['/of memory is (?:available|free)|short on RAM/', FlagSeverity::Medium, 'short_memory', []],
+        ['/spinning hard drives/', FlagSeverity::Medium, 'spinning_drive', []],
+        ['/^(\d+) device\(s\) report a driver problem/', FlagSeverity::Medium, 'driver_problems', ['count']],
+        ['/^Battery /', FlagSeverity::Medium, 'battery_worn', []],
+        ['/^Activation Lock is ENABLED/', FlagSeverity::Medium, 'activation_lock', []],
+        ['/^Remote Login \(SSH\) is on/', FlagSeverity::Medium, 'remote_login', []],
+        ['/^Screen Sharing is on/', FlagSeverity::Medium, 'screen_sharing', []],
+        ['/^Automatic sign-in is on/', FlagSeverity::Medium, 'auto_signin', []],
+        ['/^No backup was found/', FlagSeverity::Medium, 'no_backup', []],
+        ['/^The last backup was (\d+) days ago/', FlagSeverity::Medium, 'old_backup', ['days']],
+        ['/^No (?:Windows|macOS) update has been installed for (\d+) days/', FlagSeverity::Medium, 'no_updates_installed', ['days']],
+        ['/^(\d+) accounts have administrator rights/', FlagSeverity::Low, 'many_admins', ['count']],
+        ['/^The BIOS \(firmware\) is (\d+) years old/', FlagSeverity::Low, 'old_bios', ['years']],
+        ['/tamper protection is off/', FlagSeverity::Low, 'tamper_protection', []],
+        ['/^A restart is pending/', FlagSeverity::Low, 'restart_pending', []],
+        ['/^(?:Up for|Not restarted for) (\d+) days/', FlagSeverity::Low, 'not_restarted', ['days']],
+        ['/^(\d+) programs start with Windows/', FlagSeverity::Low, 'startup_programs', ['count']],
+        ['/agents running/', FlagSeverity::Low, 'remote_agents', []],
+        ['/managed by an organisation|usually an organisation|Configuration profiles|Custom admin-trusted|Enrolled via/', FlagSeverity::Low, 'managed', []],
+        ['/load average|thermally throttled|Low Power Mode|Background indexing/', FlagSeverity::Low, 'running_slow', []],
     ];
 
-    public function advise(string $flag): FlagAdvice
+    public function advise(string $flag, ?string $locale = null): FlagAdvice
     {
-        foreach (self::RULES as [$pattern, $severity, $headline, $advice]) {
+        foreach (self::RULES as [$pattern, $severity, $key, $names]) {
             if (preg_match($pattern, $flag, $matches) === 1) {
-                $captures = array_slice($matches, 1);
+                $captures = array_slice($matches, 1, count($names));
+                $values = array_combine($names, $captures);
 
-                return new FlagAdvice($severity, $this->fill($headline, $captures), $advice, $flag, $this->fill($headline, array_map($this->withoutNumbers(...), $captures)));
+                return new FlagAdvice(
+                    $severity,
+                    trans("flags.$key.headline", $values, $locale),
+                    trans("flags.$key.advice", [], $locale),
+                    $flag,
+                    trans("flags.$key.headline", array_map($this->withoutNumbers(...), $values), 'en'),
+                );
             }
         }
 
@@ -85,20 +86,6 @@ final class FlagAdvisor
     private function withoutNumbers(string $text): string
     {
         return preg_replace('/\d+(?:[.,]\d+)*/', '#', $text) ?? $text;
-    }
-
-    /**
-     * @param  array<int, string>  $captures
-     */
-    private function fill(string $template, array $captures): string
-    {
-        $replacements = [];
-
-        foreach ($captures as $index => $value) {
-            $replacements['{'.($index + 1).'}'] = $value;
-        }
-
-        return strtr($template, $replacements);
     }
 
     /**

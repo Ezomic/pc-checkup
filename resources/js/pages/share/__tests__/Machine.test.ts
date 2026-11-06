@@ -1,9 +1,12 @@
 import { mount } from '@vue/test-utils';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Machine from '@/pages/share/Machine.vue';
 import type { SharedMachine, SharedReport } from '@/types';
 
+const page = vi.hoisted(() => ({ props: { locale: 'en' } }));
+
 vi.mock('@inertiajs/vue3', () => ({
+    usePage: () => page,
     Head: { template: '<span />' },
     Link: { props: ['href'], template: '<a :href="href"><slot /></a>' },
 }));
@@ -145,5 +148,66 @@ describe('share/Machine', () => {
         expect(wrapper.get('h1').text()).toBe('OptiPlex');
         expect(wrapper.text()).not.toContain('Looking good');
         expect(wrapper.text()).not.toContain('Needs work');
+    });
+});
+
+describe('share/Machine in Dutch', () => {
+    beforeEach(() => {
+        page.props.locale = 'nl';
+    });
+
+    afterEach(() => {
+        page.props.locale = 'en';
+        vi.useRealTimers();
+    });
+
+    it('speaks Dutch around the server text', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-11-02T12:00:00Z'));
+
+        const wrapper = render({
+            report: {
+                ...report,
+                scanned_at: '2026-10-30T12:00:00.000000Z',
+                fixed_count: 2,
+                facts: {
+                    free_disk: '45.5%',
+                    memory: '16.5 GB',
+                    cpu: 'Ryzen 5',
+                },
+            },
+        });
+        const text = wrapper.text();
+
+        expect(text).toContain('Ziet er goed uit');
+        expect(text).toContain('Laatst gecontroleerd: 3 dagen geleden');
+        expect(text).toContain('Wat eerst te doen');
+        expect(text).toContain('2 dingen opgelost sinds de vorige controle');
+        expect(text).toContain('Vrije ruimte');
+        expect(text).toContain('Werkgeheugen');
+        expect(text).toContain('45,5%');
+        expect(text).toContain('16,5 GB');
+        expect(text).toContain('Windows · desktop');
+        expect(text).not.toMatch(/Last checked|What to do first|Looking good/);
+    });
+
+    it('uses the singular for one fixed thing and Dutch fallbacks for missing data', () => {
+        const one = render({ report: { ...report, fixed_count: 1 } });
+        const empty = render({ report: { ...report, advice: [] } });
+        const none = render({
+            report: null,
+            machine: { ...machine, name: null, model: null, status: null },
+        });
+
+        expect(one.get('[data-test="fixed-note"]').text()).toBe(
+            '1 ding opgelost sinds de vorige controle',
+        );
+        expect(empty.get('[data-test="verdict"]').text()).toBe(
+            'Bij de laatste controle viel niets op',
+        );
+        expect(none.get('[data-test="verdict"]').text()).toBe(
+            'Nog niet gecontroleerd',
+        );
+        expect(none.get('h1').text()).toBe('Computer zonder naam');
     });
 });

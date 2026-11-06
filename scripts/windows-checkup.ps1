@@ -1105,6 +1105,109 @@ if ($bl.Value) {
     }
 }
 
+# ---------- Windows 11 readiness (read only; CIM queries are capped, the rest are instant local calls) ----------
+$CouldNot = 'could not check'
+$ReadinessCimSeconds = 20
+$TpmDeviceIds = '^ACPI\\(MSFT0101|MSFT0200|IFX|NTC|STM|INTC|AMDI|BCM)'
+$SocketedFormFactors = 8, 12
+
+function Get-FirmwareMode {
+    $known = Try-Run {
+        Add-Type -Namespace Pcc -Name Firmware -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool GetFirmwareType(ref uint firmwareType);'
+        $type = [uint32]0
+        if (-not [Pcc.Firmware]::GetFirmwareType([ref]$type)) { throw 'GetFirmwareType failed' }
+        $type
+    }
+    if ($known.Value -eq 2) { return 'UEFI' }
+    if ($known.Value -eq 1) { return 'BIOS (legacy)' }
+    if (Test-Path -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\State') { return 'UEFI' }
+    return $CouldNot
+}
+
+function Get-SecureBootReadiness([string]$Firmware) {
+    $confirmed = Try-Run { Confirm-SecureBootUEFI -ErrorAction Stop }
+    if ($null -ne $confirmed.Value) { return $(if ($confirmed.Value) { 'on' } else { 'off' }) }
+    $stored = Try-Run { Get-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\State' 'UEFISecureBootEnabled' }
+    if ($null -ne $stored.Value) { return $(if ([int]$stored.Value -eq 1) { 'on' } else { 'off' }) }
+    if ($Firmware -eq 'BIOS (legacy)') { return 'not supported (legacy BIOS)' }
+    return $CouldNot
+}
+
+function Get-TpmReadiness {
+    $facts = [ordered]@{ Presence = $CouldNot; Version = $CouldNot; Ready = $CouldNot; Device = $null }
+    $wmi = Try-Run { @(Get-CimInstance -Namespace 'root\cimv2\Security\MicrosoftTpm' -ClassName Win32_Tpm -OperationTimeoutSec $ReadinessCimSeconds -ErrorAction Stop) }
+    $chip = @($wmi.Value | Where-Object { $_ }) | Select-Object -First 1
+    if ($chip) {
+        $facts.Presence = 'present'
+        if ((One-Line $chip.SpecVersion) -match '^(\d+\.\d+)') { $facts.Version = $Matches[1] }
+        if ($null -ne $chip.IsEnabled_InitialValue -and $null -ne $chip.IsActivated_InitialValue) {
+            $facts.Ready = $(if ($chip.IsEnabled_InitialValue -and $chip.IsActivated_InitialValue) { 'yes' } else { 'no' })
+        }
+        return $facts
+    }
+    if (-not $wmi.Note) {
+        $facts.Presence = 'not found'
+        return $facts
+    }
+    $device = (Try-Run { Get-CimInstance Win32_PnPEntity -Filter "PNPClass='SecurityDevices'" -OperationTimeoutSec $ReadinessCimSeconds -ErrorAction Stop | Where-Object { $_.DeviceID -match $TpmDeviceIds } | Select-Object -First 1 }).Value
+    if ($device) {
+        $facts.Presence = 'present'
+        $facts.Device = One-Line $device.Name
+        if ($facts.Device -match '(\d\.\d)\s*$') { $facts.Version = $Matches[1] }
+    }
+    return $facts
+}
+
+function Get-MemorySlotFacts {
+    $facts = [ordered]@{ Slots = $CouldNot; Form = $CouldNot; Maximum = $CouldNot; Installed = $null }
+    $arrays = @((Try-Run { Get-CimInstance Win32_PhysicalMemoryArray -OperationTimeoutSec $ReadinessCimSeconds -ErrorAction Stop }).Value | Where-Object { $_ -and $_.Use -eq 3 })
+    $modules = Try-Run { @(Get-CimInstance Win32_PhysicalMemory -OperationTimeoutSec $ReadinessCimSeconds -ErrorAction Stop) }
+    if ($arrays.Count -gt 0 -and -not $modules.Note) {
+        $total = ($arrays | Measure-Object -Property MemoryDevices -Sum).Sum
+        $used = @($modules.Value | Where-Object { $_ -and $_.Capacity -gt 0 })
+        $facts.Installed = [math]::Round(($used | Measure-Object -Property Capacity -Sum).Sum / 1GB)
+        $facts.Slots = "$total total, $($used.Count) used"
+        $socketed = @($used | Where-Object { $SocketedFormFactors -contains [int]$_.FormFactor })
+        $facts.Form = $(if ($used.Count -gt 0 -and $socketed.Count -eq $used.Count) { 'socketed' } else { 'soldered or unknown' })
+    }
+    $kilobytes = 0
+    foreach ($array in $arrays) {
+        $each = $(if ($array.MaxCapacity -eq 2147483648) { [double]$array.MaxCapacityEx } else { [double]$array.MaxCapacity })
+        $kilobytes += $each
+    }
+    if ($kilobytes -gt 0) { $facts.Maximum = "$([math]::Round($kilobytes / 1MB)) GB" }
+    return $facts
+}
+
+function Get-Windows11ReadinessLines {
+    $firmware = Get-FirmwareMode
+    $tpmFacts = Get-TpmReadiness
+    $slotFacts = Get-MemorySlotFacts
+    $cpu = $cpus | Select-Object -First 1
+    $systemDisk = Try-Run { [math]::Round((Get-Partition -DriveLetter $systemDrive.TrimEnd(':') -ErrorAction Stop | Get-Disk -ErrorAction Stop).Size / 1e9) }
+    $diskText = $(if ($null -ne $systemDisk.Value -and $systemDisk.Value -gt 0) { "$($systemDisk.Value) GB" } else { $CouldNot })
+    $installedGb = $(if ($slotFacts.Installed -gt 0) { $slotFacts.Installed } else { $ramGb })
+    $ramText = $(if ($installedGb) { "$installedGb GB" } else { $CouldNot })
+    $cpuText = $(if ($cpu -and (One-Line $cpu.Name)) { One-Line $cpu.Name } else { $CouldNot })
+    $makerText = $(if ($cpu -and (One-Line $cpu.Manufacturer)) { One-Line $cpu.Manufacturer } else { $CouldNot })
+    $familyText = $(if ($cpu -and (One-Line $cpu.Description)) { One-Line $cpu.Description } else { $CouldNot })
+    "Firmware: $firmware"
+    "Secure Boot: $(Get-SecureBootReadiness $firmware)"
+    "TPM: $($tpmFacts.Presence)"
+    "TPM version: $($tpmFacts.Version)"
+    "TPM ready: $($tpmFacts.Ready)"
+    if ($tpmFacts.Device) { "TPM device: $($tpmFacts.Device)" }
+    "CPU: $cpuText"
+    "CPU maker: $makerText"
+    "CPU family: $familyText"
+    "Memory: $ramText"
+    "System disk: $diskText"
+    "Memory slots: $($slotFacts.Slots)"
+    "Memory form: $($slotFacts.Form)"
+    "Memory maximum: $($slotFacts.Maximum)"
+    "Run as administrator: $(if ($IsAdmin) { 'yes' } else { 'no, so the TPM may not be readable' })"
+}
+
 $firewall = Try-Run { Get-NetFirewallProfile | Select-Object Name, Enabled }
 foreach ($fw in @($firewall.Value)) {
     if ($fw -and "$($fw.Enabled)" -eq 'False') { Add-Flag "Windows Firewall is off for the $($fw.Name) profile." }
@@ -1434,6 +1537,7 @@ Add-Section 'Security: Secure Boot, TPM, BitLocker' {
     "BitLocker:   $bitLocker ($systemDrive)"
     "Run as administrator: $IsAdmin"
 }
+Add-Section 'Windows 11 readiness' { Get-Windows11ReadinessLines }
 Add-Section 'Security: Defender' {
     if ($defender.Value) {
         $defender.Value | Select-Object AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled, IsTamperProtected, AntivirusSignatureAge, AntivirusSignatureLastUpdated, AMProductVersion | Format-List

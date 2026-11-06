@@ -61,6 +61,7 @@ final readonly class ReportDetails
             $this->card('slowness', 'Why is it slow?', (new ReportSlowness)->rows($sections, $freeDisk, $this->spinningDrive($sections))),
             (new ReportStartup)->card($sections),
             (new ReportReclaimable)->card($sections),
+            (new ReportUpgrade)->card($sections),
             $this->card('verdict', 'Worth keeping?', (new ReportVerdict)->rows($sections, $flags, $freeDisk)),
         ]));
     }
@@ -89,8 +90,28 @@ final readonly class ReportDetails
             $this->row('First released', $year === null ? null : (string) $year),
             $this->row('Operating system', $system),
             $system === null ? null : $this->support($flags),
+            ...$this->newestMacOs($model, $sections),
             $this->row('Last update installed', $this->lastUpdate($sections)),
         ]);
+    }
+
+    /**
+     * @return list<Row>
+     */
+    private function newestMacOs(?string $model, ReportSections $sections): array
+    {
+        $newest = MacNewestOs::forModel($model);
+        $name = $newest === null ? null : MacNewestOs::name($newest);
+        $running = MacNewestOs::running($sections->header('macos') ?? $this->capture('/^ProductVersion:\s*(\S+)/m', $sections->text('macOS version')));
+
+        if ($newest === null || $name === null || ($running !== null && version_compare($running, $newest, '>'))) {
+            return [];
+        }
+
+        return array_values(array_filter([
+            $this->row('Newest macOS this Mac can run', $name),
+            $running !== null && version_compare($running, $newest, '<') && MacNewestOs::isSupportedByApple($newest) ? $this->row('Can be updated to', $name) : null,
+        ]));
     }
 
     /**
