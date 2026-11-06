@@ -16,6 +16,7 @@ use App\Services\Reports\ReportDriveHealth;
 use App\Services\Reports\ReportFacts;
 use App\Services\Reports\ReportFreshness;
 use App\Services\Reports\ReportSections;
+use App\Services\Reports\ReportUpdates;
 use App\Services\Reports\ReportVerdict;
 use App\Services\Reports\ReportWindowsSecurity;
 use Illuminate\Support\Facades\Date;
@@ -131,6 +132,7 @@ final readonly class NeedsAttention
             $this->backup($cards),
             ...$drives->reasons($sections),
             ...$security->reasons($sections),
+            ...(new ReportUpdates)->reasons($sections),
             ...$this->flags($report->flags, [...$drives->coveredFlags($sections), ...$security->coveredFlags($sections)]),
             $this->freshness->isOlderThan($report, self::RESCAN_AFTER_DAYS) ? $this->reason(AttentionLevel::Soon, 'Last scanned more than 6 months ago') : null,
         ]));
