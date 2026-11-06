@@ -12,7 +12,7 @@ final readonly class ReportDeviceProblems
 {
     public const ROW_LIMIT = 10;
 
-    private const MAX_TOTAL = 9999;
+    private const TOTAL = '/^\d{1,4}$/';
 
     private const NOT_PROBLEMS = [0, 22, 24, 45];
 
@@ -66,8 +66,8 @@ final readonly class ReportDeviceProblems
         }
 
         $rows = $this->rows($lines);
-        $counted = LocaleNumber::count(ReportDates::keyValue($lines, 'total'));
-        $total = max(count($rows), $counted !== null && $counted <= self::MAX_TOTAL ? $counted : 0);
+        $counted = (string) ReportDates::keyValue($lines, 'total');
+        $total = max(count($rows), preg_match(self::TOTAL, $counted) === 1 ? (int) $counted : 0);
 
         return [
             'id' => 'device-problems',
