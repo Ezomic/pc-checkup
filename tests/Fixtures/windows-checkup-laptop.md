@@ -125,3 +125,26 @@ file|disk-image.vhdx|20971520|Other|Virtual Machines
 file|Game Recording.mp4|4194304|Videos|Videos
 file|Setup.exe|1572864|Apps|Downloads
 ```
+
+## Apps you may not need
+
+```
+scan: complete
+seconds: 3
+limit: 45
+format: 1
+scanned: 2026-11-06
+app|Old CAD Program|4194304|2024-02-10
+app|Photo Suite 2018|2097152|unknown
+```
+
+## Backup freshness
+
+```
+format: 1
+scanned: 2026-11-06
+filehistory: set up
+filehistory-last: 2026-08-14
+onedrive-folders: none
+restorepoint-last: 2026-09-30
+```

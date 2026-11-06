@@ -18,6 +18,14 @@
 # profile (file name, size and the name of the folder above it, never a full path). It deletes
 # nothing.
 #
+# The apps step looks, for at most 45 seconds, at the programs in the Uninstall registry keys that were
+# not used for 12 months or more. It stores the name, the size and the date of last use of at most 15
+# programs of 100 MB or more, never a publisher or an install path, and leaves out Microsoft and
+# Windows components and drivers. Dates of last use come from Prefetch only when that folder can be
+# read without admin rights. The backup step reads when File History last ran, whether Desktop,
+# Documents and Pictures live in OneDrive and the date of the newest restore point. Neither step
+# changes anything.
+#
 # Optional upload: with a token the finished report is also sent to PC Checkup. The token is
 # read from, in this order: -Token, the PC_CHECKUP_TOKEN environment variable, or a file named
 # pc-checkup.token next to this script. The site is $DefaultUrl below; -Url or PC_CHECKUP_URL
@@ -680,6 +688,154 @@ function Get-SpaceReport {
     foreach ($line in $lines) { $output.Add($line) }
     foreach ($line in $files) { $output.Add($line) }
     return $output.ToArray()
+}
+
+# Last run dates from Prefetch file names such as SPOTIFY.EXE-1A2B3C4D.pf: the exe name, squeezed to
+# lower case letters and digits, and the newest write time of its files. $Files needs Name and
+# LastWriteTime. Generic exe names (setup, update...) and very short ones are never used.
+function Get-UnusedAppsRunMap($Files) {
+    $generic = 'setup', 'install', 'installer', 'update', 'updater', 'uninstall', 'unins000', 'launcher', 'helper', 'service', 'agent', 'config', 'bootstrapper'
+    $map = @{}
+    foreach ($file in @($Files)) {
+        if ($file.Name -notmatch '^(.+)\.exe-[0-9A-Fa-f]{8}\.pf$') { continue }
+        $exe = ($Matches[1] -replace '[^A-Za-z0-9]', '').ToLowerInvariant()
+        if ($exe.Length -lt 4 -or $generic -contains $exe) { continue }
+        if (-not $map.ContainsKey($exe) -or $file.LastWriteTime -gt $map[$exe]) { $map[$exe] = $file.LastWriteTime }
+    }
+    return $map
+}
+
+# Picks the apps that may be unused from the Uninstall registry entries in $Records (DisplayName,
+# Publisher, EstimatedSize in KB, InstallDate as yyyyMMdd, SystemComponent, ParentKeyName, ReleaseType).
+# $RunMap is the result of Get-UnusedAppsRunMap, or $null when Prefetch cannot be read. An app whose
+# run date is known is listed when it is 12 months old or more; without a run date it is listed as
+# "unknown" when it was installed 12 months ago or earlier. Output lines are app|name|KB|last.
+function Get-UnusedAppsRows($Records, $RunMap, [datetime]$Today, [long]$MinKb, [int]$Limit) {
+    # Drivers, runtimes and parts of Windows are not apps a person chose, and are never suggested for removal.
+    $skipPublisher = '(?i)microsoft|windows|intel|nvidia|advanced micro devices|^amd\b|realtek|qualcomm|synaptics|broadcom|mediatek'
+    $skipName = '(?i)^(microsoft|windows|update for|security update|hotfix)\b|\bKB\d{6,}\b|\.net\b|visual c\+\+|webview2|redistributable|\bruntime\b|\bdriver\b|\bfirmware\b'
+    $cutoff = $Today.Date.AddYears(-1)
+    $best = @{}
+    foreach ($record in @($Records)) {
+        $name = Get-StorageFolderLabel ([string]$record.DisplayName) 60
+        if ($null -eq $name) { continue }
+        if ($record.SystemComponent -eq 1 -or $record.ParentKeyName -or ([string]$record.ReleaseType) -match '(?i)update|hotfix|patch') { continue }
+        if ($name -match $skipName -or ([string]$record.Publisher) -match $skipPublisher) { continue }
+        $kb = [long]0
+        if (-not [long]::TryParse([string]$record.EstimatedSize, [ref]$kb) -or $kb -lt $MinKb -or $kb -gt 2147483647) { continue }
+        $last = $null
+        if ($null -ne $RunMap) {
+            $squeezed = ($name -replace '[^A-Za-z0-9]', '').ToLowerInvariant()
+            foreach ($exe in $RunMap.Keys) {
+                if ($squeezed.Contains($exe) -and ($null -eq $last -or $RunMap[$exe] -gt $last)) { $last = $RunMap[$exe] }
+            }
+        }
+        $label = 'unknown'
+        if ($null -ne $last) {
+            if ($last.Date -gt $cutoff) { continue }
+            $label = $last.ToString('yyyy-MM-dd')
+        } else {
+            $installed = [datetime]::MinValue
+            $text = ([string]$record.InstallDate).Trim()
+            if ($text -notmatch '^\d{8}$' -or -not [datetime]::TryParseExact($text, 'yyyyMMdd', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$installed)) { continue }
+            if ($installed.Year -lt 2000 -or $installed.Date -gt $cutoff) { continue }
+        }
+        $key = $name.ToLowerInvariant()
+        if (-not $best.ContainsKey($key) -or $best[$key].Kb -lt $kb) { $best[$key] = [pscustomobject]@{ Name = $name; Kb = $kb; Last = $label } }
+    }
+    $ordered = @($best.Values | Sort-Object @{ Expression = { $_.Kb }; Descending = $true }, Name)
+    $rows = New-Object System.Collections.Generic.List[string]
+    foreach ($app in ($ordered | Select-Object -First $Limit)) { $rows.Add("app|$($app.Name)|$($app.Kb)|$($app.Last)") }
+    if ($ordered.Count -gt $Limit) { $rows.Add("more|$($ordered.Count - $Limit)") }
+    return $rows.ToArray()
+}
+
+# Looks once, read only, at the programs in the Uninstall registry keys (name, size, install date; no
+# publisher and no install path is kept) that were not used for 12 months or more, never longer than
+# the cap (45 seconds by default). Run dates come from Prefetch only when that folder can be read
+# without admin rights; otherwise an old install date is listed with "unknown" as the last use.
+# Returns the lines of the "Apps you may not need" section; progress goes to the screen.
+function Get-UnusedAppsReport {
+    $cap = 45
+    if ($env:PCC_APPS_CAP -match '^[1-9][0-9]{0,4}$') { $cap = [int]$env:PCC_APPS_CAP }
+    $minKb = 102400
+    if ($env:PCC_APPS_MIN_KB -match '^[1-9][0-9]{0,8}$') { $minKb = [long]$env:PCC_APPS_MIN_KB }
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
+    $today = Get-Date
+    Write-Host "Looking for apps you may not need, stopping after $cap seconds at the latest..."
+    $paths = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    if ($env:PCC_APPS_REGISTRY) { $paths = @($env:PCC_APPS_REGISTRY) }
+    $records = @(Get-ItemProperty -Path $paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName } | Select-Object DisplayName, Publisher, EstimatedSize, InstallDate, SystemComponent, ParentKeyName, ReleaseType)
+    $runMap = $null
+    $prefetch = $env:PCC_APPS_PREFETCH
+    if (-not $prefetch) { $prefetch = Join-Path $env:SystemRoot 'Prefetch' }
+    try {
+        if ($clock.ElapsedMilliseconds -ge [long]$cap * 1000) { throw 'time' }
+        $files = @(Get-ChildItem -LiteralPath $prefetch -Filter '*.pf' -ErrorAction Stop | Select-Object Name, LastWriteTime)
+        if ($files.Count -gt 0) { $runMap = Get-UnusedAppsRunMap $files }
+    } catch {
+        $runMap = $null
+    }
+    $scan = 'complete'
+    if ($clock.ElapsedMilliseconds -ge [long]$cap * 1000) {
+        $scan = "partial (time limit of $cap seconds reached)"
+        Write-Host '  The time limit was reached, so this list may be incomplete.'
+    }
+    $rows = Get-UnusedAppsRows $records $runMap $today $minKb 15
+    $output = New-Object System.Collections.Generic.List[string]
+    $output.Add("scan: $scan")
+    $output.Add("seconds: $([int][math]::Floor($clock.Elapsed.TotalSeconds))")
+    $output.Add("limit: $cap")
+    $output.Add('format: 1')
+    $output.Add("scanned: $($today.ToString('yyyy-MM-dd'))")
+    foreach ($row in $rows) { $output.Add($row) }
+    return $output.ToArray()
+}
+
+# The creation date (yyyy-MM-dd) of the newest restore point, "none" when there is none, or "could
+# not check". Get-ComputerRestorePoint runs in a job so a hung WMI call cannot stop the scan, and
+# for at most $TimeoutSeconds. Without admin rights an empty answer is not trusted as "none".
+function Get-LastRestorePoint([int]$TimeoutSeconds = 15) {
+    $job = $null
+    try {
+        $job = Start-Job -ScriptBlock {
+            Get-ComputerRestorePoint -ErrorAction Stop | Sort-Object SequenceNumber -Descending | Select-Object -First 1 | ForEach-Object { [System.Management.ManagementDateTimeConverter]::ToDateTime($_.CreationTime).ToString('yyyy-MM-dd') }
+        }
+        if (-not (Wait-Job -Job $job -Timeout $TimeoutSeconds)) { return 'could not check' }
+        $date = @(Receive-Job -Job $job -ErrorAction Stop) | Select-Object -First 1
+        if ($date -match '^\d{4}-\d{2}-\d{2}$') { return [string]$date }
+        $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        if ($admin) { return 'none' }
+        return 'could not check'
+    } catch {
+        return 'could not check'
+    } finally {
+        if ($null -ne $job) { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+# The lines of the "Backup freshness" section from facts the backup step already read. $FileHistoryNote
+# is set when File History could not be read, $LastBackup is a [datetime] or $null, $OneDriveFolders
+# lists Desktop, Documents and Pictures when they live in OneDrive, and $RestorePoint comes from
+# Get-LastRestorePoint.
+function Get-BackupFreshnessLines([datetime]$Today, $FileHistoryNote, [bool]$FileHistoryOn, $LastBackup, $OneDriveFolders, [string]$RestorePoint) {
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('format: 1')
+    $lines.Add("scanned: $($Today.ToString('yyyy-MM-dd'))")
+    if ($FileHistoryNote) {
+        $lines.Add('filehistory: could not check')
+        $lines.Add('filehistory-last: could not check')
+    } elseif (-not $FileHistoryOn) {
+        $lines.Add('filehistory: not set up')
+        $lines.Add('filehistory-last: none')
+    } else {
+        $lines.Add('filehistory: set up')
+        if ($null -ne $LastBackup) { $lines.Add("filehistory-last: $(([datetime]$LastBackup).ToString('yyyy-MM-dd'))") } else { $lines.Add('filehistory-last: could not check') }
+    }
+    $folders = @($OneDriveFolders | Where-Object { $_ })
+    if ($folders.Count -gt 0) { $lines.Add("onedrive-folders: $($folders -join ', ')") } else { $lines.Add('onedrive-folders: none') }
+    $lines.Add("restorepoint-last: $RestorePoint")
+    return $lines.ToArray()
 }
 
 function Get-UsableSerial($Value) {
@@ -1502,6 +1658,10 @@ $spaceReport = Try-Run { Get-SpaceReport }
 Add-Section 'Space you can get back' {
     if ($spaceReport.Value) { $spaceReport.Value } else { $spaceReport.Note }
 }
+$unusedApps = Try-Run { Get-UnusedAppsReport }
+Add-Section 'Apps you may not need' {
+    if ($unusedApps.Value) { $unusedApps.Value } else { $unusedApps.Note }
+}
 Add-Section 'Disk wear and errors (SMART counters, needs admin)' {
     if ($reliability.Value) { $reliability.Value | Format-Table -AutoSize } else { $reliability.Note }
 }
@@ -1564,6 +1724,10 @@ Add-Section 'User accounts' {
 }
 
 Add-Section 'Backup status' { $backupFacts }
+$restorePoint = Get-LastRestorePoint
+Add-Section 'Backup freshness' {
+    Get-BackupFreshnessLines (Get-Date) $fileHistory.Note $fileHistoryOn $lastBackup.Value $oneDriveSaved $restorePoint
+}
 Add-Section 'Remote exposure' { $remoteFacts }
 Add-Section 'Administrator accounts' { $adminFacts }
 Add-Section 'BIOS and firmware age' { $biosFacts }

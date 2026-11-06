@@ -10,6 +10,7 @@ use App\Models\Machine;
 use App\Models\Report;
 use App\Models\User;
 use App\Services\Flags\FlagAdvisor;
+use App\Services\Reports\ReportBackups;
 use App\Services\Reports\ReportDetails;
 use App\Services\Reports\ReportFacts;
 use App\Services\Reports\ReportFreshness;
@@ -103,6 +104,7 @@ final readonly class NeedsAttention
             ...$this->battery($cards),
             $this->disk($this->facts->from($report->markdown)['free_disk']),
             $this->verdict($cards),
+            $this->backup($cards),
             ...$this->flags($report->flags),
             $this->freshness->isOlderThan($report, self::RESCAN_AFTER_DAYS) ? $this->reason(AttentionLevel::Soon, 'Last scanned more than 6 months ago') : null,
         ]));
@@ -181,6 +183,17 @@ final readonly class NeedsAttention
             'Repair' => $this->reason(AttentionLevel::Soon, 'The scan says this machine is worth repairing'),
             default => null,
         };
+    }
+
+    /**
+     * @param  array<string, Card>  $cards
+     * @return Reason|null
+     */
+    private function backup(array $cards): ?array
+    {
+        $stale = array_filter($cards['backups']['rows'] ?? [], fn (array $row): bool => $row['label'] === ReportBackups::VERDICT_LABEL && $row['tone'] === 'bad') !== [];
+
+        return $stale ? $this->reason(AttentionLevel::Soon, 'No recent backup') : null;
     }
 
     /**

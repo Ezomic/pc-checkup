@@ -175,3 +175,26 @@ file|Windows 10 install.iso|5242880|Archives|Downloads
 file|Photos export.zip|2306867|Archives|Documents
 file|Thesis backup.pdf|921600|Documents|Documents
 ```
+
+## Apps you may not need
+
+```
+scan: complete
+seconds: 18
+limit: 45
+format: 1
+scanned: 2026-11-06
+app|Final Cut Old|3145728|2023-04-02
+app|Sketch Legacy|2621440|2024-09-15
+app|Old Notes Pro|1887437|2022-12-01
+```
+
+## Backup freshness
+
+```
+format: 1
+scanned: 2026-11-06
+timemachine: set up
+timemachine-last: 2026-11-03
+icloud-folders: Desktop, Documents
+```

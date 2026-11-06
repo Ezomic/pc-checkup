@@ -390,3 +390,46 @@ it('rates staleness with the shared freshness rule', function () {
         ->and((new ReportFreshness)->isOlderThan(null, 1))->toBeFalse()
         ->and((new ReportFreshness)->isOlderThan(new Report, 1))->toBeFalse();
 });
+
+function attentionBackups(string $lines): string
+{
+    return attentionMarkdown()."\n## Backup freshness\n\n```\nformat: 1\nscanned: 2026-11-06\n{$lines}\n```\n";
+}
+
+describe('backups', function () {
+    it('asks for a backup soon when the last one is older than 30 days', function (string $lines) {
+        $row = attentionRow(attentionBackups($lines));
+
+        expect($row['level'])->toBe('soon')
+            ->and($row['reasons'])->toBe([['level' => 'soon', 'text' => 'No recent backup']]);
+    })->with([
+        '31 days' => ["timemachine: set up\ntimemachine-last: 2026-10-06"],
+        'a year' => ["timemachine: set up\ntimemachine-last: 2025-11-06"],
+        'never ran' => ["timemachine: set up\ntimemachine-last: none"],
+        'nothing set up' => ["timemachine: not set up\ntimemachine-last: none\nicloud-folders: none"],
+        'windows, old File History and no OneDrive' => ["filehistory: set up\nfilehistory-last: 2026-01-01\nonedrive-folders: none"],
+        'windows, nothing set up' => ["filehistory: not set up\nfilehistory-last: none\nonedrive-folders: none"],
+    ]);
+
+    it('does not raise anything for a recent backup, the 30 day edge, or the cloud', function (string $lines) {
+        expect(attentionReasons(attentionBackups($lines)))->toBe([]);
+    })->with([
+        'today' => ["timemachine: set up\ntimemachine-last: 2026-11-06"],
+        '30 days' => ["timemachine: set up\ntimemachine-last: 2026-10-07"],
+        'icloud only' => ["timemachine: not set up\nicloud-folders: Desktop, Documents"],
+        'date unreadable' => ["timemachine: set up\ntimemachine-last: could not check"],
+    ]);
+
+    it('does not raise anything when the backups could not be checked', function (string $lines) {
+        expect(attentionReasons(attentionBackups($lines)))->toBe([]);
+    })->with([
+        'all unreadable' => ["timemachine: could not check\ntimemachine-last: could not check\nicloud-folders: could not check"],
+        'partly unreadable' => ["timemachine: not set up\nicloud-folders: could not check"],
+        'garbage' => ["timemachine: banana\nicloud-folders: ???"],
+        'no lines' => [''],
+    ]);
+
+    it('does not raise anything for a report from before the step existed', function () {
+        expect(attentionReasons(attentionMarkdown()))->toBe([]);
+    });
+});
