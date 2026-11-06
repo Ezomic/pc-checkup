@@ -20,8 +20,6 @@ final readonly class ReportUnusedApps
 
     public const ROW_LIMIT = 15;
 
-    private const NAME_LIMIT = 60;
-
     private const MAX_COUNT = 999999;
 
     private const UNKNOWN = 'unknown';
@@ -77,7 +75,7 @@ final readonly class ReportUnusedApps
 
         foreach ($lines as $line) {
             $parts = explode('|', trim($line));
-            $name = count($parts) === 4 && $parts[0] === 'app' ? $this->clean($parts[1]) : null;
+            $name = count($parts) === 4 && $parts[0] === 'app' ? ReportAppName::clean($parts[1]) : null;
             $bytes = $name === null ? null : ByteSize::parse($parts[2]);
             $last = $this->last($parts[3] ?? '', $cutoff);
 
@@ -107,15 +105,6 @@ final readonly class ReportUnusedApps
         $date = ReportDates::parse($value);
 
         return $date !== null && $date->lessThanOrEqualTo($cutoff) ? $date->format('Y-m-d') : false;
-    }
-
-    private function clean(string $name): ?string
-    {
-        $spaced = (string) preg_replace('/[\t\n\r\f\x0B\p{Zs}\p{Zl}\p{Zp}]+/u', ' ', mb_scrub($name));
-        $stripped = (string) preg_replace('~[\p{Cc}/\\\\|]|(?![\x{200C}\x{200D}])\p{Cf}~u', '', $spaced);
-        $clean = trim(mb_substr(trim((string) preg_replace('/ {2,}/', ' ', $stripped)), 0, self::NAME_LIMIT));
-
-        return in_array($clean, ['', '.', '..'], true) ? null : $clean;
     }
 
     /**

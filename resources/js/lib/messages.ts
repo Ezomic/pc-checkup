@@ -80,7 +80,7 @@ const en = {
     'privacy.title': 'What this scan reads and does not read',
     'privacy.readsHeading': 'What it reads',
     'privacy.reads':
-        'Hardware details, the battery, disk usage and the names of the folders in your user folder, the names of installed apps, startup items and security settings. On a Mac it also lists the names of saved Wi-Fi networks and VPNs, the names of installed certificates and which apps hold privacy permissions.',
+        'Hardware details, the battery, disk usage and the names of the folders in your user folder, the names of installed apps, startup items and security settings. It also reads how strong the Wi-Fi connection in use is and how long the computer takes to start, and the names of apps that crashed recently (names only). For the Wi-Fi in use only the strength and band are read. On a Mac it also lists the names of saved Wi-Fi networks and VPNs, the names of installed certificates and which apps hold privacy permissions.',
     'privacy.notReadHeading': 'What it does not read',
     'privacy.notRead':
         'File contents, passwords (Wi-Fi passwords included), browser history, emails or photos. Your account name on the computer is replaced by a placeholder before the report is stored.',
@@ -185,7 +185,7 @@ const nl: Messages = {
     'privacy.title': 'Wat deze scan wel en niet leest',
     'privacy.readsHeading': 'Wat hij leest',
     'privacy.reads':
-        'Hardware, de accu, schijfgebruik en de namen van de mappen in je gebruikersmap, de namen van geïnstalleerde apps, opstartonderdelen en beveiligingsinstellingen. Op een Mac staan ook de namen van opgeslagen wifi-netwerken en vpn-verbindingen, de namen van geïnstalleerde certificaten en welke apps privacytoestemmingen hebben.',
+        'Hardware, de accu, schijfgebruik en de namen van de mappen in je gebruikersmap, de namen van geïnstalleerde apps, opstartonderdelen en beveiligingsinstellingen. Ook leest hij hoe sterk de wifi-verbinding is die je nu gebruikt, hoe lang de computer erover doet om op te starten en de namen van apps die onlangs zijn gecrasht (alleen namen). Van de wifi die je gebruikt worden alleen de sterkte en de frequentieband gelezen. Op een Mac staan ook de namen van opgeslagen wifi-netwerken en vpn-verbindingen, de namen van geïnstalleerde certificaten en welke apps privacytoestemmingen hebben.',
     'privacy.notReadHeading': 'Wat hij niet leest',
     'privacy.notRead':
         "Bestandsinhoud, wachtwoorden (ook wifi-wachtwoorden), browsergeschiedenis, e-mail of foto's. Je accountnaam op de computer wordt vervangen door een plaatsvervanger voordat het rapport wordt opgeslagen.",

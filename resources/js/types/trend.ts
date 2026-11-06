@@ -5,7 +5,7 @@ export type TrendPoint = {
 };
 
 export type Trend = {
-    id: 'disk' | 'battery' | 'memory';
+    id: 'disk' | 'battery' | 'memory' | 'boot';
     title: string;
     points: TrendPoint[];
     latest: string;

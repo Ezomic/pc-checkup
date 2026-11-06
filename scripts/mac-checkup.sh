@@ -1681,6 +1681,93 @@ pcc_backups_report() {
   return 0
 }
 
+PCC_WIFI_CAP="${PCC_WIFI_CAP:-20}"
+PCC_CRASH_CAP="${PCC_CRASH_CAP:-20}"
+PCC_CRASH_DAYS="${PCC_CRASH_DAYS:-30}"
+PCC_CRASH_USER_DIR="${PCC_CRASH_USER_DIR:-${HOME:-}/Library/Logs/DiagnosticReports}"
+PCC_CRASH_SYSTEM_DIR="${PCC_CRASH_SYSTEM_DIR:-/Library/Logs/DiagnosticReports}"
+
+# Signal strength (dBm) and band of the Wi-Fi connection in use right now, for the "Wi-Fi signal"
+# section. Only the "Current Network Information" block is read, and only two of its values are
+# printed: never the network name, other networks in range, saved networks or passwords. Nothing is
+# printed for a value that cannot be read (including a system language other than English).
+pcc_wifi_report() {
+  local info rc
+  echo "format: 1"
+  info=$(pcc_capped "$PCC_WIFI_CAP" system_profiler SPAirPortDataType 2> /dev/null)
+  rc=$?
+  if [ "$rc" != 0 ]; then echo "status: could not check"; return 0; fi
+  printf '%s\n' "$info" | awk '
+    function indent(s) { match(s, /^ */); return RLENGTH }
+    /^ *Current Network Information: *$/ { cur = indent($0); inside = 1; head = -1; next }
+    inside && $0 !~ /^ *$/ {
+      if (indent($0) <= cur) { inside = 0; next }
+      if (head < 0) { head = indent($0); next }
+      if (indent($0) <= head) { inside = 0; next }
+    }
+    !inside || $0 ~ /^ *$/ { next }
+    dbm == "" && $0 ~ /^ *[^:]+: *-[0-9][0-9]* dBm *\/ *-?[0-9][0-9]* dBm *$/ {
+      v = $0; sub(/^ *[^:]+: */, "", v); sub(/ *dBm.*$/, "", v); dbm = v
+    }
+    channel == "" && $0 ~ /^ *Channel: *[0-9][0-9]*( \([^)]*\))? *$/ {
+      v = $0; sub(/^ *Channel: */, "", v)
+      channel = v; sub(/[^0-9].*$/, "", channel)
+      band = ""
+      if (v ~ /\(/) { band = v; sub(/^[^(]*\(/, "", band); sub(/ *GHz.*$/, "", band); gsub(/,/, ".", band); gsub(/ /, "", band) }
+      if (band != "2.4" && band != "5" && band != "6") {
+        band = ""
+        if (channel + 0 >= 1 && channel + 0 <= 14) band = "2.4"
+        else if (channel + 0 >= 32 && channel + 0 <= 177) band = "5"
+      }
+    }
+    END {
+      if (dbm != "") print "signal-dbm: " dbm
+      if (dbm != "" && band != "") print "band: " band " GHz"
+      if (dbm == "") print "status: not connected or could not check"
+    }'
+}
+
+# The apps that crashed most in the last PCC_CRASH_DAYS days, for the "Recent app crashes" section.
+# Only the file names in the DiagnosticReports folders are read (never their contents), and only the
+# app name in front of the date is kept: the host name that older reports carry after the date is
+# dropped. Memory, reset and kernel reports are not app crashes and are skipped.
+pcc_crashes_report() {
+  local days=$PCC_CRASH_DAYS scan="complete" today list dir found=0 rc names total
+  case $days in '' | *[!0-9]* | 0*) days=30 ;; esac
+  today=${PCC_TODAY:-$(date +%Y-%m-%d)}
+  if ! printf '%s' "$today" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then today=$(date +%Y-%m-%d); fi
+  list=$(mktemp)
+  for dir in "$PCC_CRASH_USER_DIR" "$PCC_CRASH_SYSTEM_DIR"; do
+    [ -d "$dir" ] && [ -r "$dir" ] && [ -x "$dir" ] || continue
+    found=1
+    pcc_capped "$PCC_CRASH_CAP" find "$dir" -maxdepth 1 -type f \( -name '*.ips' -o -name '*.crash' \) -mtime -"$days" -print 2> /dev/null >> "$list"
+    rc=$?
+    if [ "$rc" = 142 ]; then scan="partial (time limit of $PCC_CRASH_CAP seconds reached)"; fi
+  done
+  echo "format: 1"
+  echo "scanned: $today"
+  echo "window-days: $days"
+  if [ "$found" = 0 ]; then
+    echo "scan: could not check"
+    rm -f "$list"
+    return 0
+  fi
+  names=$(sed -e 's|.*/||' "$list" \
+    | sed -n -e 's/[-_][0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].*$//p' \
+    | tr -d '\000-\011\013-\037\177|' \
+    | grep -viE '^(JetsamEvent|ResetCounter|Kernel|stacks|panic)' \
+    | grep -v '^[[:space:]]*$' \
+    | cut -c1-80)
+  echo "scan: $scan"
+  total=$(printf '%s' "$names" | grep -c . )
+  echo "total: ${total:-0}"
+  if [ "${total:-0}" -gt 0 ]; then
+    printf '%s\n' "$names" | sort | uniq -c | sort -k1,1nr -k2 | head -n 10 | awk '{ n = $1; sub(/^ *[0-9]+ /, ""); print "app|" $0 "|" n }'
+  fi
+  rm -f "$list"
+  return 0
+}
+
 # Sourcing this file (for tests) stops here instead of running the checkup.
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
 
@@ -1847,6 +1934,7 @@ sh_section "Performance: biggest folders in home" "END=\$((SECONDS+15)); for D i
 section "Graphics and displays" system_profiler SPDisplaysDataType
 section "Network interfaces" networksetup -listallhardwareports
 sh_section "Wi-Fi" "system_profiler SPAirPortDataType | head -40"
+section "Wi-Fi signal" pcc_wifi_report
 section "Bluetooth" system_profiler SPBluetoothDataType
 section "USB devices" system_profiler SPUSBDataType
 section "Thunderbolt" system_profiler SPThunderboltDataType
@@ -1883,6 +1971,7 @@ sh_section "DNS and proxy" "scutil --dns | head -25; scutil --proxy"
 sh_section "Hosts file (non-default lines)" "grep -vE '^\s*#|^\s*$' /etc/hosts"
 
 sh_section "Kernel panic reports" "ls -lt /Library/Logs/DiagnosticReports/*.panic 2>&1 | head -10; ls -lt /Library/Logs/DiagnosticReports 2>/dev/null | head -15"
+section "Recent app crashes" pcc_crashes_report
 sh_section "Recent shutdown causes" "pcc_capped 20 log show --predicate 'eventMessage contains \"Previous shutdown cause\"' --last 7d 2>/dev/null | tail -8; echo; echo '(last 7 days, capped at 20 seconds)'"
 sh_section "Time Machine" "tmutil destinationinfo 2>&1 | head -15; tmutil latestbackup 2>&1"
 sh_section "Privacy permissions (TCC), needs Full Disk Access for Terminal" "for DB in \"\$HOME/Library/Application Support/com.apple.TCC/TCC.db\" '/Library/Application Support/com.apple.TCC/TCC.db'; do echo \"== \$DB\"; sqlite3 \"\$DB\" \"select service, client, case auth_value when 2 then 'allowed' when 0 then 'denied' else auth_value end from access where auth_value=2 and service in ('kTCCServiceScreenCapture','kTCCServiceAccessibility','kTCCServiceSystemPolicyAllFiles','kTCCServiceCamera','kTCCServiceMicrophone','kTCCServiceListenEvent','kTCCServicePostEvent') order by service, client;\" 2>&1; done; echo; echo 'If you see an authorization error, grant Terminal Full Disk Access in System Settings > Privacy & Security and re-run.'"
