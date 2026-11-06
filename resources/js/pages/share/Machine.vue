@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
-import { ArrowLeft, CircleCheck } from '@lucide/vue';
+import { ArrowLeft, ArrowRight, CircleCheck } from '@lucide/vue';
 import { computed } from 'vue';
 import AdviceList from '@/components/machines/AdviceList.vue';
 import StatusBadge from '@/components/machines/StatusBadge.vue';
 import { useLocale } from '@/composables/useLocale';
-import { show } from '@/routes/share';
+import { beforeAfter, show } from '@/routes/share';
 import type { SharedMachine, SharedReport } from '@/types';
 
 const props = defineProps<{
@@ -13,6 +13,7 @@ const props = defineProps<{
     client: { name: string };
     machine: SharedMachine;
     report: SharedReport | null;
+    canCompare: boolean;
 }>();
 
 const { t, ago, number, deviceType } = useLocale();
@@ -124,6 +125,21 @@ const tiles = computed(() => {
             </div>
         </div>
     </section>
+
+    <Link
+        v-if="canCompare"
+        :href="beforeAfter({ token, machine: machine.id })"
+        class="flex items-center justify-between gap-3 rounded-xl border border-border p-4 transition-colors hover:border-primary/50 print:hidden"
+        data-test="before-after-link"
+    >
+        <span class="flex flex-col">
+            <span class="font-medium">{{ t('ba.link') }}</span>
+            <span class="text-sm text-muted-foreground">{{
+                t('ba.linkHint')
+            }}</span>
+        </span>
+        <ArrowRight class="size-4 shrink-0" aria-hidden="true" />
+    </Link>
 
     <section
         v-if="report && report.advice.length > 0"

@@ -13,6 +13,8 @@ vi.mock('@inertiajs/vue3', () => ({
 
 vi.mock('@/routes/share', () => ({
     show: (token: string) => `/c/${token}`,
+    beforeAfter: (args: { token: string; machine: number }) =>
+        `/c/${args.token}/machines/${args.machine}/before-after`,
 }));
 
 const machine: SharedMachine = {
@@ -41,6 +43,7 @@ function render(
     overrides: Partial<{
         machine: SharedMachine;
         report: SharedReport | null;
+        canCompare: boolean;
     }> = {},
 ) {
     return mount(Machine, {
@@ -49,12 +52,27 @@ function render(
             client: { name: 'Acme' },
             machine,
             report,
+            canCompare: false,
             ...overrides,
         },
     });
 }
 
 describe('share/Machine', () => {
+    it('offers the before and after page only when there are two scans', () => {
+        expect(render().find('[data-test="before-after-link"]').exists()).toBe(
+            false,
+        );
+
+        const link = render({ canCompare: true }).get(
+            '[data-test="before-after-link"]',
+        );
+
+        expect(link.attributes('href')).toBe('/c/tok/machines/1/before-after');
+        expect(link.text()).toContain('Before and after');
+        expect(link.classes()).toContain('print:hidden');
+    });
+
     it('links back to the clients list inside the share', () => {
         expect(render().get('[data-test="back"]').attributes('href')).toBe(
             '/c/tok',

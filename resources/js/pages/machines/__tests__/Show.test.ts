@@ -8,6 +8,7 @@ import RemoteSupportSection from '@/components/machines/RemoteSupportSection.vue
 import ScriptVersionNote from '@/components/machines/ScriptVersionNote.vue';
 import StaleNote from '@/components/machines/StaleNote.vue';
 import TrendsCard from '@/components/machines/TrendsCard.vue';
+import { Button } from '@/components/ui/button';
 import Show from '@/pages/machines/Show.vue';
 import type { LatestReport, ReportChanges, Trend } from '@/types';
 
@@ -20,6 +21,7 @@ vi.mock('@inertiajs/vue3', () => ({
 vi.mock('@/routes/machines', () => ({
     index: () => '/machines',
     summary: (id: number) => `/machines/${id}/summary`,
+    beforeAfter: (id: number) => `/machines/${id}/before-after`,
 }));
 
 function report(overrides: Partial<LatestReport> = {}): LatestReport {
@@ -184,6 +186,23 @@ describe('machines/Show', () => {
         expect(
             render(report(), changes).findComponent(ChangesSection).exists(),
         ).toBe(true);
+    });
+
+    it('links to the before and after page only when there is something to compare', () => {
+        const changes: ReportChanges = {
+            previous_at: '2026-10-12T10:00:00.000000Z',
+            new: [],
+            fixed: [],
+            open: 0,
+            disk: null,
+            memory: null,
+            same_rights: true,
+        };
+
+        const buttons = (changes: ReportChanges | null) =>
+            render(report(), changes).findAllComponents(Button).length;
+
+        expect(buttons(changes)).toBe(buttons(null) + 1);
     });
 
     it('prints through the browser dialog from a button hidden in print', () => {

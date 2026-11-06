@@ -26,3 +26,34 @@ export type SharedReport = {
     advice: SharedAdvice[];
     fixed_count: number | null;
 };
+
+export type BeforeAfterNumberKey =
+    | 'free_disk'
+    | 'memory'
+    | 'startup'
+    | 'battery_cycles'
+    | 'battery_condition'
+    | 'disk_read'
+    | 'disk_write';
+
+export type BeforeAfterNumber = {
+    key: BeforeAfterNumberKey;
+    from: string;
+    to: string;
+    improved: boolean | null;
+};
+
+export type BeforeAfter = {
+    before: string | null;
+    after: string | null;
+    same_rights: boolean;
+    fixed: string[];
+    open: string[];
+    new: string[];
+    numbers: BeforeAfterNumber[];
+};
+
+export type ScanOption = {
+    id: number;
+    scanned_at: string | null;
+};
