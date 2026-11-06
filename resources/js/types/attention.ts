@@ -14,9 +14,19 @@ export type AttentionRow = {
     reason_count: number;
 };
 
+export type AttentionFilterKey = 'os' | 'drive' | 'age' | 'backup' | 'stale';
+
+export type AttentionFilter = {
+    key: AttentionFilterKey;
+    label: string;
+    count: number;
+};
+
 export type NeedsAttentionOverview = {
     total: number;
     urgent: number;
     rows: AttentionRow[];
     showing_all: boolean;
+    filter: AttentionFilterKey | null;
+    filters: AttentionFilter[];
 };
