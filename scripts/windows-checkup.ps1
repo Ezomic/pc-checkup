@@ -767,9 +767,9 @@ function Get-UnusedAppsReport {
     if ($env:PCC_APPS_REGISTRY) { $paths = @($env:PCC_APPS_REGISTRY) }
     $records = @(Get-ItemProperty -Path $paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName } | Select-Object DisplayName, Publisher, EstimatedSize, InstallDate, SystemComponent, ParentKeyName, ReleaseType)
     $runMap = $null
-    $prefetch = $env:PCC_APPS_PREFETCH
-    if (-not $prefetch) { $prefetch = Join-Path $env:SystemRoot 'Prefetch' }
     try {
+        $prefetch = $env:PCC_APPS_PREFETCH
+        if (-not $prefetch) { $prefetch = Join-Path $env:SystemRoot 'Prefetch' }
         if ($clock.ElapsedMilliseconds -ge [long]$cap * 1000) { throw 'time' }
         $files = @(Get-ChildItem -LiteralPath $prefetch -Filter '*.pf' -ErrorAction Stop | Select-Object Name, LastWriteTime)
         if ($files.Count -gt 0) { $runMap = Get-UnusedAppsRunMap $files }
