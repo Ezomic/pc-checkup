@@ -98,8 +98,7 @@ final class ScriptTemp
 
             $listing = Process::run(['ps', '-o', 'pid=,stat=,args=', '-p', implode(',', array_unique($pids))])->output();
 
-            foreach (explode('
-', $listing) as $line) {
+            foreach (explode(PHP_EOL, $listing) as $line) {
                 if (preg_match('/^\s*(\d+)\s+(\S+)\s+(.*)$/', $line, $found) !== 1 || str_starts_with($found[2], 'Z')) {
                     continue;
                 }
