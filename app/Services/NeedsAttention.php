@@ -11,8 +11,11 @@ use App\Models\Report;
 use App\Models\User;
 use App\Services\Flags\FlagAdvisor;
 use App\Services\Reports\ReportDetails;
+use App\Services\Reports\ReportDriveHealth;
 use App\Services\Reports\ReportFacts;
 use App\Services\Reports\ReportFreshness;
+use App\Services\Reports\ReportSections;
+use App\Services\Reports\ReportWindowsSecurity;
 use Illuminate\Support\Facades\Date;
 
 /**
@@ -98,12 +101,18 @@ final readonly class NeedsAttention
 
         $cards = array_column($this->details->cards($report->markdown, $report->flags, $machine->device_type), null, 'id');
 
+        $sections = ReportSections::parse($report->markdown);
+        $drives = new ReportDriveHealth;
+        $security = new ReportWindowsSecurity;
+
         $reasons = array_values(array_filter([
             $this->operatingSystem($report->flags),
             ...$this->battery($cards),
             $this->disk($this->facts->from($report->markdown)['free_disk']),
             $this->verdict($cards),
-            ...$this->flags($report->flags),
+            ...$drives->reasons($sections),
+            ...$security->reasons($sections),
+            ...$this->flags($report->flags, [...$drives->coveredFlags($sections), ...$security->coveredFlags($sections)]),
             $this->freshness->isOlderThan($report, self::RESCAN_AFTER_DAYS) ? $this->reason(AttentionLevel::Soon, 'Last scanned more than 6 months ago') : null,
         ]));
 
@@ -185,11 +194,12 @@ final readonly class NeedsAttention
 
     /**
      * @param  list<string>  $flags
+     * @param  list<string>  $covered  Patterns of the flags that the health section already judged.
      * @return list<Reason>
      */
-    private function flags(array $flags): array
+    private function flags(array $flags, array $covered): array
     {
-        $own = array_filter($flags, fn (string $flag): bool => preg_match(self::COVERED_FLAGS, $flag) !== 1);
+        $own = array_filter($flags, fn (string $flag): bool => preg_match(self::COVERED_FLAGS, $flag) !== 1 && array_filter($covered, fn (string $pattern): bool => preg_match($pattern, $flag) === 1) === []);
         $high = array_filter($this->advisor->adviseAll(array_values($own)), fn ($advice): bool => $advice->severity === FlagSeverity::High);
 
         return array_values(array_map(
