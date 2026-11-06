@@ -5,23 +5,11 @@ declare(strict_types=1);
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
+use Tests\Support\ScriptTemp;
 
 function uasMissing(): bool
 {
     return PHP_OS_FAMILY === 'Windows' || trim((string) shell_exec('command -v perl 2>/dev/null')) === '';
-}
-
-function uasBin(array $scripts): string
-{
-    $dir = sys_get_temp_dir().'/pcc-uas-bin-'.bin2hex(random_bytes(4));
-    mkdir($dir, 0777, true);
-
-    foreach ($scripts as $name => $body) {
-        file_put_contents($dir.'/'.$name, "#!/bin/bash\n".$body."\n");
-        chmod($dir.'/'.$name, 0755);
-    }
-
-    return $dir;
 }
 
 function uasApp(string $path, int $kib, ?string $mdls = null, ?string $mtime = null): void
@@ -51,7 +39,7 @@ SH;
 
 function uasTree(): string
 {
-    $base = sys_get_temp_dir().'/pcc-uas-'.bin2hex(random_bytes(4));
+    $base = ScriptTemp::dir('pcc-uas');
     $apps = $base.'/Applications';
     $old = '2023-05-01 10:11:12 +0000';
     $added = '2021-01-01 10:11:12 +0000';
@@ -81,7 +69,7 @@ function uasTree(): string
  */
 function uasRun(string $base, array $env = [], ?string $bin = null, string $function = 'pcc_apps_report'): ProcessResult
 {
-    $bin ??= uasBin(['mdls' => UAS_FAKE_MDLS]);
+    $bin ??= ScriptTemp::bin('pcc-uas-bin', ['mdls' => UAS_FAKE_MDLS]);
 
     return Process::path(base_path())->timeout(120)->env(array_merge([
         'PCC_APPS_DIR' => $base.'/Applications',
@@ -114,12 +102,6 @@ function uasParse(string $output): array
 
     return compact('header', 'apps', 'more');
 }
-
-afterEach(function () {
-    foreach (glob(sys_get_temp_dir().'/pcc-uas-*') ?: [] as $dir) {
-        File::deleteDirectory($dir);
-    }
-});
 
 describe('the Mac apps step on a fake Applications tree', function () {
     it('lists only old, non-Apple apps over the size limit, biggest first, with the right dates', function () {
@@ -198,7 +180,7 @@ describe('the Mac apps step on a fake Applications tree', function () {
     });
 
     it('stops at the time limit, says partial and keeps the apps it had', function () {
-        $bin = uasBin(['mdls' => "sleep 1.1\n".UAS_FAKE_MDLS]);
+        $bin = ScriptTemp::bin('pcc-uas-bin', ['mdls' => "sleep 1.1\n".UAS_FAKE_MDLS]);
         $started = microtime(true);
         $found = uasParse(uasRun(uasTree(), ['PCC_APPS_CAP' => '2'], $bin)->throw()->output());
 
@@ -209,12 +191,12 @@ describe('the Mac apps step on a fake Applications tree', function () {
     });
 
     it('says partial when mdls or du run out of time on one app, and goes on with the others', function () {
-        $mdls = uasBin(['mdls' => 'for last; do :; done'."\n".'case "$last" in *"Old Editor"*) kill -ALRM $$ ;; esac'."\n".UAS_FAKE_MDLS]);
+        $mdls = ScriptTemp::bin('pcc-uas-bin', ['mdls' => 'for last; do :; done'."\n".'case "$last" in *"Old Editor"*) kill -ALRM $$ ;; esac'."\n".UAS_FAKE_MDLS]);
         $found = uasParse(uasRun(uasTree(), [], $mdls)->throw()->output());
 
         expect($found['header']['scan'])->toStartWith('partial')->and(array_column($found['apps'], 1))->not->toContain('Old Editor')->toContain('Never');
 
-        $du = uasBin(['mdls' => UAS_FAKE_MDLS, 'du' => 'for last; do :; done'."\n".'case "$last" in *"Old Editor"*) kill -ALRM $$ ;; esac'."\n".'exec /usr/bin/du "$@"']);
+        $du = ScriptTemp::bin('pcc-uas-bin', ['mdls' => UAS_FAKE_MDLS, 'du' => 'for last; do :; done'."\n".'case "$last" in *"Old Editor"*) kill -ALRM $$ ;; esac'."\n".'exec /usr/bin/du "$@"']);
         $found = uasParse(uasRun(uasTree(), [], $du)->throw()->output());
 
         expect($found['header']['scan'])->toStartWith('partial')->and(array_column($found['apps'], 1))->not->toContain('Old Editor')->toContain('Never');
@@ -229,7 +211,7 @@ describe('the Mac apps step on a fake Applications tree', function () {
     it('falls back to the bundle id from the Info plist when Spotlight has none, and skips Apple apps', function () {
         $base = uasTree();
         uasApp($base.'/Applications/Plist Apple.app', 2500, "kMDItemLastUsedDate       = 2020-01-01 00:00:00 +0000\n");
-        $bin = uasBin(['mdls' => UAS_FAKE_MDLS, 'defaults' => 'case "$2" in *"Plist Apple"*) echo com.apple.thing ;; esac']);
+        $bin = ScriptTemp::bin('pcc-uas-bin', ['mdls' => UAS_FAKE_MDLS, 'defaults' => 'case "$2" in *"Plist Apple"*) echo com.apple.thing ;; esac']);
 
         expect(uasRun($base, [], $bin)->throw()->output())->not->toContain('Plist Apple');
     });
@@ -250,7 +232,7 @@ const UAS_TM_ON = ['tmutil' => 'case "$1" in destinationinfo) printf "====\nName
  */
 function uasBackups(array $scripts, array $env = []): string
 {
-    return uasRun('/nonexistent', $env, uasBin($scripts), 'pcc_backups_report')->throw()->output();
+    return uasRun('/nonexistent', $env, ScriptTemp::bin('pcc-uas-bin', $scripts), 'pcc_backups_report')->throw()->output();
 }
 
 describe('the Mac backups step with fake tmutil and defaults', function () {

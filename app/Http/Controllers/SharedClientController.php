@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Actions\Clients\RecordShareView;
+use App\Actions\Machines\BuildBeforeAfter;
+use App\Actions\Machines\ResolveReportPair;
 use App\Models\Client;
 use App\Models\Machine;
 use App\Services\Share\SharedMachineView;
@@ -47,6 +49,24 @@ final class SharedClientController extends Controller
             'client' => ['name' => $client->name],
             'machine' => $view->identity($shared),
             'report' => $view->report($shared),
+            'canCompare' => $shared->reports()->count() >= 2,
+        ]);
+    }
+
+    public function beforeAfter(Request $request, string $token, string $machine, RecordShareView $record, SharedMachineView $view, ResolveReportPair $pair, BuildBeforeAfter $build): Response
+    {
+        $client = $this->client($request, $token, $record);
+
+        abort_unless(preg_match(self::ID_PATTERN, $machine) === 1, 404);
+
+        $shared = $client->machines()->whereKey((int) $machine)->firstOrFail();
+        $reports = $pair->latestTwo($shared);
+
+        return Inertia::render('share/BeforeAfter', [
+            'token' => $token,
+            'client' => ['name' => $client->name],
+            'machine' => $view->identity($shared),
+            'comparison' => $build->handle($reports[0], $reports[1], true),
         ]);
     }
 

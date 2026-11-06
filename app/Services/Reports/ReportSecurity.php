@@ -22,6 +22,8 @@ final readonly class ReportSecurity
         $remote = $this->text($sections, 'Remote exposure');
         $backup = $this->text($sections, 'Backup status');
         $windowsSecurity = $this->text($sections, 'Security: Secure Boot, TPM, BitLocker');
+        $health = (new ReportWindowsSecurity)->rows($sections);
+        $known = array_column($health, 'label');
 
         return array_values(array_filter([
             $this->fileVault($mac),
@@ -33,14 +35,23 @@ final readonly class ReportSecurity
             $this->toggle('Remote Login', $remote, '/^\s*Remote Login \(SSH\):\s*(on|off)\b/im', false, '/^\s*Remote Login \(SSH\):/im'),
             $this->toggle('Screen Sharing', $remote, '/^\s*Screen Sharing:\s*(on|off)\b/im', false, '/^\s*Screen Sharing:/im'),
             $this->toggle('Find My Mac', $this->text($sections, 'Activation Lock and Find My'), '/^\s*Find My Mac:\s*(on|off)\b/im', true),
-            $this->toggle('Disk encryption', $windowsSecurity, '/^\s*BitLocker:\s*(on|off)\b/im', true),
-            $this->windowsFirewall($this->text($sections, 'Security: firewall')),
-            $this->defender($this->text($sections, 'Security: Defender')),
+            ...$health,
+            $this->covered($known, 'Disk encryption') ? null : $this->toggle('Disk encryption', $windowsSecurity, '/^\s*BitLocker:\s*(on|off)\b/im', true),
+            $this->covered($known, 'Windows Firewall') ? null : $this->windowsFirewall($this->text($sections, 'Security: firewall')),
+            $this->covered($known, 'Antivirus') ? null : $this->defender($this->text($sections, 'Security: Defender')),
             $this->toggle('Automatic sign-in', $remote, '/^\s*Automatic sign-in:\s*(on|off)\b/im', false, '/^\s*Automatic sign-in:/im'),
-            $this->toggle('Remote Desktop', $remote, '/^\s*Remote Desktop \(RDP\):\s*(enabled|off)\b/im', false, '/^\s*Remote Desktop \(RDP\):/im'),
-            $this->toggle('SMBv1', $remote, '/^\s*SMBv1:\s*(enabled|off)\b/im', false, '/^\s*SMBv1:/im'),
+            $this->covered($known, 'Remote Desktop') ? null : $this->toggle('Remote Desktop', $remote, '/^\s*Remote Desktop \(RDP\):\s*(enabled|off)\b/im', false, '/^\s*Remote Desktop \(RDP\):/im'),
+            $this->covered($known, 'SMBv1') ? null : $this->toggle('SMBv1', $remote, '/^\s*SMBv1:\s*(enabled|off)\b/im', false, '/^\s*SMBv1:/im'),
             $this->windowsBackup($backup),
         ]));
+    }
+
+    /**
+     * @param  list<string>  $known
+     */
+    private function covered(array $known, string $label): bool
+    {
+        return in_array($label, $known, true);
     }
 
     private function text(ReportSections $sections, string $title): ?string

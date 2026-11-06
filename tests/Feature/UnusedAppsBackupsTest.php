@@ -124,6 +124,6 @@ describe('the fixtures', function () {
 
         expect($cards['unused-apps']['bars'][1]['items'][0]['detail'])->toBe('Last use unknown')
             ->and(array_column($cards['backups']['rows'], 'label'))->toBe(['Backup', 'File History', 'OneDrive folder backup', 'Last restore point'])
-            ->and($cards['backups']['rows'][0]['tone'])->toBe('bad');
+            ->and($cards['backups']['rows'][0])->toBe(['label' => 'Backup', 'value' => 'Last backup 17 days ago', 'tone' => 'neutral']);
     });
 });

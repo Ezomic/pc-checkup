@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\Process;
+use Tests\Support\ScriptTemp;
 
 function uawMissing(): bool
 {
@@ -31,8 +32,7 @@ function uawRun(string $case, string $option = 'none'): ProcessResult
         'Get-StorageFolderLabel', 'Get-UnusedAppsRunMap', 'Get-UnusedAppsRows', 'Get-UnusedAppsReport', 'Get-LastRestorePoint', 'Get-BackupFreshnessLines',
     ]));
 
-    $dir = sys_get_temp_dir().'/pcc-uaw-'.bin2hex(random_bytes(4));
-    mkdir($dir, 0777, true);
+    $dir = ScriptTemp::dir('pcc-uaw');
     file_put_contents($dir.'/step.ps1', "param([string]\$Case, [string]\$Option)\n".$functions."\n".<<<'PS'
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)

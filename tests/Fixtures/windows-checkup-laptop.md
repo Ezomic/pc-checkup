@@ -144,7 +144,7 @@ app|Photo Suite 2018|2097152|unknown
 format: 1
 scanned: 2026-11-06
 filehistory: set up
-filehistory-last: 2026-08-14
+filehistory-last: 2026-10-20
 onedrive-folders: none
 restorepoint-last: 2026-09-30
 ```

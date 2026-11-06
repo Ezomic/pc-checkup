@@ -26,6 +26,11 @@
 # Documents and Pictures live in OneDrive and the date of the newest restore point. Neither step
 # changes anything.
 #
+# The health and security step reads the state of each drive (health, wear, temperature, error counts)
+# and a list of security settings (Defender, other antivirus names, BitLocker, firewall, Remote Desktop,
+# SMBv1, how many accounts have administrator rights, UAC). It stores no serial numbers and no account
+# names, and spends at most 90 seconds. What cannot be read without admin rights says could not check.
+#
 # Optional upload: with a token the finished report is also sent to PC Checkup. The token is
 # read from, in this order: -Token, the PC_CHECKUP_TOKEN environment variable, or a file named
 # pc-checkup.token next to this script. The site is $DefaultUrl below; -Url or PC_CHECKUP_URL
@@ -1261,6 +1266,225 @@ if ($bl.Value) {
     }
 }
 
+# ---------- Windows health and security (read only; every value that cannot be read says could not check) ----------
+$HealthBudgetSeconds = 90
+$HealthCallSeconds = 20
+$HealthMaxDisks = 8
+$HealthMaxNames = 5
+$HealthNeverScanned = 4294967295
+
+# Runs a read in its own runspace so a stuck query cannot hang the scan: it gets $Seconds, or what is
+# left of the whole step's budget. The block must not use the helpers of this script. A runspace
+# that did not answer is told to stop but not disposed, because disposing it can block.
+function Try-Capped([scriptblock]$Block, [int]$Seconds = $HealthCallSeconds) {
+    $left = [int]($HealthBudgetSeconds - $script:HealthClock.Elapsed.TotalSeconds)
+    if ($left -le 0) {
+        $script:HealthCut = $true
+        return [pscustomobject]@{ Value = $null; Note = 'unavailable (the time limit of this step was reached)' }
+    }
+    $limit = [math]::Min($Seconds, $left)
+    $shell = [powershell]::Create()
+    $stuck = $false
+    try {
+        $null = $shell.AddScript("`$ErrorActionPreference = 'Stop'`n" + $Block.ToString())
+        $handle = $shell.BeginInvoke()
+        if (-not $handle.AsyncWaitHandle.WaitOne($limit * 1000)) {
+            $stuck = $true
+            $script:HealthCut = $true
+            $null = $shell.BeginStop($null, $null)
+            return [pscustomobject]@{ Value = $null; Note = "unavailable (took longer than $limit seconds)" }
+        }
+        $items = @($shell.EndInvoke($handle))
+        return [pscustomobject]@{ Value = $items; Note = $null }
+    } catch {
+        return [pscustomobject]@{ Value = $null; Note = (Explain-Error $_) }
+    } finally {
+        if (-not $stuck) { $shell.Dispose() }
+    }
+}
+
+function Get-HealthText($Value, [int]$Limit = 60) {
+    $text = One-Line (([string]$Value) -replace '[\x00-\x1f\x7f|]', ' ')
+    if ($text.Length -gt $Limit) { $text = $text.Substring(0, $Limit).Trim() }
+    return $text
+}
+
+function Get-HealthCount($Value, [double]$Max = 1000000000) {
+    if ($null -eq $Value -or "$Value" -eq '') { return $CouldNot }
+    $number = 0.0
+    if (-not [double]::TryParse("$Value", [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$number)) { return $CouldNot }
+    if ([double]::IsNaN($number) -or [double]::IsInfinity($number) -or $number -lt 0 -or $number -gt $Max) { return $CouldNot }
+    return ([math]::Round($number)).ToString('0', [Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Get-HealthAge($Value) {
+    if ("$Value" -eq "$HealthNeverScanned") { return 'never' }
+    return Get-HealthCount $Value 36500
+}
+
+function Get-HealthSwitch($Value) {
+    if ($Value -is [bool]) { return $(if ($Value) { 'on' } else { 'off' }) }
+    return $CouldNot
+}
+
+function Get-HealthRegistry([string]$Path, [string]$Name) {
+    $read = Try-Run { (Get-ItemProperty -LiteralPath $Path -Name $Name -ErrorAction Stop).$Name }
+    return $read.Value
+}
+
+function Get-HealthDriveLines {
+    $read = Try-Capped {
+        foreach ($disk in @(Get-PhysicalDisk)) {
+            $counter = $null
+            try { $counter = $disk | Get-StorageReliabilityCounter } catch { $counter = $null }
+            [pscustomobject]@{
+                Name = $disk.FriendlyName; Media = "$($disk.MediaType)"; Bus = "$($disk.BusType)"; Size = $disk.Size
+                Health = "$($disk.HealthStatus)"; Status = (@($disk.OperationalStatus) -join ',')
+                Wear = $counter.Wear; Temperature = $counter.Temperature; ReadErrors = $counter.ReadErrorsTotal
+                WriteErrors = $counter.WriteErrorsTotal; Hours = $counter.PowerOnHours
+            }
+        }
+    } 30
+    $disks = @($read.Value | Where-Object { $_ } | Select-Object -First $HealthMaxDisks)
+    if ($read.Note -or $disks.Count -eq 0) { return "Drives: $CouldNot" }
+    "Drives: $($disks.Count)"
+    $number = 0
+    foreach ($disk in $disks) {
+        $number++
+        $name = Get-HealthText $disk.Name 50
+        if (-not $name) { $name = "Drive $number" }
+        $media = Get-HealthText $disk.Media 20
+        if (-not $media -or $media -eq 'Unspecified') { $media = $CouldNot }
+        $bus = Get-HealthText $disk.Bus 20
+        if (-not $bus) { $bus = $CouldNot }
+        $size = $CouldNot
+        if ($disk.Size -gt 0) { $size = "$(Get-HealthCount ([math]::Round($disk.Size / 1GB)) 1000000) GB" }
+        $health = Get-HealthText $disk.Health 20
+        if (-not $health) { $health = $CouldNot }
+        $status = Get-HealthText $disk.Status 40
+        if (-not $status) { $status = $CouldNot }
+        $wear = Get-HealthCount $disk.Wear 100
+        $temperature = Get-HealthCount $disk.Temperature 150
+        $readErrors = Get-HealthCount $disk.ReadErrors
+        $writeErrors = Get-HealthCount $disk.WriteErrors
+        $hours = Get-HealthCount $disk.Hours 1000000
+        "Drive ${number}: $name | type $media | bus $bus | size $size | health $health | status $status | wear $wear | temperature $temperature | read errors $readErrors | write errors $writeErrors | power-on hours $hours"
+    }
+}
+
+function Get-HealthDefenderLines {
+    $read = Try-Capped { Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled, AntivirusSignatureAge, QuickScanAge, FullScanAge, IsTamperProtected }
+    $mp = @($read.Value | Where-Object { $_ }) | Select-Object -First 1
+    "Defender real-time protection: $(Get-HealthSwitch $mp.RealTimeProtectionEnabled)"
+    "Defender signature age days: $(Get-HealthCount $mp.AntivirusSignatureAge 36500)"
+    "Defender last quick scan age days: $(Get-HealthAge $mp.QuickScanAge)"
+    "Defender last full scan age days: $(Get-HealthAge $mp.FullScanAge)"
+    "Defender tamper protection: $(Get-HealthSwitch $mp.IsTamperProtected)"
+    $av = Try-Capped { Get-CimInstance -Namespace root\SecurityCenter2 -ClassName AntiVirusProduct -OperationTimeoutSec 15 | Select-Object -ExpandProperty displayName }
+    if ($av.Note) { 'Other antivirus: ' + $CouldNot; return }
+    $names = @($av.Value | ForEach-Object { Get-HealthText $_ 40 } | Where-Object { $_ -and $_ -notmatch 'Windows Defender|Microsoft Defender' } | Select-Object -Unique -First $HealthMaxNames)
+    'Other antivirus: ' + $(if ($names.Count -gt 0) { $names -join ', ' } else { 'none' })
+}
+
+function Get-HealthBitLockerLine {
+    $read = Try-Capped {
+        $state = ''
+        try { $state = "$((Get-BitLockerVolume -MountPoint $env:SystemDrive).ProtectionStatus)" } catch { $state = '' }
+        if ($state -eq 'On' -or $state -eq '1') { return 'on' }
+        if ($state -eq 'Off' -or $state -eq '0') { return 'off' }
+        $code = (New-Object -ComObject Shell.Application).NameSpace("$env:SystemDrive\").Self.ExtendedProperty('System.Volume.BitLockerProtection')
+        if ($code -eq 1) { return 'on' }
+        if ($code -eq 0) { return 'off' }
+    }
+    $state = @($read.Value | Where-Object { $_ }) | Select-Object -First 1
+    "BitLocker system drive: $(if ($state) { $state } else { $CouldNot })"
+}
+
+function Get-HealthFirewallLines {
+    $read = Try-Capped { Get-NetFirewallProfile | Select-Object Name, Enabled }
+    foreach ($profile in 'Domain', 'Private', 'Public') {
+        $found = @($read.Value | Where-Object { $_ -and "$($_.Name)" -eq $profile }) | Select-Object -First 1
+        $state = $CouldNot
+        if ($found -and "$($found.Enabled)" -eq 'True') { $state = 'on' }
+        if ($found -and "$($found.Enabled)" -eq 'False') { $state = 'off' }
+        "Firewall ${profile}: $state"
+    }
+}
+
+function Get-HealthRemoteLines {
+    $deny = Get-HealthRegistry 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' 'fDenyTSConnections'
+    $rdp = $CouldNot
+    if ("$deny" -eq '0') { $rdp = 'on' }
+    if ("$deny" -eq '1') { $rdp = 'off' }
+    $auth = Get-HealthRegistry 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' 'UserAuthentication'
+    $nla = $CouldNot
+    if ("$auth" -eq '1') { $nla = 'required' }
+    if ("$auth" -eq '0') { $nla = 'not required' }
+    "Remote Desktop: $rdp"
+    "Remote Desktop network level authentication: $nla"
+    $smb = Try-Capped { [int][bool](Get-SmbServerConfiguration).EnableSMB1Protocol }
+    $value = @($smb.Value | Where-Object { $null -ne $_ }) | Select-Object -First 1
+    if ($null -eq $value) { $value = Get-HealthRegistry 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters' 'SMB1' }
+    $smb1 = $CouldNot
+    if ("$value" -eq '1') { $smb1 = 'on' }
+    if ("$value" -eq '0') { $smb1 = 'off' }
+    "SMBv1: $smb1"
+}
+
+function Get-HealthAccountLines {
+    $group = Try-Capped {
+        $disabled = @(Get-LocalUser | Where-Object { $_.Enabled -eq $false } | ForEach-Object { $_.SID.Value })
+        @(Get-LocalGroupMember -SID 'S-1-5-32-544' | Where-Object { $disabled -notcontains $_.SID.Value }).Count
+    }
+    $count = @($group.Value | Where-Object { $null -ne $_ }) | Select-Object -First 1
+    "Local administrator accounts: $(Get-HealthCount $count 100000)"
+    $builtin = Try-Capped { (Get-LocalUser | Where-Object { $_.SID.Value -like 'S-1-5-21-*-500' } | Select-Object -First 1).Enabled }
+    $enabled = @($builtin.Value | Where-Object { $_ -is [bool] }) | Select-Object -First 1
+    "Built-in Administrator account: $(if ($enabled -eq $true) { 'enabled' } elseif ($enabled -eq $false) { 'disabled' } else { $CouldNot })"
+}
+
+function Get-HealthPolicyLines {
+    $pause = Try-Run {
+        $key = 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings'
+        if (-not (Test-Path -LiteralPath $key)) { return 'no' }
+        $settings = Get-ItemProperty -LiteralPath $key -ErrorAction Stop
+        $latest = $null
+        foreach ($text in @($settings.PauseUpdatesExpiryTime, $settings.PauseFeatureUpdatesEndTime, $settings.PauseQualityUpdatesEndTime)) {
+            if (-not $text) { continue }
+            $when = [datetime]::MinValue
+            if (-not [datetime]::TryParse("$text", [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$when)) { throw 'unreadable pause date' }
+            if (-not $latest -or $when -gt $latest) { $latest = $when }
+        }
+        if ($latest -and $latest -gt (Get-Date).ToUniversalTime()) { return "yes, until $($latest.ToString('yyyy-MM-dd'))" }
+        return 'no'
+    }
+    "Windows Update paused: $(if ($pause.Value) { $pause.Value } else { $CouldNot })"
+    $policies = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+    $lua = Get-HealthRegistry $policies 'EnableLUA'
+    $uac = $CouldNot
+    if ("$lua" -eq '1') { $uac = 'on' }
+    if ("$lua" -eq '0') { $uac = 'off' }
+    $consent = Get-HealthRegistry $policies 'ConsentPromptBehaviorAdmin'
+    $prompt = $CouldNot
+    if ("$consent" -eq '0') { $prompt = 'never asks' }
+    if ("$consent" -match '^[1-5]$') { $prompt = 'asks' }
+    "UAC: $uac"
+    "UAC administrator prompt: $prompt"
+}
+
+function Get-WindowsHealthSecurityLines {
+    $script:HealthClock = [Diagnostics.Stopwatch]::StartNew()
+    $script:HealthCut = $false
+    Get-HealthDriveLines
+    Get-HealthDefenderLines
+    Get-HealthBitLockerLine
+    Get-HealthFirewallLines
+    Get-HealthRemoteLines
+    Get-HealthAccountLines
+    Get-HealthPolicyLines
+    if ($script:HealthCut) { 'Time limit reached: some values were not read' }
+}
+
 # ---------- Windows 11 readiness (read only; CIM queries are capped, the rest are instant local calls) ----------
 $CouldNot = 'could not check'
 $ReadinessCimSeconds = 20
@@ -1698,6 +1922,7 @@ Add-Section 'Security: Secure Boot, TPM, BitLocker' {
     "Run as administrator: $IsAdmin"
 }
 Add-Section 'Windows 11 readiness' { Get-Windows11ReadinessLines }
+Add-Section 'Windows health and security' { Get-WindowsHealthSecurityLines }
 Add-Section 'Security: Defender' {
     if ($defender.Value) {
         $defender.Value | Select-Object AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled, IsTamperProtected, AntivirusSignatureAge, AntivirusSignatureLastUpdated, AMProductVersion | Format-List

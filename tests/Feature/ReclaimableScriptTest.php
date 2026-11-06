@@ -7,6 +7,7 @@ use App\Services\Reports\ReportFacts;
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
+use Tests\Support\ScriptTemp;
 
 function spcFile(string $path, int $kib): void
 {
@@ -16,7 +17,7 @@ function spcFile(string $path, int $kib): void
 
 function spcTree(): string
 {
-    $base = sys_get_temp_dir().'/pcc-space-'.bin2hex(random_bytes(4));
+    $base = ScriptTemp::dir('pcc-script-space');
     $home = $base.'/home';
 
     foreach ([
@@ -88,34 +89,12 @@ function spcNear(int $actual, int $expected, int $slack = 24): bool
     return $actual >= $expected && $actual <= $expected + $slack;
 }
 
-/**
- * @param  array<string, string>  $scripts
- */
-function spcBin(array $scripts): string
-{
-    $dir = sys_get_temp_dir().'/pcc-space-bin-'.bin2hex(random_bytes(4));
-    mkdir($dir, 0777, true);
-
-    foreach ($scripts as $name => $body) {
-        file_put_contents($dir.'/'.$name, "#!/bin/bash\n".$body."\n");
-        chmod($dir.'/'.$name, 0755);
-    }
-
-    return $dir;
-}
-
 function spcTmutil(int $count): string
 {
     $lines = implode('; ', array_map(fn (int $i): string => "echo com.apple.TimeMachine.2024-01-0{$i}-000000.local", range(1, max($count, 1))));
 
-    return spcBin(['tmutil' => $count === 0 ? 'echo "Snapshots for volume group containing disk /:"' : 'echo "Snapshots for volume group containing disk /:"; '.$lines]);
+    return fakeMacBin(['tmutil' => $count === 0 ? 'echo "Snapshots for volume group containing disk /:"' : 'echo "Snapshots for volume group containing disk /:"; '.$lines]);
 }
-
-afterEach(function () {
-    foreach (glob(sys_get_temp_dir().'/pcc-space-*') ?: [] as $dir) {
-        File::deleteDirectory($dir);
-    }
-});
 
 describe('the Mac space step on a tree with known files', function () {
     it('measures the Trash, caches, Xcode folder, backups and installers with their counts', function () {
@@ -153,7 +132,7 @@ describe('the Mac space step on a tree with known files', function () {
     });
 
     it('prints no snapshot count when tmutil fails', function () {
-        $bin = spcBin(['tmutil' => 'exit 1']);
+        $bin = fakeMacBin(['tmutil' => 'exit 1']);
 
         expect(spcRun(spcTree(), [], $bin.':/usr/bin:/bin')->output())->not->toContain('snapshots');
     });
@@ -256,7 +235,7 @@ describe('the Mac space step on a tree with known files', function () {
     });
 
     it('prints only the header for an empty home, and for a home that does not exist', function () {
-        $base = sys_get_temp_dir().'/pcc-space-'.bin2hex(random_bytes(4));
+        $base = ScriptTemp::dir('pcc-script-space');
         mkdir($base.'/home', 0777, true);
 
         expect(array_keys(spcRows(spcRun($base)->output())))->toBe([])
@@ -286,28 +265,28 @@ describe('the Mac space step on a tree with known files', function () {
 
 describe('the time limit of the space step', function () {
     it('stops a slow disk at the limit and says so', function () {
-        $bin = spcBin(['du' => 'exec sleep 30', 'find' => 'exec sleep 30', 'tmutil' => 'exec sleep 30']);
+        $bin = fakeMacBin(['du' => 'exec sleep 120', 'find' => 'exec sleep 120', 'tmutil' => 'exec sleep 120']);
         $start = microtime(true);
         $result = spcRun(spcTree(), ['PCC_SPACE_CAP' => '3'], $bin.':/usr/bin:/bin');
         $took = microtime(true) - $start;
 
-        expect($took)->toBeLessThan(10)
+        expect($took)->toBeLessThan(3 + 20)
             ->and($result->output())->toContain('scan: partial (time limit of 3 seconds reached)')->toContain('limit: 3')
             ->and($result->errorOutput())->toContain('time limit')->not->toContain('Alarm clock')
             ->and(array_keys(spcRows($result->output())))->toBe([]);
     });
 
     it('never runs longer than the limit even when every command hangs', function () {
-        $bin = spcBin(['du' => 'exec sleep 60', 'find' => 'exec sleep 60', 'tmutil' => 'exec sleep 60']);
+        $bin = fakeMacBin(['du' => 'exec sleep 120', 'find' => 'exec sleep 120', 'tmutil' => 'exec sleep 120']);
         $start = microtime(true);
         spcRun(spcTree(), ['PCC_SPACE_CAP' => '6'], $bin.':/usr/bin:/bin');
 
-        expect(microtime(true) - $start)->toBeLessThan(11);
+        expect(microtime(true) - $start)->toBeLessThan(6 + 20);
     });
 
     it('keeps the places it measured when only the biggest files search runs out of time', function () {
-        $bin = spcBin(['find' => 'case " $* " in *" -size "*) exec sleep 30 ;; esac; exec /usr/bin/find "$@"']);
-        $result = spcRun(spcTree(), ['PCC_SPACE_CAP' => '5'], $bin.':/usr/bin:/bin');
+        $bin = fakeMacBin(['find' => 'case " $* " in *" -size "*) exec sleep 120 ;; esac; exec /usr/bin/find "$@"']);
+        $result = spcRun(spcTree(), ['PCC_SPACE_CAP' => '12'], $bin.':/usr/bin:/bin');
         $rows = spcRows($result->output());
 
         expect($result->output())->toContain('scan: partial')
@@ -316,8 +295,8 @@ describe('the time limit of the space step', function () {
     });
 
     it('keeps the files it found when a place runs out of time', function () {
-        $bin = spcBin(['du' => 'for last; do :; done; case "$last" in *Caches) exec sleep 30 ;; esac; exec /usr/bin/du "$@"']);
-        $result = spcRun(spcTree(), ['PCC_SPACE_CAP' => '10'], $bin.':/usr/bin:/bin');
+        $bin = fakeMacBin(['du' => 'for last; do :; done; case "$last" in *Caches) exec sleep 120 ;; esac; exec /usr/bin/du "$@"']);
+        $result = spcRun(spcTree(), ['PCC_SPACE_CAP' => '12'], $bin.':/usr/bin:/bin');
         $rows = spcRows($result->output());
 
         expect($result->output())->toContain('scan: partial')

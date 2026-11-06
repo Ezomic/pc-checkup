@@ -9,6 +9,7 @@ use App\Http\Controllers\ClientShareLinkController;
 use App\Http\Controllers\HealthController;
 use App\Http\Controllers\LoginLinkController;
 use App\Http\Controllers\LoginLinkRequestController;
+use App\Http\Controllers\MachineBeforeAfterController;
 use App\Http\Controllers\MachineClientController;
 use App\Http\Controllers\MachineController;
 use App\Http\Controllers\MachineHistoryController;
@@ -39,6 +40,7 @@ Route::get('tools/rustdesk/windows', RustDeskInstallerController::class)
 Route::middleware(['throttle:share', SetShareLocale::class, HardenSharePage::class])->prefix('c/{token}')->group(function () {
     Route::get('/', [SharedClientController::class, 'show'])->name('share.show');
     Route::get('machines/{machine}', [SharedClientController::class, 'machine'])->name('share.machine');
+    Route::get('machines/{machine}/before-after', [SharedClientController::class, 'beforeAfter'])->name('share.before-after');
 });
 
 Route::middleware('guest')->group(function () {
@@ -69,6 +71,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('machines/{machine}', [MachineController::class, 'show'])->name('machines.show');
     Route::get('machines/{machine}/history', MachineHistoryController::class)->name('machines.history');
     Route::get('machines/{machine}/summary', [MachineController::class, 'summary'])->name('machines.summary');
+    Route::get('machines/{machine}/before-after', [MachineBeforeAfterController::class, 'show'])->name('machines.before-after');
     Route::put('machines/{machine}/client', [MachineClientController::class, 'update'])->name('machines.client.update');
     Route::put('machines/{machine}/rustdesk', [MachineRustDeskController::class, 'update'])->name('machines.rustdesk.update');
     Route::put('machines/{machine}/status', [MachineStatusController::class, 'update'])->name('machines.status.update');
