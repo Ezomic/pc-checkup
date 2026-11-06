@@ -39,6 +39,7 @@ export type ReportScript = {
     version: string | null;
     current: string;
     outdated: boolean;
+    ranOutdated: boolean;
 };
 
 export type LatestReport = {

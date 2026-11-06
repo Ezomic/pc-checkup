@@ -154,21 +154,21 @@ describe('comparing a report with the current script', function () {
         $current = CheckupScript::Mac->version();
 
         expect((new ReportScriptVersion)->for(versionedReport('macOS', "- Script version: {$current}")))
-            ->toBe(['version' => $current, 'current' => $current, 'outdated' => false]);
+            ->toBe(['version' => $current, 'current' => $current, 'outdated' => false, 'ranOutdated' => false]);
     });
 
     it('is outdated when the report came from another version, older or newer', function (string $theirs) {
         $current = CheckupScript::Windows->version();
 
         expect((new ReportScriptVersion)->for(versionedReport('Windows', "- Script version: {$theirs}")))
-            ->toBe(['version' => $theirs, 'current' => $current, 'outdated' => true]);
+            ->toBe(['version' => $theirs, 'current' => $current, 'outdated' => true, 'ranOutdated' => false]);
     })->with(['00000000', '2099-01-01.9', 'ffffffff']);
 
     it('is outdated and unknown for a report without a usable version', function () {
         expect((new ReportScriptVersion)->for(versionedReport('Windows', null)))
-            ->toBe(['version' => null, 'current' => CheckupScript::Windows->version(), 'outdated' => true])
+            ->toBe(['version' => null, 'current' => CheckupScript::Windows->version(), 'outdated' => true, 'ranOutdated' => false])
             ->and((new ReportScriptVersion)->for(versionedReport('Windows', '- Script version: not a version')))
-            ->toBe(['version' => null, 'current' => CheckupScript::Windows->version(), 'outdated' => true]);
+            ->toBe(['version' => null, 'current' => CheckupScript::Windows->version(), 'outdated' => true, 'ranOutdated' => false]);
     });
 
     it('says nothing for a report from an operating system we have no script for', function () {
@@ -186,7 +186,18 @@ describe('the owner machine page', function () {
         actingAs($user)->get("/machines/{$machine->id}")->assertInertia(fn ($page) => $page
             ->where('report.script.version', $current)
             ->where('report.script.current', $current)
-            ->where('report.script.outdated', false));
+            ->where('report.script.outdated', false)
+            ->where('report.script.ranOutdated', false));
+    });
+
+    it('tells the owner the person was warned and continued anyway', function () {
+        $user = User::factory()->create();
+        $machine = scannedMachine($user, 'macOS', '- Script version: 00000000
+- Update check: outdated, continued');
+
+        actingAs($user)->get("/machines/{$machine->id}")->assertInertia(fn ($page) => $page
+            ->where('report.script.outdated', true)
+            ->where('report.script.ranOutdated', true));
     });
 
     it('flags an old version and an unknown one', function (?string $line, ?string $version) {
@@ -223,6 +234,62 @@ describe('the owner machine page', function () {
         $props = json_encode($this->get("/c/{$client->share_token}/machines/{$machine->id}")->viewData('page')['props']);
 
         expect($props)->not->toContain('outdated')->and($props)->not->toContain('00000000');
+    });
+});
+
+describe('reading the update check from a report', function () {
+    it('reads the outcome the script recorded', function (string $line, ?string $expected) {
+        $parsed = (new ReportParser)->parse(versionedReport('macOS', $line));
+
+        expect($parsed->updateCheck)->toBe($expected);
+    })->with([
+        'current' => ['- Update check: current', 'current'],
+        'outdated and continued' => ['- Update check: outdated, continued', 'outdated, continued'],
+        'not checked' => ['- Update check: not checked', 'not checked'],
+        'padded and any case' => ['- update CHECK:  Outdated, Continued ', 'outdated, continued'],
+        'something else' => ['- Update check: outdated, stopped', null],
+        'html' => ['- Update check: <b>current</b>', null],
+        'a hostname' => ['- Update check: current pc-checkup.example.test', null],
+        'control characters' => ['- Update check: current', null],
+        'empty' => ['- Update check:', null],
+        'very long' => ['- Update check: '.str_repeat('current', 20000), null],
+    ]);
+
+    it('has no outcome for a report from before the line existed', function () {
+        expect((new ReportParser)->parse(versionedReport('macOS', null))->updateCheck)->toBeNull();
+    });
+
+    it('ignores the line quoted further down in a section', function () {
+        $markdown = versionedReport('macOS', null).'
+```
+- Update check: outdated, continued
+```
+';
+
+        expect((new ReportParser)->parse($markdown)->updateCheck)->toBeNull();
+    });
+
+    it('only flags a scan that was warned and went on', function (?string $line, bool $expected) {
+        $current = CheckupScript::Mac->version();
+
+        expect((new ReportScriptVersion)->for(versionedReport('macOS', "- Script version: {$current}".($line === null ? '' : "
+{$line}")))['ranOutdated'] ?? null)->toBe($expected);
+    })->with([
+        'continued' => ['- Update check: outdated, continued', true],
+        'current' => ['- Update check: current', false],
+        'not checked' => ['- Update check: not checked', false],
+        'missing' => [null, false],
+    ]);
+
+    it('never puts the outcome on a client share page', function () {
+        $client = Client::factory()->withShareLink()->create();
+        $machine = scannedMachine($client->user, 'Windows', '- Script version: 00000000
+- Update check: outdated, continued');
+        $machine->forceFill(['client_id' => $client->id])->save();
+
+        $props = json_encode($this->get("/c/{$client->share_token}/machines/{$machine->id}")->assertOk()->viewData('page')['props']);
+
+        expect($props)->not->toContain('ranOutdated')->and($props)->not->toContain('Update check')->and($props)->not->toContain('outdated, continued');
     });
 });
 

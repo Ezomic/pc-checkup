@@ -31,5 +31,13 @@ const note = computed(() => {
         >
             {{ note }}
         </p>
+        <p
+            v-if="script.ranOutdated"
+            class="text-sm text-muted-foreground"
+            data-test="script-ran-outdated"
+        >
+            The script warned that a newer version existed, and the scan was run
+            anyway.
+        </p>
     </div>
 </template>

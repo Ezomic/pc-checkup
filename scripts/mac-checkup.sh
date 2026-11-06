@@ -45,6 +45,39 @@ case $PCC_SCRIPT_NAME in *.sh) ;; *) PCC_SCRIPT_NAME="mac-checkup.sh" ;; esac
 pcc_banner() { echo "PC Checkup Mac script, version $PCC_SCRIPT_VERSION"; }
 
 pcc_version_line() { echo "- Script version: $PCC_SCRIPT_VERSION"; }
+
+# Asks the site which script version is current (one GET, nothing about this Mac) and, when it
+# differs from this script, asks y/N. Returns 1 only when the answer is not yes. It never
+# downloads or runs anything. Quiet, and PCC_UPDATE_STATUS stays "not checked", when it is
+# switched off (PCC_SKIP_UPDATE_CHECK=1), nobody can answer, the request fails or the answer is odd.
+PCC_UPDATE_STATUS="not checked"
+pcc_update_check() {
+  local base current answer
+  PCC_UPDATE_STATUS="not checked"
+  if [ "${PCC_SKIP_UPDATE_CHECK:-}" = "1" ]; then return 0; fi
+  if [ ! -t 0 ] || [ ! -t 1 ]; then return 0; fi
+  case $PCC_SCRIPT_VERSION in *[!0123456789abcdef]*) return 0 ;; esac
+  if [ "${#PCC_SCRIPT_VERSION}" -ne 8 ]; then return 0; fi
+  base=$(pcc_clean "${PCC_CLI_URL:-${PC_CHECKUP_URL:-$PCC_DEFAULT_URL}}")
+  base=${base%/}
+  if ! pcc_valid_url "$base"; then return 0; fi
+  current=$(curl --silent --max-time 5 --max-filesize 64 "$base/scripts/version/mac" 2>/dev/null) || return 0
+  case $current in *[!0123456789abcdef]*) return 0 ;; esac
+  if [ "${#current}" -ne 8 ]; then return 0; fi
+  if [ "$current" = "$PCC_SCRIPT_VERSION" ]; then PCC_UPDATE_STATUS="current"; return 0; fi
+  echo
+  echo "Er is een nieuwere versie van dit script beschikbaar."
+  echo "A newer version of this script is available."
+  echo "Download het hier / Download it here: $base/"
+  printf 'Toch doorgaan? / Continue anyway? [y/N] '
+  IFS= read -r answer || answer=""
+  answer=$(pcc_clean "$answer" | tr '[:upper:]' '[:lower:]')
+  case $answer in
+    y|yes|j|ja) PCC_UPDATE_STATUS="outdated, continued"; return 0 ;;
+  esac
+  echo "Gestopt. Download het nieuwe script en start het opnieuw. / Stopped. Download the new script and run it again."
+  return 1
+}
 PCC_SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)
 PCC_TOKEN=""
 PCC_TOKEN_SOURCE=""
@@ -1425,6 +1458,7 @@ section() {
 sh_section() { section "$1" bash -c "$2"; }
 
 pcc_banner
+pcc_update_check || exit 1
 echo "Running checkup, this can take a few minutes..."
 
 # ---------- Flags ----------
@@ -1602,6 +1636,7 @@ if [ "$PCC_CLI_FIX" = 1 ]; then pcc_fix_run; fi
   echo
   echo "- Format: 1"
   pcc_version_line
+  echo "- Update check: $PCC_UPDATE_STATUS"
   echo "- OS: macOS"
   echo "- Device type: $(echo "$SP_HW" | grep -q 'Model Name: MacBook' && echo laptop || echo desktop)"
   echo "- Generated: $(date)"

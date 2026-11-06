@@ -6,8 +6,11 @@ function render(script: {
     version: string | null;
     current: string;
     outdated: boolean;
+    ranOutdated?: boolean;
 }) {
-    return mount(ScriptVersionNote, { props: { script } });
+    const full = { ranOutdated: false, ...script };
+
+    return mount(ScriptVersionNote, { props: { script: full } });
 }
 
 describe('ScriptVersionNote', () => {
@@ -51,6 +54,31 @@ describe('ScriptVersionNote', () => {
         expect(wrapper.get('[data-test="script-outdated"]').text()).toContain(
             'unknown script version, probably an old one (current bbbb2222)',
         );
+    });
+
+    it('says nothing about a warning unless the person went on after one', () => {
+        const wrapper = render({
+            version: 'aaaa1111',
+            current: 'bbbb2222',
+            outdated: true,
+        });
+
+        expect(wrapper.find('[data-test="script-ran-outdated"]').exists()).toBe(
+            false,
+        );
+    });
+
+    it('says the script warned about a newer version and the scan went ahead', () => {
+        const wrapper = render({
+            version: 'aaaa1111',
+            current: 'bbbb2222',
+            outdated: true,
+            ranOutdated: true,
+        });
+
+        expect(
+            wrapper.get('[data-test="script-ran-outdated"]').text(),
+        ).toContain('warned that a newer version existed');
     });
 
     it('is left out of the print', () => {

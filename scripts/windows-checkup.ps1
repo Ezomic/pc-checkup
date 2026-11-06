@@ -914,7 +914,41 @@ function Get-ScriptBanner { "PC Checkup Windows script, version $ScriptVersion" 
 
 function Get-ScriptVersionLine { "- Script version: $ScriptVersion" }
 
+# Asks the site which script version is current (one GET, nothing about this PC) and, when it
+# differs from this script, asks y/N. Returns 'current', 'outdated, continued', 'stopped' or
+# 'not checked' (switched off with PCC_SKIP_UPDATE_CHECK=1, nobody can answer, the request
+# fails or the answer is odd). It never downloads or runs anything.
+function Invoke-UpdateCheck([string]$GivenUrl, [bool]$Interactive = ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected)) {
+    try {
+        if ($env:PCC_SKIP_UPDATE_CHECK -eq '1' -or -not $Interactive) { return 'not checked' }
+        if ($ScriptVersion -cnotmatch '\A[0-9a-f]{8}\z') { return 'not checked' }
+        $base = $GivenUrl
+        if (-not $base) { $base = $env:PC_CHECKUP_URL }
+        if (-not $base) { $base = $DefaultUrl }
+        $base = ([string]$base).Trim().TrimEnd('/')
+        if (-not (Test-UploadUrl $base)) { return 'not checked' }
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        $answer = Invoke-RestMethod -Uri "$base/scripts/version/windows" -TimeoutSec 5 -MaximumRedirection 0
+        if ($answer -isnot [string]) { return 'not checked' }
+        $current = $answer.Trim()
+        if ($current -cnotmatch '\A[0-9a-f]{8}\z') { return 'not checked' }
+        if ($current -ceq $ScriptVersion) { return 'current' }
+        Write-Host ''
+        Write-Host 'Er is een nieuwere versie van dit script beschikbaar.'
+        Write-Host 'A newer version of this script is available.'
+        Write-Host "Download het hier / Download it here: $base/"
+        $reply = ([string](Read-Host 'Toch doorgaan? / Continue anyway? [y/N]')).Trim()
+        if ($reply -match '^(y|yes|j|ja)$') { return 'outdated, continued' }
+        Write-Host 'Gestopt. Download het nieuwe script en start het opnieuw. / Stopped. Download the new script and run it again.'
+        return 'stopped'
+    } catch {
+        return 'not checked'
+    }
+}
+
 Write-Host (Get-ScriptBanner)
+$updateCheck = Invoke-UpdateCheck $Url
+if ($updateCheck -eq 'stopped') { exit 1 }
 Write-Host 'Running checkup, this can take a few minutes...'
 
 # ---------- Identity ----------
@@ -1857,6 +1891,7 @@ $lines.Add('This report comes from one scan that ran once, only read information
 $lines.Add('')
 $lines.Add('- Format: 1')
 $lines.Add((Get-ScriptVersionLine))
+$lines.Add("- Update check: $updateCheck")
 $lines.Add('- OS: Windows')
 $lines.Add("- Device type: $deviceType")
 $lines.Add("- Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm')")

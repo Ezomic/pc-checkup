@@ -9,7 +9,7 @@ use App\Enums\CheckupScript;
 final class ReportScriptVersion
 {
     /**
-     * @return array{version: string|null, current: string, outdated: bool}|null
+     * @return array{version: string|null, current: string, outdated: bool, ranOutdated: bool}|null
      */
     public function for(string $markdown): ?array
     {
@@ -26,6 +26,7 @@ final class ReportScriptVersion
             'version' => $parsed->scriptVersion,
             'current' => $current,
             'outdated' => $parsed->scriptVersion !== $current,
+            'ranOutdated' => $parsed->updateCheck === 'outdated, continued',
         ];
     }
 }
