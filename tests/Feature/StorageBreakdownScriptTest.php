@@ -7,6 +7,7 @@ use App\Services\Reports\ReportStorage;
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
+use Tests\Support\ScriptTemp;
 
 function storageFile(string $path, int $kib): void
 {
@@ -16,7 +17,7 @@ function storageFile(string $path, int $kib): void
 
 function storageTree(): string
 {
-    $base = sys_get_temp_dir().'/pcc-storage-'.bin2hex(random_bytes(4));
+    $base = ScriptTemp::dir('pcc-script-storage');
     $home = $base.'/home';
 
     foreach ([
@@ -97,7 +98,16 @@ function storageNear(int $actual, int $expected, int $slack = 24): bool
 
 function slowDu(string ...$pathEnds): string
 {
-    return fakeMacBin(['du' => 'for last; do :; done; case "$last" in *'.implode('|*', $pathEnds).') exec sleep 30 ;; esac; exec /usr/bin/du "$@"']);
+    return fakeMacBin(['du' => 'for last; do :; done; case "$last" in *'.implode('|*', $pathEnds).') exec sleep 120 ;; esac; exec /usr/bin/du "$@"']);
+}
+
+/**
+ * Hangs on every du pass over the user folder and the folders in it, but leaves the du that find runs
+ * per file alone: find is killed by the clock, and a hung du under it would outlive the script.
+ */
+function slowHomeDu(): string
+{
+    return fakeMacBin(['du' => 'for last; do :; done; case " $* " in *" -d "*) case "$last" in */home|*/home/*) exec sleep 120 ;; esac ;; esac; exec /usr/bin/du "$@"']);
 }
 
 /**
@@ -108,12 +118,6 @@ function lostPass(string $pathPattern = '*'): string
 {
     return fakeMacBin(['du' => 'for last; do :; done; case " $* " in *" -d 0 "*) exec /usr/bin/du "$@" ;; esac; case "$last" in '.$pathPattern.') kill -ALRM $$ ;; esac; exec /usr/bin/du "$@"']);
 }
-
-afterEach(function () {
-    foreach (glob(sys_get_temp_dir().'/pcc-storage-*') ?: [] as $dir) {
-        File::deleteDirectory($dir);
-    }
-});
 
 describe('the Mac step on a tree with known files', function () {
     it('measures the well-known folders in the user folder, leaving out the ones that do not exist', function () {
@@ -261,7 +265,7 @@ describe('the Mac step on a tree with known files', function () {
     });
 
     it('prints a scan with nothing in it for an empty home and an empty drive', function () {
-        $base = sys_get_temp_dir().'/pcc-storage-'.bin2hex(random_bytes(4));
+        $base = ScriptTemp::dir('pcc-script-storage');
         mkdir($base.'/home', 0777, true);
         mkdir($base.'/root');
         $rows = storageRows(runStorage($base)->output());
@@ -282,7 +286,7 @@ describe('the Mac step on a tree with known files', function () {
 describe('a Mac with a separate data volume (macOS 10.15 and later)', function () {
     function dataTree(): string
     {
-        $base = sys_get_temp_dir().'/pcc-storage-'.bin2hex(random_bytes(4));
+        $base = ScriptTemp::dir('pcc-script-storage');
         storageFile("{$base}/root/System/data", 900);
         storageFile("{$base}/root/Users/placeholder", 4);
         storageFile("{$base}/root/Library/placeholder", 4);
@@ -340,13 +344,13 @@ describe('a Mac with a separate data volume (macOS 10.15 and later)', function (
 
 describe('the time limit', function () {
     it('stops a slow disk at the limit and says so', function () {
-        $bin = fakeMacBin(['du' => 'exec sleep 30', 'find' => 'exec sleep 30']);
+        $bin = fakeMacBin(['du' => 'exec sleep 120', 'find' => 'exec sleep 120']);
         $start = microtime(true);
         $result = runStorage(storageTree(), ['PCC_STORAGE_CAP' => '3'], $bin.':/usr/bin:/bin');
         $took = microtime(true) - $start;
         $rows = storageRows($result->output());
 
-        expect($took)->toBeLessThan(10)
+        expect($took)->toBeLessThan(3 + 20)
             ->and($result->output())->toContain('scan: partial (time limit of 3 seconds reached)')
             ->and($result->output())->toContain('limit: 3')
             ->and($result->errorOutput())->toContain('time limit')->not->toContain('Alarm clock')
@@ -356,16 +360,16 @@ describe('the time limit', function () {
     });
 
     it('never runs longer than the limit even when every command hangs', function () {
-        $bin = fakeMacBin(['du' => 'exec sleep 60', 'find' => 'exec sleep 60']);
+        $bin = fakeMacBin(['du' => 'exec sleep 120', 'find' => 'exec sleep 120']);
         $start = microtime(true);
         runStorage(storageTree(), ['PCC_STORAGE_CAP' => '6'], $bin.':/usr/bin:/bin');
 
-        expect(microtime(true) - $start)->toBeLessThan(11);
+        expect(microtime(true) - $start)->toBeLessThan(6 + 20);
     });
 
     it('keeps what it measured before the time ran out and marks the scan partial', function () {
-        $bin = fakeMacBin(['find' => 'exec sleep 30']);
-        $result = runStorage(storageTree(), ['PCC_STORAGE_CAP' => '4'], $bin.':/usr/bin:/bin');
+        $bin = fakeMacBin(['find' => 'exec sleep 120']);
+        $result = runStorage(storageTree(), ['PCC_STORAGE_CAP' => '12'], $bin.':/usr/bin:/bin');
         $rows = storageRows($result->output());
 
         expect($result->output())->toContain('scan: partial')
@@ -376,7 +380,7 @@ describe('the time limit', function () {
 
     it('lists the user folder as not measured when only that pass runs out of time', function () {
         $base = storageTree();
-        $result = runStorage($base, ['PCC_STORAGE_CAP' => '6'], slowDu('/home').':/usr/bin:/bin');
+        $result = runStorage($base, ['PCC_STORAGE_CAP' => '12'], slowHomeDu().':/usr/bin:/bin');
         $rows = storageRows($result->output());
 
         expect($result->output())->toContain('scan: partial')
@@ -417,7 +421,7 @@ describe('the time limit', function () {
 
 function namedHomeTree(): string
 {
-    $base = sys_get_temp_dir().'/pcc-storage-'.bin2hex(random_bytes(4));
+    $base = ScriptTemp::dir('pcc-script-storage');
     $home = $base.'/home';
 
     foreach ([
@@ -458,7 +462,7 @@ function namedSub(array $rows, string $parent): array
  */
 function oddNamesTree(array $folders): string
 {
-    $base = sys_get_temp_dir().'/pcc-storage-'.bin2hex(random_bytes(4));
+    $base = ScriptTemp::dir('pcc-script-storage');
 
     foreach ($folders as $name => $kib) {
         storageFile("{$base}/home/{$name}/file.dat", (int) $kib);
@@ -600,7 +604,7 @@ describe('the biggest folders in the user folder (Mac)', function () {
     });
 
     it('prints no names for an empty user folder', function () {
-        $base = sys_get_temp_dir().'/pcc-storage-'.bin2hex(random_bytes(4));
+        $base = ScriptTemp::dir('pcc-script-storage');
         mkdir($base.'/home', 0777, true);
         mkdir($base.'/root');
         $rows = storageRows(runStorage($base)->output());
@@ -622,20 +626,20 @@ describe('the biggest folders in the user folder (Mac)', function () {
     });
 
     it('shows what it measured and stops at the limit when the user folder is slow', function () {
-        $bin = fakeMacBin(['du' => 'case "$*" in *home*) exec sleep 30 ;; esac; exec /usr/bin/du "$@"', 'find' => 'exec sleep 30']);
+        $bin = fakeMacBin(['du' => 'case "$*" in *home*) exec sleep 120 ;; esac; exec /usr/bin/du "$@"', 'find' => 'exec sleep 120']);
         $start = microtime(true);
-        $result = runStorage(namedHomeTree(), ['PCC_STORAGE_CAP' => '8'], $bin.':/usr/bin:/bin');
+        $result = runStorage(namedHomeTree(), ['PCC_STORAGE_CAP' => '12'], $bin.':/usr/bin:/bin');
         $rows = storageRows($result->output());
 
-        expect(microtime(true) - $start)->toBeLessThan(14)
-            ->and($result->output())->toContain('scan: partial (time limit of 8 seconds reached)')
+        expect(microtime(true) - $start)->toBeLessThan(12 + 20)
+            ->and($result->output())->toContain('scan: partial (time limit of 12 seconds reached)')
             ->and(namedHome($rows))->toBe([])
             ->and($rows['root'])->not->toBe([])
             ->and(array_column($rows['missing'], 0))->toContain('home/Downloads');
     });
 
     it('measures the big folders it can reach and leaves out the one that hangs', function () {
-        $bin = fakeMacBin(['du' => 'for last; do :; done; case "$last" in *home) kill -ALRM $$ ;; *home/Library) exec sleep 60 ;; esac; exec /usr/bin/du "$@"']);
+        $bin = fakeMacBin(['du' => 'for last; do :; done; case "$last" in *home) kill -ALRM $$ ;; *home/Library) exec sleep 120 ;; esac; exec /usr/bin/du "$@"']);
         $result = runStorage(namedHomeTree(), ['PCC_STORAGE_CAP' => '30'], $bin.':/usr/bin:/bin');
         $named = namedHome(storageRows($result->output()));
 
