@@ -1612,6 +1612,7 @@ while [ $# -gt 0 ]; do
     *) echo "Unknown option: $1. Usage: bash $PCC_SCRIPT_NAME [--token TOKEN] [--code CODE] [--url URL] [--fix] [--benchmark]"; exit 2 ;;
   esac
 done
+echo "NL: Deze scan leest alleen hardware, schijfgebruik, map- en appnamen en beveiligingsinstellingen, wijzigt niets en verstuurt het rapport alleen als u een scancode invoert."; echo "EN: This scan only reads hardware, disk use, folder and app names and security settings, changes nothing, and uploads the report only if you enter a scan code. $PCC_DEFAULT_URL/privacy"
 pcc_find_token "$PCC_CLI_TOKEN"
 PCC_CLI_TOKEN=""
 if [ -z "$PCC_TOKEN" ]; then

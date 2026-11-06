@@ -76,6 +76,32 @@ const en = {
     'ba.condition.replace_soon': 'Replace soon',
     'ba.condition.replace_now': 'Replace now',
     'ba.condition.poor': 'Poor',
+    'privacy.link': 'What the scan reads and does not read',
+    'privacy.title': 'What this scan reads and does not read',
+    'privacy.readsHeading': 'What it reads',
+    'privacy.reads':
+        'Hardware details, the battery, disk usage and the names of the folders in your user folder, the names of installed apps, startup items and security settings. On a Mac it also lists the names of saved Wi-Fi networks and VPNs, the names of installed certificates and which apps hold privacy permissions.',
+    'privacy.notReadHeading': 'What it does not read',
+    'privacy.notRead':
+        'File contents, passwords (Wi-Fi passwords included), browser history, emails or photos. Your account name on the computer is replaced by a placeholder before the report is stored.',
+    'privacy.changesHeading': 'What it changes',
+    'privacy.changes':
+        'Nothing. It runs once, only when someone starts it. It installs nothing, deletes nothing and leaves nothing running afterwards.',
+    'privacy.keptHeading': 'What happens to the report',
+    'privacy.kept':
+        'The report is only sent when the person running the scan enters a scan code or token. It is kept only to give advice about this computer, and only the owner and the client it belongs to can see it.',
+    'privacy.deleteHeading': 'Deleting it',
+    'privacy.delete':
+        'On request the computer and all of its reports are deleted permanently.',
+    'privacy.ownerHeading': 'Who is responsible',
+    'privacy.owner':
+        '{name} runs this service. Questions or a deletion request:',
+    'privacy.scriptHeading': 'See for yourself',
+    'privacy.script':
+        'The scan is a plain text script that you can read before you run it.',
+    'privacy.scriptWindows': 'Windows script',
+    'privacy.scriptMac': 'Mac script',
+    'privacy.scriptVersion': 'version {version}',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -155,6 +181,32 @@ const nl: Messages = {
     'ba.condition.replace_soon': 'Binnenkort vervangen',
     'ba.condition.replace_now': 'Nu vervangen',
     'ba.condition.poor': 'Slecht',
+    'privacy.link': 'Wat de scan wel en niet leest',
+    'privacy.title': 'Wat deze scan wel en niet leest',
+    'privacy.readsHeading': 'Wat hij leest',
+    'privacy.reads':
+        'Hardware, de accu, schijfgebruik en de namen van de mappen in je gebruikersmap, de namen van geïnstalleerde apps, opstartonderdelen en beveiligingsinstellingen. Op een Mac staan ook de namen van opgeslagen wifi-netwerken en vpn-verbindingen, de namen van geïnstalleerde certificaten en welke apps privacytoestemmingen hebben.',
+    'privacy.notReadHeading': 'Wat hij niet leest',
+    'privacy.notRead':
+        "Bestandsinhoud, wachtwoorden (ook wifi-wachtwoorden), browsergeschiedenis, e-mail of foto's. Je accountnaam op de computer wordt vervangen door een plaatsvervanger voordat het rapport wordt opgeslagen.",
+    'privacy.changesHeading': 'Wat hij verandert',
+    'privacy.changes':
+        'Niets. Hij draait één keer, alleen als iemand hem start. Hij installeert niets, verwijdert niets en laat niets draaien.',
+    'privacy.keptHeading': 'Wat er met het rapport gebeurt',
+    'privacy.kept':
+        'Het rapport wordt alleen verstuurd als degene die de scan draait een scancode of token invoert. Het wordt alleen bewaard om advies over deze computer te geven, en alleen de eigenaar en de klant van wie de computer is kunnen het zien.',
+    'privacy.deleteHeading': 'Laten verwijderen',
+    'privacy.delete':
+        'Op verzoek worden de computer en al zijn rapporten definitief verwijderd.',
+    'privacy.ownerHeading': 'Wie er verantwoordelijk is',
+    'privacy.owner':
+        '{name} beheert deze dienst. Vragen of een verzoek tot verwijdering:',
+    'privacy.scriptHeading': 'Kijk zelf mee',
+    'privacy.script':
+        'De scan is een script in gewone tekst dat je kunt lezen voordat je het draait.',
+    'privacy.scriptWindows': 'Windows-script',
+    'privacy.scriptMac': 'Mac-script',
+    'privacy.scriptVersion': 'versie {version}',
 };
 
 export const messages: Record<Locale, Messages> = { en, nl };

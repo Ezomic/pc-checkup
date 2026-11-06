@@ -10,6 +10,7 @@ import ChecklistSection from '@/components/machines/ChecklistSection.vue';
 import ClientSection from '@/components/machines/ClientSection.vue';
 import DetailCards from '@/components/machines/DetailCards.vue';
 import EstimateSection from '@/components/machines/EstimateSection.vue';
+import ForgetMachineSection from '@/components/machines/ForgetMachineSection.vue';
 import NotesSection from '@/components/machines/NotesSection.vue';
 import PhotosSection from '@/components/machines/PhotosSection.vue';
 import RemoteSupportSection from '@/components/machines/RemoteSupportSection.vue';
@@ -244,6 +245,7 @@ defineOptions({
             <ChecklistSection :machine-id="machine.id" :items="checklist" />
             <NotesSection :machine-id="machine.id" :notes="notes" />
             <PhotosSection :machine-id="machine.id" :photos="photos" />
+            <ForgetMachineSection :machine-id="machine.id" />
         </div>
     </div>
 </template>

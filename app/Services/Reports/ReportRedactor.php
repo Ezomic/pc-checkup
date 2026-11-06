@@ -21,7 +21,9 @@ final class ReportRedactor
     {
         $lines = explode("\n", str_replace(["\r\n", "\r"], "\n", $markdown));
 
-        return implode("\n", array_map(fn (string $line): string => $this->isSecret($line) ? self::REMOVED : $line, $lines));
+        $kept = implode("\n", array_map(fn (string $line): string => $this->isSecret($line) ? self::REMOVED : $line, $lines));
+
+        return (new ReportUserMasker)->mask($kept);
     }
 
     private function isSecret(string $line): bool

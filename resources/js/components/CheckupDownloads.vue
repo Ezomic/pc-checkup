@@ -3,6 +3,7 @@ import { usePage } from '@inertiajs/vue3';
 import { Download, Laptop, Monitor } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import { Button } from '@/components/ui/button';
+import { privacy } from '@/routes';
 import { download } from '@/routes/scripts';
 
 type Platform = 'windows' | 'mac';
@@ -57,6 +58,22 @@ const command = computed<string>(() =>
             <span class="font-mono">{{ file }}</span
             >. Delete older copies of the script first, so an old one cannot run
             by mistake.
+        </p>
+        <p class="text-xs text-muted-foreground" data-test="privacy-links">
+            What the scan reads and does not read:
+            <a
+                :href="privacy({ query: { lang: 'en' } }).url"
+                class="underline underline-offset-4"
+                data-test="privacy-en"
+                >English</a
+            >
+            ·
+            <a
+                :href="privacy({ query: { lang: 'nl' } }).url"
+                class="underline underline-offset-4"
+                data-test="privacy-nl"
+                >Nederlands</a
+            >
         </p>
     </div>
 </template>

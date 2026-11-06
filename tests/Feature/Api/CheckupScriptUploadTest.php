@@ -16,6 +16,11 @@ function specialReport(): string
     return (string) file_get_contents(__DIR__.'/../../Fixtures/upload-special-chars.md');
 }
 
+function storedSpecialReport(): string
+{
+    return str_replace('C:\Users\robbi\Desktop', 'C:\Users\<user>\Desktop', specialReport());
+}
+
 /**
  * Runs code after sourcing the Mac script, with the arguments as $1, $2.
  *
@@ -55,7 +60,7 @@ describe('the JSON body the Windows script builds', function () {
         postRawJson($body)->assertOk()->assertJsonPath('created', false);
 
         assertDatabaseCount('reports', 1);
-        expect(Report::query()->sole()->markdown)->toBe(specialReport());
+        expect(Report::query()->sole()->markdown)->toBe(storedSpecialReport());
     });
 });
 
@@ -74,7 +79,7 @@ describe('the JSON body the Mac script builds', function () {
         postRawJson($body)->assertOk()->assertJsonPath('created', false);
 
         assertDatabaseCount('reports', 1);
-        expect(Report::query()->sole()->markdown)->toBe(specialReport());
+        expect(Report::query()->sole()->markdown)->toBe(storedSpecialReport());
     });
 
     it('escapes control characters and replaces invalid UTF-8', function () {

@@ -14,6 +14,11 @@ final class MachinePolicy
         return $user->id === $machine->user_id;
     }
 
+    public function delete(User $user, Machine $machine): bool
+    {
+        return $user->id === $machine->user_id;
+    }
+
     public function update(User $user, Machine $machine): bool
     {
         return $user->id === $machine->user_id;

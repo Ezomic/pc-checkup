@@ -11,9 +11,9 @@ use Illuminate\Database\Eloquent\Collection;
 
 final class RedactReportsCommand extends Command
 {
-    protected $signature = 'reports:redact {--dry-run : Only count the reports that hold secrets, change nothing}';
+    protected $signature = 'reports:redact {--dry-run : Only count the reports that would change, change nothing}';
 
-    protected $description = 'Remove tokens, passwords and binary blobs from stored reports, soft deleted ones included';
+    protected $description = 'Remove tokens, passwords, binary blobs and the OS user name from stored reports, soft deleted ones included';
 
     public function handle(ReportRedactor $redactor): int
     {
@@ -41,7 +41,7 @@ final class RedactReportsCommand extends Command
         });
 
         $this->components->info($dryRun
-            ? "{$changed} of {$total} reports contain secrets."
+            ? "{$changed} of {$total} reports contain secrets or a user name."
             : "Redacted {$changed} of {$total} reports.");
 
         return self::SUCCESS;
