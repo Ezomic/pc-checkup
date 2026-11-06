@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkedOn, scannedAgo, shortDate } from '@/lib/scannedAgo';
+import { checkedOn, scannedAgo, scanMoment, shortDate } from '@/lib/scannedAgo';
 
 const now = new Date('2026-11-02T12:00:00Z');
 
@@ -49,5 +49,16 @@ describe('scannedAgo in Dutch', () => {
         ['2026-10-28 12:00:00', '5 dagen geleden'],
     ])('reads %s as %s', (value, expected) => {
         expect(scannedAgo(value, now, 'nl')).toBe(expected);
+    });
+});
+
+describe('scanMoment', () => {
+    it('writes the date and the time in the language of the page', () => {
+        expect(scanMoment('2026-10-12T10:05:00.000000Z', 'en')).toContain(
+            'October 2026',
+        );
+        expect(scanMoment('2026-10-12T10:05:00.000000Z', 'nl')).toContain(
+            'oktober 2026',
+        );
     });
 });

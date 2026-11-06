@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
-import { FileText, History, Printer } from '@lucide/vue';
+import { ArrowLeftRight, FileText, History, Printer } from '@lucide/vue';
 import { computed } from 'vue';
 import AdviceList from '@/components/machines/AdviceList.vue';
 import AfterFixSection from '@/components/machines/AfterFixSection.vue';
@@ -21,7 +21,7 @@ import TrendsCard from '@/components/machines/TrendsCard.vue';
 import WarrantySection from '@/components/machines/WarrantySection.vue';
 import { Button } from '@/components/ui/button';
 import { checkedOn, scannedAgo } from '@/lib/scannedAgo';
-import { history, index, summary } from '@/routes/machines';
+import { beforeAfter, history, index, summary } from '@/routes/machines';
 import type {
     AfterFixReport,
     ChecklistItem,
@@ -156,6 +156,15 @@ defineOptions({
                     <Link :href="summary(machine.id)">
                         <FileText class="size-4" />
                         Printable summary
+                    </Link>
+                </Button>
+                <Button v-if="changes" as-child size="sm" variant="outline">
+                    <Link
+                        :href="beforeAfter(machine.id)"
+                        data-test="before-after"
+                    >
+                        <ArrowLeftRight class="size-4" />
+                        Before and after
                     </Link>
                 </Button>
             </div>
