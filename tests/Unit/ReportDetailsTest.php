@@ -73,6 +73,7 @@ describe('age and support', function () {
                 'First released' => '2015',
                 'Operating system' => 'macOS 10.14.6',
                 'Security support' => 'Out of security support',
+                'Newest macOS this Mac can run' => 'macOS 12 Monterey',
                 'Last update installed' => '24 January 2022, 1744 days before the scan',
             ])
             ->and(toneOf($card, 'Security support'))->toBe('bad');
