@@ -723,7 +723,7 @@ pcc_tm_last_date() {
   local when
   when=$(defaults read /Library/Preferences/com.apple.TimeMachine 2>/dev/null | awk '/SnapshotDates/ {on = 1} on && /\)/ {on = 0} on' | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | sort | tail -n 1)
   if [ -z "$when" ]; then
-    when=$(perl -e 'alarm shift; exec @ARGV' 15 tmutil latestbackup 2>/dev/null | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}' | tail -n 1 | cut -c1-10)
+    when=$(pcc_capped 15 tmutil latestbackup 2>/dev/null | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}' | tail -n 1 | cut -c1-10)
   fi
   printf '%s' "$when"
 }
@@ -1495,7 +1495,7 @@ pcc_apps_mtime() {
 # apps. Returns 142 when mdls did not answer in time.
 pcc_apps_decide() {
   local app=$1 cutoff=$2 info rc id used added
-  info=$(perl -e 'alarm shift; exec @ARGV' 5 mdls -name kMDItemCFBundleIdentifier -name kMDItemLastUsedDate -name kMDItemDateAdded "$app" 2> /dev/null)
+  info=$(pcc_capped 5 mdls -name kMDItemCFBundleIdentifier -name kMDItemLastUsedDate -name kMDItemDateAdded "$app" 2> /dev/null)
   rc=$?
   if [ "$rc" = 142 ]; then return 142; fi
   id=$(pcc_apps_field "$info" kMDItemCFBundleIdentifier)
@@ -1574,7 +1574,7 @@ pcc_apps_report() {
   echo "Looking for apps you may not need, stopping after $cap seconds at the latest..." >&2
   for dir in "${PCC_APPS_DIR:-/Applications}" "${home%/}/Applications"; do
     [ -d "$dir" ] || continue
-    perl -e 'alarm shift; exec @ARGV' 10 find "$dir" -maxdepth 2 \( -type d -name Utilities -prune \) -o \( -type d -name '*.app' -prune -print \) 2> /dev/null >> "$list"
+    pcc_capped 10 find "$dir" -maxdepth 2 \( -type d -name Utilities -prune \) -o \( -type d -name '*.app' -prune -print \) 2> /dev/null >> "$list"
     if [ $? = 142 ]; then scan="partial (time limit of $cap seconds reached)"; fi
   done
   while IFS= read -r app; do
@@ -1587,7 +1587,7 @@ pcc_apps_report() {
     secs=$((cap - (SECONDS - start)))
     if [ "$secs" -lt 1 ]; then scan="partial (time limit of $cap seconds reached)"; break; fi
     if [ "$secs" -gt 20 ]; then secs=20; fi
-    kb=$(perl -e 'alarm shift; exec @ARGV' "$secs" du -sk "$app" 2> /dev/null | awk 'NR==1 && $1 ~ /^[0-9]+$/ {print $1}')
+    kb=$(pcc_capped "$secs" du -x -sk "$app" 2> /dev/null | awk 'NR==1 && $1 ~ /^[0-9]+$/ {print $1}')
     if [ -z "$kb" ]; then scan="partial (time limit of $cap seconds reached)"; continue; fi
     if [ "$kb" -ge "$min_kb" ]; then printf '%s\t%s\t%s\n' "$kb" "$last" "$app" >> "$found"; fi
   done < "$list"
@@ -1622,7 +1622,7 @@ pcc_backups_report() {
   if ! printf '%s' "$today" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then today=$(date +%Y-%m-%d); fi
   echo "format: 1"
   echo "scanned: $today"
-  info=$(perl -e 'alarm shift; exec @ARGV' 15 tmutil destinationinfo 2>&1)
+  info=$(pcc_capped 15 tmutil destinationinfo 2>&1)
   case $info in
     *"No destinations configured"*)
       echo "timemachine: not set up"
@@ -1633,7 +1633,7 @@ pcc_backups_report() {
       if [ -n "$last" ]; then
         echo "timemachine-last: $last"
       else
-        latest=$(perl -e 'alarm shift; exec @ARGV' 15 tmutil latestbackup 2>&1)
+        latest=$(pcc_capped 15 tmutil latestbackup 2>&1)
         case $latest in
           *"No backups found"* | *"No machine directory found"*) echo "timemachine-last: none" ;;
           *) echo "timemachine-last: could not check" ;;
