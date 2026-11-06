@@ -14,6 +14,12 @@
 # It follows no links and leaves other disks alone. If the time runs out the report says the
 # numbers are partial.
 #
+# The space step looks, for at most 60 seconds, at a few fixed places where space can be got back:
+# the Trash, user caches, installers and disk images in Downloads, old iPhone and iPad backups
+# (size and count, never a device name), the number of Time Machine snapshots, and Xcode build
+# folders if they exist. It also notes the 10 biggest files of 50 MB or more in your user folder
+# (file name, size and the name of the folder above it, never a full path). It deletes nothing.
+#
 # --benchmark also runs short CPU, memory, disk and network speed tests (a minute or so, with a
 # 512 MB temp file that is removed afterwards) and adds a Benchmark section to the report. The
 # network tests need a token or scan code and are skipped without one.
@@ -1188,6 +1194,187 @@ pcc_storage_report() {
   return 0
 }
 
+# Counts what sits directly inside folder $1, for at most $2 seconds. More arguments go to find.
+pcc_space_count() {
+  local dir=$1 secs=$2 count
+  shift 2
+  if [ "$secs" -lt 1 ]; then echo 0; return 0; fi
+  count=$(perl -e 'alarm shift; exec @ARGV' "$secs" find "$dir" -mindepth 1 -maxdepth 1 ! -name .DS_Store "$@" 2>/dev/null | wc -l | tr -d ' ')
+  echo "${count:-0}"
+}
+
+# True unless the folder cannot be listed, as with the Trash or iPhone backups on a Mac that has not
+# given Terminal Full Disk Access. A listing that is merely slow counts as readable.
+pcc_space_readable() {
+  local rc
+  perl -e 'alarm shift; exec @ARGV' "$2" ls -f "$1" > /dev/null 2>&1
+  rc=$?
+  [ "$rc" = 0 ] || [ "$rc" = 142 ]
+}
+
+# Installers and disk images (dmg, pkg, iso) directly inside Downloads, as reclaim|installers|KB|count.
+# du reports 0 for a file that only exists in the cloud, so those are left out.
+pcc_space_installers() {
+  local dir=$1 secs=$2 rc_file=$3
+  if [ "$secs" -lt 1 ]; then echo 142 >> "$rc_file"; return 0; fi
+  {
+    perl -e 'alarm shift; exec @ARGV' "$secs" find "$dir" -maxdepth 1 -type f \( -iname '*.dmg' -o -iname '*.pkg' -o -iname '*.iso' \) -exec du -k {} + 2>/dev/null
+    echo $? >> "$rc_file"
+  } | awk -F '\t' '$1 ~ /^[0-9]+$/ && $1 > 0 { kb += $1; n++ } END { if (n > 0) print "reclaim|installers|" kb "|" n }'
+}
+
+# The number of Time Machine snapshots kept on this Mac. Their size is not known, only the count.
+pcc_space_snapshots() {
+  local secs=$1 rc_file=$2 out rc
+  if [ "$secs" -lt 1 ]; then echo 142 >> "$rc_file"; return 0; fi
+  out=$(perl -e 'alarm shift; exec @ARGV' "$secs" tmutil listlocalsnapshots / 2>/dev/null)
+  rc=$?
+  echo "$rc" >> "$rc_file"
+  if [ "$rc" = 0 ]; then echo "snapshots|$(printf '%s\n' "$out" | grep -c 'com\.apple\.TimeMachine\.')"; fi
+}
+
+# Measures the well-known places one at a time, each with an equal share of the time that is left.
+# Prints reclaim|place|KB|count for a place that exists, unreadable|place for one that cannot be
+# listed, and snapshots|count. Nothing else is looked at.
+pcc_space_places() {
+  local home=$1 stop=$2 rc_file=$3 candidates present="" key dir left secs kb
+  candidates="trash|$home/.Trash
+caches|$home/Library/Caches
+installers|$home/Downloads
+backups|$home/Library/Application Support/MobileSync/Backup
+derived|$home/Library/Developer/Xcode/DerivedData
+devicesupport|$home/Library/Developer/Xcode/iOS DeviceSupport"
+  while IFS='|' read -r key dir; do
+    if [ -d "$dir" ] && [ ! -L "$dir" ]; then present="$present$key|$dir
+"; fi
+  done <<EOF
+$candidates
+EOF
+  if command -v tmutil > /dev/null 2>&1; then present="${present}snapshots|/
+"; fi
+  left=$(printf '%s' "$present" | grep -c .)
+  while IFS='|' read -r key dir; do
+    [ -n "$key" ] || continue
+    secs=$(((stop - SECONDS + left - 1) / left))
+    left=$((left - 1))
+    if [ "$key" != snapshots ] && [ "$secs" -ge 1 ] && ! pcc_space_readable "$dir" "$secs"; then
+      echo "unreadable|$key"
+      continue
+    fi
+    case $key in
+      installers) pcc_space_installers "$dir" "$secs" "$rc_file" ;;
+      snapshots) pcc_space_snapshots "$secs" "$rc_file" ;;
+      *)
+        kb=$(pcc_storage_du 0 "$secs" "$dir" "$rc_file" | awk -F '\t' '$1 ~ /^[0-9]+$/ { print $1; exit }')
+        if [ -n "$kb" ]; then
+          if [ "$key" = backups ]; then
+            echo "reclaim|$key|$kb|$(pcc_space_count "$dir" $((stop - SECONDS)) -type d)"
+          else
+            echo "reclaim|$key|$kb|$(pcc_space_count "$dir" $((stop - SECONDS)))"
+          fi
+        fi
+        ;;
+    esac
+  done <<EOF
+$present
+EOF
+}
+
+# The biggest single files under the user folder as file|name|KB|kind|folder: at most 10, each of at
+# least $3 KB. Hidden items, Library, app and library packages, links and other disks are not
+# entered, and a cloud-only file has no size on disk, so it drops out. The name
+# and the folder directly above it are cleaned (control characters, pipes and slashes removed,
+# 80 and 60 characters at most), and a full path is never printed.
+pcc_space_files() {
+  local home=$1 stop=$2 min_kb=$3 rc_file=$4 left library
+  [ -d "$home" ] || return 0
+  left=$((stop - SECONDS))
+  if [ "$left" -le 0 ]; then echo 142 >> "$rc_file"; return 0; fi
+  library=$(printf '%s' "$home/Library" | sed -e 's/[][*?\\]/\\&/g')
+  {
+    perl -e 'alarm shift; exec @ARGV' "$left" find "$home" -mindepth 1 -xdev \( -path "$library" -o -name '.*' -o \( -type d \( -name '*.app' -o -name '*.framework' -o -name '*.bundle' -o -name '*.plugin' -o -name '*.kext' -o -name '*.xpc' -o -name '*.appex' -o -name '*.photoslibrary' -o -name '*.musiclibrary' -o -name '*.tvlibrary' -o -name '*.imovielibrary' -o -name '*.fcpbundle' -o -name '*.sparsebundle' \) \) \) -prune -o -type f -size +"${min_kb}k" -exec du -k {} + 2>/dev/null
+    echo $? >> "$rc_file"
+  } | perl -e '
+    use strict;
+    use warnings;
+    use Encode qw(decode encode);
+    my ($home, $limit) = @ARGV;
+    my %groups = (
+      Photos => "jpg jpeg png gif heic heif bmp tif tiff webp raw cr2 nef arw dng",
+      Videos => "mp4 mov avi mkv wmv m4v webm flv mpg mpeg 3gp",
+      Music => "mp3 m4a wav flac aac ogg wma aiff aif opus",
+      Documents => "pdf doc docx xls xlsx ppt pptx txt rtf odt ods odp csv pages numbers key md epub",
+      Archives => "zip rar 7z tar gz tgz bz2 xz iso zst cab",
+      Apps => "exe msi dmg pkg app ipa apk appx msix",
+    );
+    my %kind;
+    for my $name (keys %groups) { $kind{$_} = $name for split / /, $groups{$name}; }
+    sub clean {
+      my ($text, $max) = @_;
+      $text = decode("UTF-8", $text);
+      $text =~ s{[\t\n\r\f\x0B\p{Zs}\p{Zl}\p{Zp}]+}{ }g;
+      $text =~ s{[\p{Cc}/\\|]|(?![\x{200C}\x{200D}])\p{Cf}}{}g;
+      $text =~ s{ {2,}}{ }g;
+      $text =~ s{^ +| +$}{}g;
+      $text = substr($text, 0, $max);
+      $text =~ s{ +$}{};
+      return undef if $text eq q() || $text eq q(.) || $text eq q(..);
+      return encode("UTF-8", $text);
+    }
+    my @top;
+    while (my $line = <STDIN>) {
+      chomp $line;
+      next unless $line =~ m{^(\d+)\t(.+)$};
+      my ($kb, $path) = ($1, $2);
+      next if $kb < 1 || index($path, "$home/") != 0 || !-f $path;
+      push @top, [$kb, $path];
+      @top = sort { $b->[0] <=> $a->[0] or $a->[1] cmp $b->[1] } @top;
+      splice @top, $limit * 3 if @top > $limit * 3;
+    }
+    my $printed = 0;
+    for my $item (@top) {
+      last if $printed >= $limit;
+      my @segments = split m{/}, substr($item->[1], length($home) + 1);
+      next unless @segments;
+      my $raw = pop @segments;
+      my $name = clean($raw, 80);
+      next unless defined $name;
+      my $folder = @segments ? clean($segments[-1], 60) : undef;
+      my $ext = $raw =~ m{^.+\.([^.]+)$} ? lc $1 : q();
+      print join("|", "file", $name, $item->[0], $kind{$ext} // "Other", defined $folder ? $folder : q()), "\n";
+      $printed++;
+    }
+  ' "${home%/}" 10
+}
+
+# Looks once, read only, in the well-known places where space can be got back, and for the biggest
+# files, never longer than the cap (60 seconds by default). Progress goes to the screen and the
+# report text goes to stdout.
+pcc_space_report() {
+  local home=${PCC_SPACE_HOME:-$HOME} cap=${PCC_SPACE_CAP:-60} min_kb=${PCC_SPACE_MIN_KB:-51200}
+  local start=$SECONDS places files rc_file scan="complete"
+  case $cap in '' | *[!0-9]* | 0*) cap=60 ;; esac
+  case $min_kb in '' | *[!0-9]* | 0*) min_kb=51200 ;; esac
+  rc_file=$(mktemp)
+  echo "Looking for space you can get back, stopping after $cap seconds at the latest..." >&2
+  echo "  Checking the Trash, caches, installers and backups..." >&2
+  places=$(pcc_space_places "${home%/}" "$(pcc_storage_stop "$start" "$cap" 40)" "$rc_file" 2>/dev/null)
+  echo "  Looking for the biggest files in your user folder..." >&2
+  files=$(pcc_space_files "${home%/}" $((start + cap)) "$min_kb" "$rc_file" 2>/dev/null)
+  if grep -q '^142$' "$rc_file"; then
+    scan="partial (time limit of $cap seconds reached)"
+    echo "  The time limit was reached, so these numbers are partial." >&2
+  fi
+  rm -f "$rc_file"
+  echo "scan: $scan"
+  echo "seconds: $((SECONDS - start))"
+  echo "limit: $cap"
+  echo "format: 1"
+  printf '%s\n' "$places" | grep -E '^(reclaim|snapshots|unreadable)\|'
+  printf '%s\n' "$files" | grep -E '^file\|'
+  return 0
+}
+
 # Sourcing this file (for tests) stops here instead of running the checkup.
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
 
@@ -1335,6 +1522,8 @@ sh_section "Storage (boot volume)" "diskutil info / | grep -E 'Device Node|Volum
 section "Disk usage" df -h
 STORAGE_BREAKDOWN=$(pcc_storage_report)
 section "Storage breakdown" echo "$STORAGE_BREAKDOWN"
+SPACE_REPORT=$(pcc_space_report)
+section "Space you can get back" echo "$SPACE_REPORT"
 section "Memory pressure" memory_pressure
 sh_section "Top processes by CPU" "ps -Arco pid,pcpu,pmem,comm | head -12"
 sh_section "Top processes by memory" "ps -Amrco pid,pcpu,pmem,comm | head -12"
