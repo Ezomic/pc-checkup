@@ -142,7 +142,9 @@ describe('machines/History', () => {
     it('mentions selected scans that are on another page', () => {
         const wrapper = render([scan(1)], { selected: [1, 9] });
 
-        expect(wrapper.text()).toContain('2 of 2 selected (1 on another page)');
+        expect(wrapper.text().replace(/\s+/g, ' ')).toContain(
+            '2 of 2 selected (1 on another page)',
+        );
     });
 
     it('shows a comparison error', () => {
