@@ -8,6 +8,7 @@ use App\Models\Machine;
 use App\Models\Report;
 use App\Models\User;
 use App\Services\Reports\ReportDetails;
+use App\Services\Reports\ReportUserMasker;
 use Carbon\CarbonImmutable;
 
 use function Pest\Laravel\actingAs;
@@ -409,7 +410,8 @@ describe('masking of crash names', function () {
     });
 
     it('still masks the names when one app name holds invalid UTF-8', function () {
-        $markdown = wbcImport(wbcCrashBody("app|Bad\xC3\x28|1\napp|Johannes Notes.exe|4", total: '5'));
+        $text = "## Startup programs\n\n```\nC:\\Users\\Johannes\\AppData\\x.exe\n```\n".wbcSection('Recent app crashes', wbcCrashBody("app|Bad\xC3\x28|1\napp|Johannes Notes.exe|4", total: '5'));
+        $markdown = (new ReportUserMasker)->mask($text);
 
         expect($markdown)->not->toContain('Johannes')->toContain('<user> Notes.exe');
     });
