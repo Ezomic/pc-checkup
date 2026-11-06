@@ -111,3 +111,19 @@ vm.swapusage: total = 2048,00M  used = 328,25M  free = 1719,75M  (encrypted)
    66  69,2 mds
   217  25,5 mds_stores
 ```
+
+## Space you can get back
+
+```
+scan: complete
+seconds: 11
+limit: 60
+format: 1
+reclaim|trash|1,2 GB|1.031
+reclaim|caches|4,5 GB|1.234
+reclaim|installers|880,5 MB|7
+reclaim|backups|12,25 GB|2
+snapshots|2
+file|Vakantiefilm 2024.mov|7,5 GB|Videos|Movies
+file|Belastingaangifte 2023.pdf|120,5 MB|Documents|Documenten
+```
