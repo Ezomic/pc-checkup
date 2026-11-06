@@ -21,11 +21,20 @@ use App\Http\Controllers\PhotoController;
 use App\Http\Controllers\ReportImportController;
 use App\Http\Controllers\RustDeskInstallerController;
 use App\Http\Controllers\ScanController;
+use App\Http\Controllers\ScriptVersionController;
 use App\Http\Controllers\SharedClientController;
 use App\Http\Controllers\ToolController;
+use App\Http\Middleware\HandleAppearance;
+use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\HardenSharePage;
 use App\Http\Middleware\SetShareLocale;
+use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
+use Illuminate\Cookie\Middleware\EncryptCookies;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
+use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
+use Illuminate\View\Middleware\ShareErrorsFromSession;
 use Inertia\Inertia;
 
 Route::get('/', fn () => Inertia::render('Welcome'))->name('home');
@@ -33,6 +42,11 @@ Route::get('/', fn () => Inertia::render('Welcome'))->name('home');
 Route::get('health', HealthController::class)->name('health');
 
 Route::get('scripts/{script}', CheckupScriptController::class)->name('scripts.download');
+
+Route::get('scripts/version/{script}', ScriptVersionController::class)
+    ->middleware('throttle:60,1')
+    ->withoutMiddleware([EncryptCookies::class, AddQueuedCookiesToResponse::class, StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class, HandleAppearance::class, HandleInertiaRequests::class, AddLinkHeadersForPreloadedAssets::class])
+    ->name('scripts.version');
 
 Route::get('tools/rustdesk/windows', RustDeskInstallerController::class)
     ->middleware('throttle:20,1')->name('tools.rustdesk.download');
