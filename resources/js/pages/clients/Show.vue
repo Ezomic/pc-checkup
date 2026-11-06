@@ -4,18 +4,26 @@ import { Trash2 } from '@lucide/vue';
 import { ref } from 'vue';
 import ShareLinkSection from '@/components/clients/ShareLinkSection.vue';
 import InputError from '@/components/InputError.vue';
+import AttentionBadge from '@/components/machines/AttentionBadge.vue';
 import StatusBadge from '@/components/machines/StatusBadge.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { summaryLine } from '@/lib/clientSummary';
 import { scannedAgo } from '@/lib/scannedAgo';
 import { destroy, index, update } from '@/routes/clients';
-import { show as showMachine } from '@/routes/machines';
+import { history, show as showMachine } from '@/routes/machines';
 import { update as assign } from '@/routes/machines/client';
-import type { AssignableMachine, ClientDetails, ClientMachine } from '@/types';
+import type {
+    AssignableMachine,
+    ClientDetails,
+    ClientMachine,
+    ClientMachineSummary,
+} from '@/types';
 
 const props = defineProps<{
     client: ClientDetails;
+    summary: ClientMachineSummary;
     machines: ClientMachine[];
     available_machines: AssignableMachine[];
 }>();
@@ -140,7 +148,15 @@ function optionLabel(machine: AssignableMachine): string {
         />
 
         <section class="flex flex-col gap-3" data-test="client-machines">
-            <h2 class="text-lg font-semibold">Machines</h2>
+            <div class="flex flex-wrap items-baseline justify-between gap-x-4">
+                <h2 class="text-lg font-semibold">Machines</h2>
+                <p
+                    class="text-sm text-muted-foreground"
+                    data-test="machines-summary"
+                >
+                    {{ summaryLine(summary) }}
+                </p>
+            </div>
 
             <p
                 v-if="machines.length === 0"
@@ -153,25 +169,87 @@ function optionLabel(machine: AssignableMachine): string {
                 <li
                     v-for="machine in machines"
                     :key="machine.id"
-                    class="flex items-center justify-between gap-4 rounded-xl border border-border p-3"
+                    class="flex flex-col gap-3 rounded-xl border border-border p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
+                    data-test="client-machine"
                 >
-                    <div class="flex min-w-0 items-center gap-3">
-                        <StatusBadge :status="machine.status" />
-                        <Link
-                            :href="showMachine(machine.id)"
-                            class="truncate font-medium underline-offset-4 hover:underline"
+                    <div class="flex min-w-0 flex-col gap-1">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <AttentionBadge :level="machine.level" />
+                            <Link
+                                :href="showMachine(machine.id)"
+                                class="font-medium break-words underline-offset-4 hover:underline"
+                            >
+                                {{ title(machine) }}
+                            </Link>
+                            <StatusBadge :status="machine.status" />
+                        </div>
+                        <p
+                            class="text-sm text-muted-foreground"
+                            data-test="machine-meta"
                         >
-                            {{ title(machine) }}
-                        </Link>
+                            <span v-if="machine.device_type" class="capitalize">
+                                {{ machine.device_type }} ·
+                            </span>
+                            <span v-if="machine.last_scan_at">
+                                Scanned {{ scannedAgo(machine.last_scan_at) }}
+                            </span>
+                            <span v-else>Not scanned yet</span>
+                            <span v-if="machine.verdict">
+                                · Worth keeping? {{ machine.verdict }}
+                            </span>
+                        </p>
+                        <ul
+                            v-if="machine.reasons.length > 0"
+                            class="flex flex-col gap-0.5 text-sm"
+                        >
+                            <li
+                                v-for="reason in machine.reasons"
+                                :key="reason.text"
+                                class="break-words"
+                                data-test="machine-reason"
+                            >
+                                {{ reason.text }}
+                            </li>
+                            <li
+                                v-if="
+                                    machine.reason_count >
+                                    machine.reasons.length
+                                "
+                                class="text-xs text-muted-foreground"
+                            >
+                                +{{
+                                    machine.reason_count -
+                                    machine.reasons.length
+                                }}
+                                more
+                            </li>
+                        </ul>
+                        <p
+                            v-else
+                            class="text-sm text-muted-foreground"
+                            data-test="machine-nothing"
+                        >
+                            Nothing to do right now.
+                        </p>
                     </div>
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        data-test="unassign"
-                        @click="setClient(machine.id, null)"
-                    >
-                        Remove
-                    </Button>
+                    <div class="flex shrink-0 items-center gap-1">
+                        <Button
+                            as-child
+                            variant="outline"
+                            size="sm"
+                            data-test="client-machine-history"
+                        >
+                            <Link :href="history(machine.id)">History</Link>
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            data-test="unassign"
+                            @click="setClient(machine.id, null)"
+                        >
+                            Remove
+                        </Button>
+                    </div>
                 </li>
             </ul>
 

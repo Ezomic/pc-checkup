@@ -14,6 +14,7 @@ use App\Services\Reports\ReportBackups;
 use App\Services\Reports\ReportDetails;
 use App\Services\Reports\ReportFacts;
 use App\Services\Reports\ReportFreshness;
+use App\Services\Reports\ReportVerdict;
 use Illuminate\Support\Facades\Date;
 
 /**
@@ -54,7 +55,7 @@ final readonly class NeedsAttention
         $items = [];
 
         foreach ($user->machines()->with(['newestReport', 'client:id,name'])->get() as $machine) {
-            $reasons = $this->reasons($machine, $machine->newestReport);
+            $reasons = $this->analyse($machine, $machine->newestReport)['reasons'];
 
             if ($reasons !== []) {
                 $items[] = $this->item($machine, $reasons);
@@ -69,6 +70,22 @@ final readonly class NeedsAttention
             'urgent' => count(array_filter($items, fn (array $item): bool => $item['level'] === AttentionLevel::Urgent->value)),
             'rows' => $all ? $items : array_slice($items, 0, self::LIST_LIMIT),
             'showing_all' => $all,
+        ];
+    }
+
+    /**
+     * @return array{level: 'urgent'|'soon'|'fine', reasons: list<Reason>, reason_count: int, verdict: string|null}
+     */
+    public function assess(Machine $machine): array
+    {
+        $analysis = $this->analyse($machine, $machine->newestReport);
+        $reasons = $analysis['reasons'];
+
+        return [
+            'level' => $reasons[0]['level'] ?? 'fine',
+            'reasons' => array_slice($reasons, 0, self::MAX_REASONS),
+            'reason_count' => count($reasons),
+            'verdict' => $analysis['verdict'],
         ];
     }
 
@@ -89,12 +106,12 @@ final readonly class NeedsAttention
     }
 
     /**
-     * @return list<Reason>
+     * @return array{reasons: list<Reason>, verdict: string|null}
      */
-    private function reasons(Machine $machine, ?Report $report): array
+    private function analyse(Machine $machine, ?Report $report): array
     {
         if ($report === null) {
-            return $this->unscanned($machine);
+            return ['reasons' => $this->unscanned($machine), 'verdict' => null];
         }
 
         $cards = array_column($this->details->cards($report->markdown, $report->flags, $machine->device_type), null, 'id');
@@ -111,7 +128,7 @@ final readonly class NeedsAttention
 
         usort($reasons, fn (array $a, array $b): int => AttentionLevel::from($a['level'])->rank() <=> AttentionLevel::from($b['level'])->rank());
 
-        return $reasons;
+        return ['reasons' => $reasons, 'verdict' => ReportVerdict::outcome($cards['verdict']['rows'] ?? [])];
     }
 
     /**

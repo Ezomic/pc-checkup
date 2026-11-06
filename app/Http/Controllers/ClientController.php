@@ -13,6 +13,7 @@ use App\Http\Requests\Clients\SaveClientRequest;
 use App\Models\Client;
 use App\Models\Machine;
 use App\Models\User;
+use App\Services\Machines\ClientOverview;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -61,9 +62,11 @@ final class ClientController extends Controller
         return to_route('clients.show', $client);
     }
 
-    public function show(Client $client): Response
+    public function show(Client $client, ClientOverview $overview): Response
     {
         $this->authorize('view', $client);
+
+        $machines = $overview->handle($client);
 
         return Inertia::render('clients/Show', [
             'client' => [
@@ -74,9 +77,8 @@ final class ClientController extends Controller
                 'last_viewed_at' => $client->last_viewed_at,
                 'created_at' => $client->created_at,
             ],
-            'machines' => $client->machines()->orderBy('id')->get()
-                ->map(fn (Machine $machine): array => $machine->only(['id', 'name', 'model', 'os', 'device_type', 'status']))
-                ->all(),
+            'summary' => $machines['summary'],
+            'machines' => $machines['machines'],
             'available_machines' => Machine::query()
                 ->where('user_id', $client->user_id)
                 ->where(fn (Builder $query) => $query->whereNull('client_id')->orWhere('client_id', '!=', $client->id))
