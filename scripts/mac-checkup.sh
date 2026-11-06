@@ -20,6 +20,12 @@
 # folders if they exist. It also notes the 10 biggest files of 50 MB or more in your user folder
 # (file name, size and the name of the folder above it, never a full path). It deletes nothing.
 #
+# The apps step looks, for at most 45 seconds, at the apps in /Applications and ~/Applications that
+# Spotlight says were not opened for 12 months or more. It stores the name, the size and the date of
+# last use of at most 15 apps of 100 MB or more, never a path or a bundle id, and leaves out Apple's
+# own apps and utilities. The backup step reads when Time Machine last ran and whether iCloud Drive
+# keeps Desktop and Documents in sync. Neither step changes anything.
+#
 # --benchmark also runs short CPU, memory, disk and network speed tests (a minute or so, with a
 # 512 MB temp file that is removed afterwards) and adds a Benchmark section to the report. The
 # network tests need a token or scan code and are skipped without one.
@@ -628,7 +634,7 @@ pcc_tm_last_date() {
   local when
   when=$(defaults read /Library/Preferences/com.apple.TimeMachine 2>/dev/null | awk '/SnapshotDates/ {on = 1} on && /\)/ {on = 0} on' | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | sort | tail -n 1)
   if [ -z "$when" ]; then
-    when=$(tmutil latestbackup 2>/dev/null | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}' | tail -n 1 | cut -c1-10)
+    when=$(perl -e 'alarm shift; exec @ARGV' 15 tmutil latestbackup 2>/dev/null | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}' | tail -n 1 | cut -c1-10)
   fi
   printf '%s' "$when"
 }
@@ -1375,6 +1381,184 @@ pcc_space_report() {
   return 0
 }
 
+# The first 10 characters of $1 when they look like YYYY-MM-DD, otherwise nothing.
+pcc_apps_date() {
+  local day
+  day=$(printf '%s' "$1" | cut -c1-10)
+  if printf '%s' "$day" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then printf '%s' "$day"; fi
+}
+
+# The value of one attribute from mdls output ("name   = value"); prints nothing for (null).
+pcc_apps_field() {
+  local value
+  value=$(printf '%s\n' "$1" | sed -n "s/^$2 *= *//p" | head -n 1 | tr -d '"')
+  if [ "$value" != "(null)" ]; then printf '%s' "$value"; fi
+}
+
+# The date the bundle was last changed, as YYYY-MM-DD (UTC).
+pcc_apps_mtime() {
+  perl -e 'my @t = gmtime((stat $ARGV[0])[9]); printf "%04d-%02d-%02d", $t[5] + 1900, $t[4] + 1, $t[3]' "$1" 2> /dev/null
+}
+
+# Decides about one app bundle from Spotlight metadata. Prints the date it was last opened when that
+# is on or before the cutoff, or "unknown" when Spotlight has no such date but the app is older than
+# the cutoff, and nothing at all for Apple's own apps, for apps used since the cutoff and for newer
+# apps. Returns 142 when mdls did not answer in time.
+pcc_apps_decide() {
+  local app=$1 cutoff=$2 info rc id used added
+  info=$(perl -e 'alarm shift; exec @ARGV' 5 mdls -name kMDItemCFBundleIdentifier -name kMDItemLastUsedDate -name kMDItemDateAdded "$app" 2> /dev/null)
+  rc=$?
+  if [ "$rc" = 142 ]; then return 142; fi
+  id=$(pcc_apps_field "$info" kMDItemCFBundleIdentifier)
+  if [ -z "$id" ] && command -v defaults > /dev/null 2>&1; then id=$(defaults read "$app/Contents/Info" CFBundleIdentifier 2> /dev/null); fi
+  case $id in com.apple.*) return 0 ;; esac
+  used=$(pcc_apps_date "$(pcc_apps_field "$info" kMDItemLastUsedDate)")
+  if [ -n "$used" ]; then
+    if [[ "$used" > "$cutoff" ]]; then return 0; fi
+    echo "$used"
+    return 0
+  fi
+  added=$(pcc_apps_date "$(pcc_apps_field "$info" kMDItemDateAdded)")
+  if [ -z "$added" ]; then added=$(pcc_apps_mtime "$app"); fi
+  if [ -n "$added" ] && ! [[ "$added" > "$cutoff" ]]; then echo "unknown"; fi
+  return 0
+}
+
+# Turns "KB<TAB>last<TAB>path" lines into app|name|KB|last, the biggest first and at most $2, then
+# more|N for the apps that did not fit. The name is the bundle name without .app, cleaned of control
+# characters, slashes and pipes, 60 characters at most. The path itself is never printed.
+pcc_apps_rows() {
+  perl -e '
+    use strict;
+    use warnings;
+    use Encode qw(decode encode);
+    my ($limit) = @ARGV;
+    sub clean {
+      my ($text) = @_;
+      $text = decode("UTF-8", $text);
+      $text =~ s{\.app$}{}i;
+      $text =~ s{[\t\n\r\f\x0B\p{Zs}\p{Zl}\p{Zp}]+}{ }g;
+      $text =~ s{[\p{Cc}/\\|]|(?![\x{200C}\x{200D}])\p{Cf}}{}g;
+      $text =~ s{ {2,}}{ }g;
+      $text =~ s{^ +| +$}{}g;
+      $text = substr($text, 0, 60);
+      $text =~ s{ +$}{};
+      return undef if $text eq q() || $text eq q(.) || $text eq q(..);
+      return encode("UTF-8", $text);
+    }
+    my %seen;
+    while (my $line = <STDIN>) {
+      chomp $line;
+      next unless $line =~ m{^(\d+)\t([^\t]+)\t(.+)$};
+      my ($kb, $last, $path) = ($1, $2, $3);
+      my $name = clean((split m{/}, $path)[-1] // q());
+      next unless defined $name;
+      my $key = lc $name;
+      $seen{$key} = [$kb, $last, $name] if !$seen{$key} || $seen{$key}->[0] < $kb;
+    }
+    my @apps = sort { $b->[0] <=> $a->[0] or $a->[2] cmp $b->[2] } values %seen;
+    my $printed = 0;
+    for my $app (@apps) {
+      last if $printed >= $limit;
+      print join("|", "app", $app->[2], $app->[0], $app->[1]), "\n";
+      $printed++;
+    }
+    print "more|", scalar(@apps) - $printed, "\n" if @apps > $printed;
+  ' "$1"
+}
+
+# Looks once, read only, at the apps in /Applications and ~/Applications that were not opened for 12
+# months or more, using Spotlight metadata and the size of the bundle, never longer than the cap (45
+# seconds by default). Apple's own apps, utilities and apps under 100 MB are left out; at most 15
+# apps are listed. Prints the lines of the "Apps you may not need" section; progress goes to the screen.
+pcc_apps_report() {
+  local cap=${PCC_APPS_CAP:-45} min_kb=${PCC_APPS_MIN_KB:-102400} home=${PCC_APPS_HOME:-$HOME}
+  local start=$SECONDS today cutoff scan="complete" dir app last rc secs kb list found
+  case $cap in '' | *[!0-9]* | 0*) cap=45 ;; esac
+  case $min_kb in '' | *[!0-9]* | 0*) min_kb=102400 ;; esac
+  today=${PCC_TODAY:-$(date +%Y-%m-%d)}
+  if ! printf '%s' "$today" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then today=$(date +%Y-%m-%d); fi
+  cutoff="$((${today%%-*} - 1))-${today#*-}"
+  list=$(mktemp)
+  found=$(mktemp)
+  trap 'rm -f "$list" "$found"; exit 130' INT TERM
+  echo "Looking for apps you may not need, stopping after $cap seconds at the latest..." >&2
+  for dir in "${PCC_APPS_DIR:-/Applications}" "${home%/}/Applications"; do
+    [ -d "$dir" ] || continue
+    perl -e 'alarm shift; exec @ARGV' 10 find "$dir" -maxdepth 2 \( -type d -name Utilities -prune \) -o \( -type d -name '*.app' -prune -print \) 2> /dev/null >> "$list"
+    if [ $? = 142 ]; then scan="partial (time limit of $cap seconds reached)"; fi
+  done
+  while IFS= read -r app; do
+    if [ $((SECONDS - start)) -ge "$cap" ]; then scan="partial (time limit of $cap seconds reached)"; break; fi
+    [ -d "$app" ] || continue
+    last=$(pcc_apps_decide "$app" "$cutoff")
+    rc=$?
+    if [ "$rc" = 142 ]; then scan="partial (time limit of $cap seconds reached)"; continue; fi
+    [ -n "$last" ] || continue
+    secs=$((cap - (SECONDS - start)))
+    if [ "$secs" -lt 1 ]; then scan="partial (time limit of $cap seconds reached)"; break; fi
+    if [ "$secs" -gt 20 ]; then secs=20; fi
+    kb=$(perl -e 'alarm shift; exec @ARGV' "$secs" du -sk "$app" 2> /dev/null | awk 'NR==1 && $1 ~ /^[0-9]+$/ {print $1}')
+    if [ -z "$kb" ]; then scan="partial (time limit of $cap seconds reached)"; continue; fi
+    if [ "$kb" -ge "$min_kb" ]; then printf '%s\t%s\t%s\n' "$kb" "$last" "$app" >> "$found"; fi
+  done < "$list"
+  if [ "$scan" != "complete" ]; then echo "  The time limit was reached, so this list may be incomplete." >&2; fi
+  echo "scan: $scan"
+  echo "seconds: $((SECONDS - start))"
+  echo "limit: $cap"
+  echo "format: 1"
+  echo "scanned: $today"
+  pcc_apps_rows 15 < "$found"
+  rm -f "$list" "$found"
+  trap - INT TERM
+  return 0
+}
+
+# Prints the folders (Desktop, Documents) that iCloud Drive keeps in sync, or "none". Nothing is
+# printed when the preferences cannot be read.
+pcc_backups_icloud() {
+  local folders="" key name
+  command -v defaults > /dev/null 2>&1 || return 0
+  for key in Desktop Documents; do
+    name=$(defaults read com.apple.finder "FXICloudDrive$key" 2> /dev/null)
+    if [ "$name" = 1 ]; then folders="${folders:+$folders, }$key"; fi
+  done
+  echo "${folders:-none}"
+}
+
+# Facts about Time Machine and iCloud Drive for the "Backup freshness" section, one "key: value"
+# per line. A fact that cannot be read is "could not check", never a guess. Nothing is changed.
+pcc_backups_report() {
+  local today=${PCC_TODAY:-$(date +%Y-%m-%d)} info last latest icloud
+  if ! printf '%s' "$today" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then today=$(date +%Y-%m-%d); fi
+  echo "format: 1"
+  echo "scanned: $today"
+  info=$(perl -e 'alarm shift; exec @ARGV' 15 tmutil destinationinfo 2>&1)
+  case $info in
+    *"No destinations configured"*)
+      echo "timemachine: not set up"
+      echo "timemachine-last: none" ;;
+    *Name*)
+      echo "timemachine: set up"
+      last=$(pcc_tm_last_date)
+      if [ -n "$last" ]; then
+        echo "timemachine-last: $last"
+      else
+        latest=$(perl -e 'alarm shift; exec @ARGV' 15 tmutil latestbackup 2>&1)
+        case $latest in
+          *"No backups found"* | *"No machine directory found"*) echo "timemachine-last: none" ;;
+          *) echo "timemachine-last: could not check" ;;
+        esac
+      fi ;;
+    *)
+      echo "timemachine: could not check"
+      echo "timemachine-last: could not check" ;;
+  esac
+  icloud=$(pcc_backups_icloud)
+  echo "icloud-folders: ${icloud:-could not check}"
+  return 0
+}
+
 # Sourcing this file (for tests) stops here instead of running the checkup.
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
 
@@ -1524,6 +1708,8 @@ STORAGE_BREAKDOWN=$(pcc_storage_report)
 section "Storage breakdown" echo "$STORAGE_BREAKDOWN"
 SPACE_REPORT=$(pcc_space_report)
 section "Space you can get back" echo "$SPACE_REPORT"
+APPS_REPORT=$(pcc_apps_report)
+section "Apps you may not need" echo "$APPS_REPORT"
 section "Memory pressure" memory_pressure
 sh_section "Top processes by CPU" "ps -Arco pid,pcpu,pmem,comm | head -12"
 sh_section "Top processes by memory" "ps -Amrco pid,pcpu,pmem,comm | head -12"
@@ -1551,6 +1737,7 @@ sh_section "Firmware password (Intel only)" "firmwarepasswd -check 2>&1 | head -
 sh_section "Sharing and remote access" "systemsetup -getremotelogin 2>&1; systemsetup -getremoteappleevents 2>&1; launchctl print-disabled system 2>/dev/null | grep -iE 'ssh|screensharing|remotemanagement'"
 
 section "Backup status" pcc_check_facts "$CHECK_BACKUP"
+section "Backup freshness" pcc_backups_report
 section "Remote exposure" pcc_check_facts "$CHECK_REMOTE"
 section "Software update age" pcc_check_facts "$CHECK_UPDATES"
 section "Administrator accounts" pcc_check_facts "$CHECK_ADMINS"

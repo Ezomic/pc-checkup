@@ -127,3 +127,26 @@ snapshots|2
 file|Vakantiefilm 2024.mov|7,5 GB|Videos|Movies
 file|Belastingaangifte 2023.pdf|120,5 MB|Documents|Documenten
 ```
+
+## Apps you may not need
+
+```
+scan: complete
+seconds: 22
+limit: 45
+format: 1
+scanned: 2026-11-05
+app|Oude Video Editor|2,3 GB|2023-01-10
+app|Archief Tool|650 MB|2022-06-01
+more|2
+```
+
+## Backup freshness
+
+```
+format: 1
+scanned: 2026-11-05
+timemachine: not set up
+timemachine-last: none
+icloud-folders: none
+```
