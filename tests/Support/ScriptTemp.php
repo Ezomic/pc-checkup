@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Process;
 
 final class ScriptTemp
 {
-    private const ORPHAN_WAIT_MICROSECONDS = 5_000_000;
+    private const ORPHAN_WAIT_SECONDS = 5;
 
     /** @var list<string> */
     private static array $dirs = [];
@@ -49,7 +49,7 @@ final class ScriptTemp
      */
     public static function orphans(): array
     {
-        $deadline = microtime(true) + self::ORPHAN_WAIT_MICROSECONDS / 1_000_000;
+        $deadline = microtime(true) + self::ORPHAN_WAIT_SECONDS;
 
         do {
             $alive = self::alive();
@@ -92,11 +92,20 @@ final class ScriptTemp
         foreach (self::$bins as $bin) {
             $pids = is_file($bin.'/.pids') ? file($bin.'/.pids', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) : false;
 
-            foreach ($pids === false ? [] : $pids as $pid) {
-                $state = trim(Process::run(['ps', '-o', 'stat=', '-p', $pid])->output());
+            if ($pids === false || $pids === []) {
+                continue;
+            }
 
-                if ($state !== '' && ! str_starts_with($state, 'Z')) {
-                    $alive[] = (int) $pid;
+            $listing = Process::run(['ps', '-o', 'pid=,stat=,args=', '-p', implode(',', array_unique($pids))])->output();
+
+            foreach (explode('
+', $listing) as $line) {
+                if (preg_match('/^\s*(\d+)\s+(\S+)\s+(.*)$/', $line, $found) !== 1 || str_starts_with($found[2], 'Z')) {
+                    continue;
+                }
+
+                if (str_contains($found[3], $bin) || str_starts_with($found[3], 'sleep ')) {
+                    $alive[] = (int) $found[1];
                 }
             }
         }
