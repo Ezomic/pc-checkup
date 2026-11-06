@@ -31,6 +31,14 @@
 # SMBv1, how many accounts have administrator rights, UAC). It stores no serial numbers and no account
 # names, and spends at most 90 seconds. What cannot be read without admin rights says could not check.
 #
+# The remote access and network step looks for a fixed list of known remote-access tools (TeamViewer,
+# AnyDesk and the like) among installed programs and running processes and records only the names of
+# those it finds, never any other app. From the hosts file it records how many extra host names it holds
+# and which of a fixed list of well-known sites (Google, Microsoft, Apple, Dutch banks) it sends
+# elsewhere, never its lines. It records whether a proxy is set and only its host, the addresses of the
+# DNS servers in use, and the names of the antivirus programs Windows Security Center knows and whether
+# each is active. Every read has a time limit.
+#
 # Optional upload: with a token the finished report is also sent to PC Checkup. The token is
 # read from, in this order: -Token, the PC_CHECKUP_TOKEN environment variable, or a file named
 # pc-checkup.token next to this script. The site is $DefaultUrl below; -Url or PC_CHECKUP_URL
@@ -952,6 +960,146 @@ function Get-CrashAppLines([string[]]$Names, [datetime]$Today, [int]$Days, [bool
     $lines.Add("total: $($clean.Count)")
     $clean | Group-Object | Sort-Object @{ Expression = { $_.Count }; Descending = $true }, Name | Select-Object -First 10 | ForEach-Object { $lines.Add("app|$($_.Name)|$($_.Count)") }
     return $lines.ToArray()
+}
+
+# Known remote-access tools, matched against program names, Program Files folder names and process
+# names. Only the name on the left is ever printed. The app holds the same list of names.
+$RemoteTools = @(
+    @{ Name = 'TeamViewer'; Pattern = 'teamviewer' }
+    @{ Name = 'AnyDesk'; Pattern = 'anydesk' }
+    @{ Name = 'UltraViewer'; Pattern = 'ultraviewer' }
+    @{ Name = 'RustDesk'; Pattern = 'rustdesk' }
+    @{ Name = 'Supremo'; Pattern = '^supremo' }
+    @{ Name = 'ScreenConnect'; Pattern = 'screenconnect|connectwise control' }
+    @{ Name = 'LogMeIn'; Pattern = 'logmein' }
+    @{ Name = 'Splashtop'; Pattern = 'splashtop|^srservice$|^srmanager$' }
+    @{ Name = 'AeroAdmin'; Pattern = 'aeroadmin' }
+    @{ Name = 'Ammyy Admin'; Pattern = 'ammyy|^aa_v3$' }
+    @{ Name = 'Chrome Remote Desktop'; Pattern = 'chrome remote desktop|^remoting_host$' }
+    @{ Name = 'Remote Utilities'; Pattern = 'remote utilities|^rutserv$|^rfusclient$' }
+    @{ Name = 'Radmin'; Pattern = 'radmin(?! ?vpn)' }
+    @{ Name = 'RealVNC'; Pattern = 'realvnc|^vncserver$|^vncviewer$' }
+    @{ Name = 'TightVNC'; Pattern = 'tightvnc|^tvnserver$' }
+    @{ Name = 'UltraVNC'; Pattern = 'ultravnc|^winvnc$' }
+    @{ Name = 'NoMachine'; Pattern = 'nomachine|^nxservice' }
+    @{ Name = 'Zoho Assist'; Pattern = 'zoho ?assist' }
+    @{ Name = 'DWService'; Pattern = 'dwservice|dwagent' }
+    @{ Name = 'HopToDesk'; Pattern = 'hoptodesk' }
+    @{ Name = 'GoTo Resolve'; Pattern = 'goto ?resolve|gotoassist' }
+    @{ Name = 'BeyondTrust'; Pattern = 'bomgar|beyondtrust remote support' }
+    @{ Name = 'Parsec'; Pattern = '^parsecd?$' }
+)
+
+# The lines of the "Remote access tools" section from "i|name" (an installed program or a Program
+# Files folder) and "r|name" (a running process) rows. Names that match no known tool are dropped
+# here and never printed, so this is not an inventory. LogMeIn Hamachi is a VPN, not remote control.
+function Get-RemoteToolLines([string[]]$Rows, $Failure) {
+    if ($Failure) { return @('format: 1', 'scan: could not check') }
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('format: 1')
+    $lines.Add('scan: complete')
+    $installed = @(@($Rows) | Where-Object { $_ -like 'i|*' -and $_ -notmatch 'hamachi' } | ForEach-Object { $_.Substring(2).Trim() })
+    $running = @(@($Rows) | Where-Object { $_ -like 'r|*' -and $_ -notmatch 'hamachi' } | ForEach-Object { $_.Substring(2).Trim() })
+    foreach ($tool in $RemoteTools) {
+        $states = @()
+        if (@($installed | Where-Object { $_ -match $tool.Pattern }).Count -gt 0) { $states += 'installed' }
+        if (@($running | Where-Object { $_ -match $tool.Pattern }).Count -gt 0) { $states += 'running' }
+        if ($states.Count -gt 0) { $lines.Add("tool|$($tool.Name)|$($states -join ',')") }
+    }
+    return $lines.ToArray()
+}
+
+# Sites whose redirection in the hosts file is a sign of hijacking. The app holds the same list.
+$WatchedSites = @(
+    'google.com', 'google.nl', 'gmail.com', 'youtube.com', 'microsoft.com', 'live.com', 'outlook.com', 'office.com',
+    'microsoftonline.com', 'windowsupdate.com', 'apple.com', 'icloud.com', 'facebook.com', 'paypal.com',
+    'ing.nl', 'rabobank.nl', 'abnamro.nl', 'snsbank.nl', 'asnbank.nl', 'regiobank.nl', 'triodos.nl', 'knab.nl',
+    'bunq.com', 'digid.nl', 'belastingdienst.nl'
+)
+$HostsLineLimit = 50000
+
+# Summary lines of the hosts file: how many host names it maps besides the defaults, and which of the
+# watched sites it sends elsewhere (redirected) or to nowhere (blocked). No line of the file is printed.
+function Get-HostsSummaryLines([string[]]$Lines) {
+    $default = @('localhost', 'localhost.localdomain', 'broadcasthost', 'ip6-localhost', 'ip6-loopback')
+    $entries = 0
+    $redirected = New-Object System.Collections.Generic.List[string]
+    $blocked = New-Object System.Collections.Generic.List[string]
+    $watched = '(^|\.)(' + (($WatchedSites | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')$'
+    $all = @($Lines)
+    foreach ($raw in @($all | Select-Object -First $HostsLineLimit)) {
+        $parts = (([string]$raw) -replace '#.*$', '').Split([char[]]" `t", [StringSplitOptions]::RemoveEmptyEntries)
+        if ($parts.Count -lt 2) { continue }
+        $nowhere = $parts[0] -match '^(0\.0\.0\.0|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|::1?|::0)$'
+        for ($index = 1; $index -lt $parts.Count; $index++) {
+            $name = $parts[$index].ToLowerInvariant().TrimEnd('.')
+            if ($default -contains $name) { continue }
+            $entries++
+            if ($name -notmatch $watched) { continue }
+            $site = $Matches[2]
+            $list = $redirected
+            if ($nowhere) { $list = $blocked }
+            if (-not $list.Contains($site)) { $list.Add($site) }
+        }
+    }
+    $status = if ($all.Count -gt $HostsLineLimit) { "hosts: partial (only the first $HostsLineLimit lines were read)" } else { 'hosts: complete' }
+    $out = @($status, "hosts-entries: $entries")
+    if ($redirected.Count -gt 0) { $out += "hosts-redirected: $($redirected -join ', ')" }
+    if ($blocked.Count -gt 0) { $out += "hosts-blocked: $($blocked -join ', ')" }
+    return $out
+}
+
+# Only the host (and port) of a proxy setting or of the address of a proxy script: no scheme, no
+# user name or password, no path. Anything that does not look like a plain host gives nothing.
+function Get-ProxyHostText([string]$Value) {
+    $text = @(([string]$Value) -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) | Select-Object -First 1
+    if (-not $text) { return $null }
+    $text = $text -replace '^[A-Za-z]+=', '' -replace '^[A-Za-z][A-Za-z0-9+.-]*://', ''
+    if ($text.Contains('@')) { $text = $text.Substring($text.LastIndexOf('@') + 1) }
+    $text = ($text -split '[/?#]')[0]
+    if ($text -cmatch '^[A-Za-z0-9._\-\[\]:]{1,100}$') { return $text }
+    return $null
+}
+
+function Get-ProxyLines($Enable, [string]$Server, [string]$Script) {
+    $hostText = if ("$Enable" -eq '1') { Get-ProxyHostText $Server } else { $null }
+    $scriptHost = if ($Script) { Get-ProxyHostText $Script } else { $null }
+    if ("$Enable" -ne '1' -and -not $Script) { return @('proxy: off') }
+    $out = @('proxy: on')
+    if ($hostText) { $out += "proxy-host: $hostText" }
+    if ($scriptHost) { $out += "proxy-script-host: $scriptHost" }
+    return $out
+}
+
+function Get-DnsServerLines([string[]]$Addresses) {
+    $seen = New-Object System.Collections.Generic.List[string]
+    foreach ($address in @($Addresses)) {
+        $text = ([string]$address).Trim()
+        $parsed = $null
+        if ($text -and [System.Net.IPAddress]::TryParse(($text -replace '%.*$', ''), [ref]$parsed) -and -not $seen.Contains($text)) { $seen.Add($text) }
+    }
+    return @('dns: complete') + @($seen | Select-Object -First 8 | ForEach-Object { "dns-server: $_" })
+}
+
+# The lines of the "Antivirus products" section from "productState|displayName" rows of Windows
+# Security Center. Bits 12 to 15 of productState are 1 when real-time protection is on. Windows Server
+# has no Security Center, which shows as an error about the namespace.
+function Get-AntivirusProductLines([string[]]$Rows, $Failure) {
+    if ($Failure -match 'namespace') { return @('format: 1', 'status: not available') }
+    if ($Failure) { return @('format: 1', 'status: could not check') }
+    $products = [ordered]@{}
+    foreach ($row in @($Rows)) {
+        if ("$row" -notmatch '^(\d{1,10})\|(.*)$') { continue }
+        $name = (($Matches[2] -replace '[\x00-\x1f\x7f|]', ' ') -replace '\s+', ' ').Trim()
+        if (-not $name) { continue }
+        if ($name.Length -gt 60) { $name = $name.Substring(0, 60).Trim() }
+        $on = ([int64]$Matches[1] -band 0xF000) -eq 0x1000
+        $key = $name.ToLowerInvariant()
+        if ($products.Contains($key)) { $products[$key].On = $products[$key].On -or $on } else { $products[$key] = @{ Name = $name; On = $on } }
+    }
+    $out = @('format: 1', 'status: complete')
+    foreach ($product in @($products.Values | Select-Object -First 10)) { $out += "product|$($product.Name)|$(if ($product.On) { 'on' } else { 'off' })" }
+    return $out
 }
 
 function Get-UsableSerial($Value) {
@@ -2172,6 +2320,39 @@ Add-Section 'Locale and time' {
     Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'
     (Get-TimeZone).Id
     (Get-Culture).Name
+}
+Add-Section 'Remote access tools' {
+    $read = Read-CappedJob {
+        $keys = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
+        foreach ($entry in @(Get-ItemProperty -Path $keys -ErrorAction SilentlyContinue)) { if ($entry.DisplayName) { "i|$($entry.DisplayName)" } }
+        foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+            if ($root -and (Test-Path -LiteralPath $root)) { foreach ($dir in @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue)) { "i|$($dir.Name)" } }
+        }
+        foreach ($process in @(Get-Process -ErrorAction SilentlyContinue)) { "r|$($process.ProcessName)" }
+    } 25
+    Get-RemoteToolLines $read.Value $read.Note
+}
+Add-Section 'Network settings' {
+    'format: 1'
+    $hosts = Read-CappedJob { param($HostsLimit) Get-Content -LiteralPath "$env:SystemRoot\System32\drivers\etc\hosts" -TotalCount ($HostsLimit + 1) -ErrorAction Stop } 15 @($HostsLineLimit)
+    if ($hosts.Note) { 'hosts: could not check' } else { Get-HostsSummaryLines $hosts.Value }
+    $proxy = Read-CappedJob {
+        $settings = Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -ErrorAction Stop
+        [pscustomobject]@{ Enable = "$($settings.ProxyEnable)"; Server = "$($settings.ProxyServer)"; Script = "$($settings.AutoConfigURL)" }
+    } 15
+    $settings = @($proxy.Value) | Select-Object -First 1
+    if ($proxy.Note -or -not $settings) { 'proxy: could not check' } else { Get-ProxyLines $settings.Enable $settings.Server $settings.Script }
+    $dns = Read-CappedJob {
+        $connected = @(Get-NetIPInterface -ConnectionState Connected -ErrorAction Stop | ForEach-Object { $_.InterfaceIndex })
+        foreach ($entry in @(Get-DnsClientServerAddress -ErrorAction Stop)) { if ($connected -contains $entry.InterfaceIndex) { $entry.ServerAddresses } }
+    } 20
+    if ($dns.Note) { 'dns: could not check' } else { Get-DnsServerLines $dns.Value }
+}
+Add-Section 'Antivirus products' {
+    $read = Read-CappedJob {
+        foreach ($product in @(Get-CimInstance -Namespace root\SecurityCenter2 -ClassName AntiVirusProduct -OperationTimeoutSec 15 -ErrorAction Stop)) { "$($product.productState)|$($product.displayName)" }
+    } 20
+    Get-AntivirusProductLines $read.Value $read.Note
 }
 
 # ---------- Assemble ----------

@@ -67,4 +67,32 @@ describe('share/Privacy', () => {
         expect(wrapper.text()).toContain('wachtwoorden');
         expect(wrapper.text()).toContain('Niets.');
     });
+
+    it('names the remote-access, hosts, proxy, DNS and antivirus reads in both languages', () => {
+        const dutch = render({ contactConfigured: false, contactEmail: 'x' });
+
+        for (const words of [
+            'hulp op afstand',
+            'hosts-bestand',
+            'proxy',
+            'DNS-servers',
+            'antivirusprogramma',
+        ]) {
+            expect(dutch.text()).toContain(words);
+        }
+
+        page.props.locale = 'en';
+        const english = render({ contactConfigured: false, contactEmail: 'x' });
+        page.props.locale = 'nl';
+
+        for (const words of [
+            'remote-access tools',
+            'hosts file',
+            'proxy',
+            'DNS servers',
+            'antivirus programs',
+        ]) {
+            expect(english.text()).toContain(words);
+        }
+    });
 });
