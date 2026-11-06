@@ -52,7 +52,17 @@ function render(machines: MachineCard[]) {
 
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-11-02T12:00:00Z'));
-    const wrapper = mount(Index, { props: { machines: page } });
+    const wrapper = mount(Index, {
+        props: {
+            machines: page,
+            needsAttention: {
+                total: 0,
+                urgent: 0,
+                rows: [],
+                showing_all: false,
+            },
+        },
+    });
     vi.useRealTimers();
 
     return wrapper;
@@ -99,5 +109,16 @@ describe('machines/Index', () => {
 
         expect(wrapper.find('[data-test="stale-note"]').exists()).toBe(false);
         expect(wrapper.text()).not.toContain('Scanned');
+    });
+});
+
+describe('machines/Index needs attention', () => {
+    it('shows the section above the machine cards', () => {
+        const html = render([card()]).html();
+
+        expect(html.indexOf('data-test="needs-attention"')).toBeGreaterThan(-1);
+        expect(html.indexOf('data-test="needs-attention"')).toBeLessThan(
+            html.indexOf('data-test="machine-cards"'),
+        );
     });
 });

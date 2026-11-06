@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Services\Checklist\ChecklistResolver;
 use App\Services\Flags\FlagAdvice;
 use App\Services\Flags\FlagAdvisor;
+use App\Services\NeedsAttention;
 use App\Services\Reports\ReportDetails;
 use App\Services\Reports\ReportFacts;
 use App\Services\Reports\ReportFreshness;
@@ -28,12 +29,13 @@ use Inertia\Response;
 
 final class MachineController extends Controller
 {
-    public function index(Request $request, FlagAdvisor $advisor, ReportFreshness $freshness): Response
+    public function index(Request $request, FlagAdvisor $advisor, ReportFreshness $freshness, NeedsAttention $attention): Response
     {
         $user = $request->user();
         abort_unless($user instanceof User, 403);
 
         return Inertia::render('machines/Index', [
+            'needsAttention' => $attention->handle($user, $request->query('attention') === 'all'),
             'machines' => $user->machines()
                 ->with('newestReport')
                 ->withCount('reports')
