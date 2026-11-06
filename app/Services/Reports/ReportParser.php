@@ -27,6 +27,8 @@ final class ReportParser
         'net_up_mbps',
     ];
 
+    private const UPDATE_CHECKS = ['current', 'outdated, continued', 'not checked'];
+
     private const NOTHING_FLAGGED = 'Nothing flagged automatically.';
 
     public function parse(string $markdown): ParsedReport
@@ -50,12 +52,20 @@ final class ReportParser
             rustdeskId: RustDeskId::orNull($header['rustdesk id'] ?? null),
             ranAsAdmin: $this->rights($header['run as administrator'] ?? null),
             scriptVersion: $this->scriptVersion($header['script version'] ?? null),
+            updateCheck: $this->updateCheck($header['update check'] ?? null),
         );
     }
 
     private function scriptVersion(?string $value): ?string
     {
         return $value !== null && preg_match('/\A[A-Za-z0-9.-]{1,32}\z/', $value) === 1 ? $value : null;
+    }
+
+    private function updateCheck(?string $value): ?string
+    {
+        $value = $value === null ? null : mb_strtolower($value);
+
+        return in_array($value, self::UPDATE_CHECKS, true) ? $value : null;
     }
 
     private function rights(?string $value): ?bool

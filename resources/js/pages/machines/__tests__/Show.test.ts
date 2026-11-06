@@ -122,7 +122,12 @@ describe('machines/Show', () => {
     });
 
     it('shows the script version note beside the scanned time and leaves it out without one', () => {
-        const script = { version: null, current: 'bbbb2222', outdated: true };
+        const script = {
+            version: null,
+            current: 'bbbb2222',
+            outdated: true,
+            ranOutdated: false,
+        };
 
         expect(
             render(report({ script }))

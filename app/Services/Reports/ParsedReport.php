@@ -30,6 +30,7 @@ final readonly class ParsedReport
         public ?string $rustdeskId = null,
         public ?bool $ranAsAdmin = null,
         public ?string $scriptVersion = null,
+        public ?string $updateCheck = null,
     ) {}
 
     public function usableSerial(): ?string
