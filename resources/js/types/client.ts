@@ -1,3 +1,5 @@
+import type { AttentionLevel, AttentionReason } from './attention';
+import type { ScanVerdict } from './history';
 import type { Machine } from './machine';
 
 export type ClientSummary = {
@@ -20,7 +22,20 @@ export type ClientDetails = {
 export type ClientMachine = Pick<
     Machine,
     'id' | 'name' | 'model' | 'os' | 'device_type' | 'status'
->;
+> & {
+    last_scan_at: string | null;
+    level: AttentionLevel | 'fine';
+    reasons: AttentionReason[];
+    reason_count: number;
+    verdict: ScanVerdict | null;
+};
+
+export type ClientMachineSummary = {
+    total: number;
+    urgent: number;
+    soon: number;
+    fine: number;
+};
 
 export type AssignableMachine = Pick<Machine, 'id' | 'name' | 'model'> & {
     client_name: string | null;
