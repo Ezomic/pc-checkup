@@ -321,7 +321,96 @@ pcc_fix_advice() {
   esac
 }
 
-pcc_fix_du_kb() { perl -e 'alarm shift; exec @ARGV' 30 du -sk "$1" 2>/dev/null | awk 'NR==1 {print $1}'; }
+# Runs "pcc_capped SECONDS COMMAND [ARGS]" in its own process group and relays its output. When the
+# seconds run out the whole group is killed (a du under find included), the output pipes are
+# dropped even if a process stuck on a dead mount cannot die, and the exit code is 142. When the
+# command ends, anything it left running in the group is killed and its own exit code is returned.
+# Ctrl-C, TERM, HUP or a closed reader stop the group too, and Ctrl-C ends the helper by the signal
+# so the scan aborts. Limits: a process that starts its own session (setsid) is not in the group and
+# can survive; stdout and stderr are relayed separately, so their interleaving is not kept; and the
+# cap is not enforced while whatever reads the output is itself stalled. Core perl, 5.8 syntax.
+PCC_CAP_PL='
+use strict;
+use warnings;
+use POSIX ":sys_wait_h";
+use Time::HiRes qw(time sleep);
+my $secs = shift @ARGV;
+my $deadline = time + $secs;
+my (@rd, @wr);
+for my $i (0, 1) { pipe($rd[$i], $wr[$i]) or exit 126; }
+my $pid = fork;
+exit 126 unless defined $pid;
+if (!$pid) {
+  setpgrp(0, 0);
+  close $rd[$_] for 0, 1;
+  open(STDIN, "<", "/dev/null");
+  open(STDOUT, ">&", $wr[0]) or POSIX::_exit(126);
+  open(STDERR, ">&", $wr[1]) or POSIX::_exit(126);
+  close $wr[$_] for 0, 1;
+  { no warnings; exec { $ARGV[0] } @ARGV; }
+  POSIX::_exit(127);
+}
+close $wr[$_] for 0, 1;
+sub stop { kill "KILL", -$pid; kill "KILL", $pid; }
+for my $sig (qw(INT TERM HUP)) {
+  $SIG{$sig} = sub { stop(); $SIG{$sig} = "DEFAULT"; kill $sig, $$; exit 128; };
+}
+$SIG{PIPE} = sub { stop(); exit 141 };
+sub retry { return $!{EINTR} || $!{EAGAIN}; }
+my @open = (0, 1);
+my ($status, $timedout);
+while (1) {
+  if (!defined $status) {
+    my $reaped = waitpid($pid, WNOHANG);
+    if ($reaped == $pid) { $status = $?; }
+    elsif ($reaped < 0) { $status = 0; }
+  }
+  my $left = $deadline - time;
+  if ($left <= 0) { $timedout = 1; last; }
+  if (!@open) {
+    last if defined $status;
+    sleep($left < 0.02 ? $left : 0.02);
+    next;
+  }
+  my $rin = "";
+  vec($rin, fileno($rd[$_]), 1) = 1 for @open;
+  my $rout = $rin;
+  my $wait = defined $status ? 0 : ($left < 0.05 ? $left : 0.05);
+  my $n = select($rout, undef, undef, $wait);
+  last if $n == 0 && defined $status;
+  next if $n <= 0;
+  my @still;
+  for my $i (@open) {
+    if (vec($rout, fileno($rd[$i]), 1)) {
+      my $buf;
+      my $got = sysread($rd[$i], $buf, 65536);
+      if (!defined $got) { push @still, $i if retry(); next; }
+      next if $got == 0;
+      my $off = 0;
+      while ($off < $got) {
+        my $put = syswrite($i ? \*STDERR : \*STDOUT, $buf, $got - $off, $off);
+        if (!defined $put) {
+          if (retry()) { sleep 0.01; next; }
+          last if $i;
+          stop();
+          exit($!{EPIPE} ? 141 : 1);
+        }
+        $off += $put;
+      }
+    }
+    push @still, $i;
+  }
+  @open = @still;
+}
+stop();
+exit 142 if $timedout;
+exit(($status & 127) ? 128 + ($status & 127) : $status >> 8);
+'
+export PCC_CAP_PL
+pcc_capped() { perl -e "$PCC_CAP_PL" "$@"; }
+export -f pcc_capped
+
+pcc_fix_du_kb() { pcc_capped 30 du -x -sk "$1" 2>/dev/null | awk 'NR==1 {print $1}'; }
 
 pcc_fix_present() {
   local value
@@ -370,7 +459,7 @@ pcc_fix_record() { printf -- '- %s | %s | %s | undo: %s\n' "$1" "$2" "$(pcc_onel
 
 pcc_fix_preview_caches() {
   echo "  Size preview: $((PCC_CACHE_KB / 1024)) MB in $PCC_CACHE_DIR. Largest folders:"
-  perl -e 'alarm shift; exec @ARGV' 30 du -sk "$PCC_CACHE_DIR"/* 2>/dev/null | sort -rn | head -5 | awk '{printf "    %d MB  %s\n", $1 / 1024, $2}'
+  pcc_capped 30 du -x -sk "$PCC_CACHE_DIR"/* 2>/dev/null | sort -rn | head -5 | awk '{printf "    %d MB  %s\n", $1 / 1024, $2}'
   echo "  Only the contents of that cache folder are removed; apps rebuild them. No documents or other user files are touched."
 }
 
@@ -667,7 +756,7 @@ pcc_tm_last_date() {
   local when
   when=$(defaults read /Library/Preferences/com.apple.TimeMachine 2>/dev/null | awk '/SnapshotDates/ {on = 1} on && /\)/ {on = 0} on' | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | sort | tail -n 1)
   if [ -z "$when" ]; then
-    when=$(perl -e 'alarm shift; exec @ARGV' 15 tmutil latestbackup 2>/dev/null | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}' | tail -n 1 | cut -c1-10)
+    when=$(pcc_capped 15 tmutil latestbackup 2>/dev/null | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}' | tail -n 1 | cut -c1-10)
   fi
   printf '%s' "$when"
 }
@@ -854,7 +943,7 @@ pcc_storage_stop() {
 pcc_storage_du() {
   local depth=$1 secs=$2 dir=$3 rc_file=$4
   if [ "$secs" -lt 1 ]; then echo 142 >> "$rc_file"; return 0; fi
-  perl -e 'alarm shift; exec @ARGV' "$secs" du -x -k -d "$depth" "$dir" 2>/dev/null
+  pcc_capped "$secs" du -x -k -d "$depth" "$dir" 2>/dev/null
   echo $? >> "$rc_file"
 }
 
@@ -1145,7 +1234,7 @@ pcc_storage_types() {
   if [ "$left" -le 0 ]; then echo "capped|1"; return 0; fi
   rc_file=$(mktemp)
   {
-    perl -e 'alarm shift; exec @ARGV' "$left" find "$home" -xdev -path "$home/Library/CloudStorage" -prune -o -type f -exec du -k {} + 2>/dev/null
+    pcc_capped "$left" find "$home" -xdev -path "$home/Library/CloudStorage" -prune -o -type f -exec du -x -k {} + 2>/dev/null
     echo $? > "$rc_file"
   } | LC_ALL=C awk -F '\t' '
     function add(list, kind,    n, parts, i) {
@@ -1238,7 +1327,7 @@ pcc_space_count() {
   local dir=$1 secs=$2 count
   shift 2
   if [ "$secs" -lt 1 ]; then echo 0; return 0; fi
-  count=$(perl -e 'alarm shift; exec @ARGV' "$secs" find "$dir" -mindepth 1 -maxdepth 1 ! -name .DS_Store "$@" 2>/dev/null | wc -l | tr -d ' ')
+  count=$(pcc_capped "$secs" find "$dir" -mindepth 1 -maxdepth 1 ! -name .DS_Store "$@" 2>/dev/null | wc -l | tr -d ' ')
   echo "${count:-0}"
 }
 
@@ -1246,7 +1335,7 @@ pcc_space_count() {
 # given Terminal Full Disk Access. A listing that is merely slow counts as readable.
 pcc_space_readable() {
   local rc
-  perl -e 'alarm shift; exec @ARGV' "$2" ls -f "$1" > /dev/null 2>&1
+  pcc_capped "$2" ls -f "$1" > /dev/null 2>&1
   rc=$?
   [ "$rc" = 0 ] || [ "$rc" = 142 ]
 }
@@ -1257,7 +1346,7 @@ pcc_space_installers() {
   local dir=$1 secs=$2 rc_file=$3
   if [ "$secs" -lt 1 ]; then echo 142 >> "$rc_file"; return 0; fi
   {
-    perl -e 'alarm shift; exec @ARGV' "$secs" find "$dir" -maxdepth 1 -type f \( -iname '*.dmg' -o -iname '*.pkg' -o -iname '*.iso' \) -exec du -k {} + 2>/dev/null
+    pcc_capped "$secs" find "$dir" -maxdepth 1 -type f \( -iname '*.dmg' -o -iname '*.pkg' -o -iname '*.iso' \) -exec du -x -k {} + 2>/dev/null
     echo $? >> "$rc_file"
   } | awk -F '\t' '$1 ~ /^[0-9]+$/ && $1 > 0 { kb += $1; n++ } END { if (n > 0) print "reclaim|installers|" kb "|" n }'
 }
@@ -1266,7 +1355,7 @@ pcc_space_installers() {
 pcc_space_snapshots() {
   local secs=$1 rc_file=$2 out rc
   if [ "$secs" -lt 1 ]; then echo 142 >> "$rc_file"; return 0; fi
-  out=$(perl -e 'alarm shift; exec @ARGV' "$secs" tmutil listlocalsnapshots / 2>/dev/null)
+  out=$(pcc_capped "$secs" tmutil listlocalsnapshots / 2>/dev/null)
   rc=$?
   echo "$rc" >> "$rc_file"
   if [ "$rc" = 0 ]; then echo "snapshots|$(printf '%s\n' "$out" | grep -c 'com\.apple\.TimeMachine\.')"; fi
@@ -1331,7 +1420,7 @@ pcc_space_files() {
   if [ "$left" -le 0 ]; then echo 142 >> "$rc_file"; return 0; fi
   library=$(printf '%s' "$home/Library" | sed -e 's/[][*?\\]/\\&/g')
   {
-    perl -e 'alarm shift; exec @ARGV' "$left" find "$home" -mindepth 1 -xdev \( -path "$library" -o -name '.*' -o \( -type d \( -name '*.app' -o -name '*.framework' -o -name '*.bundle' -o -name '*.plugin' -o -name '*.kext' -o -name '*.xpc' -o -name '*.appex' -o -name '*.photoslibrary' -o -name '*.musiclibrary' -o -name '*.tvlibrary' -o -name '*.imovielibrary' -o -name '*.fcpbundle' -o -name '*.sparsebundle' \) \) \) -prune -o -type f -size +"${min_kb}k" -exec du -k {} + 2>/dev/null
+    pcc_capped "$left" find "$home" -mindepth 1 -xdev \( -path "$library" -o -name '.*' -o \( -type d \( -name '*.app' -o -name '*.framework' -o -name '*.bundle' -o -name '*.plugin' -o -name '*.kext' -o -name '*.xpc' -o -name '*.appex' -o -name '*.photoslibrary' -o -name '*.musiclibrary' -o -name '*.tvlibrary' -o -name '*.imovielibrary' -o -name '*.fcpbundle' -o -name '*.sparsebundle' \) \) \) -prune -o -type f -size +"${min_kb}k" -exec du -x -k {} + 2>/dev/null
     echo $? >> "$rc_file"
   } | perl -e '
     use strict;
@@ -1439,7 +1528,7 @@ pcc_apps_mtime() {
 # apps. Returns 142 when mdls did not answer in time.
 pcc_apps_decide() {
   local app=$1 cutoff=$2 info rc id used added
-  info=$(perl -e 'alarm shift; exec @ARGV' 5 mdls -name kMDItemCFBundleIdentifier -name kMDItemLastUsedDate -name kMDItemDateAdded "$app" 2> /dev/null)
+  info=$(pcc_capped 5 mdls -name kMDItemCFBundleIdentifier -name kMDItemLastUsedDate -name kMDItemDateAdded "$app" 2> /dev/null)
   rc=$?
   if [ "$rc" = 142 ]; then return 142; fi
   id=$(pcc_apps_field "$info" kMDItemCFBundleIdentifier)
@@ -1518,7 +1607,7 @@ pcc_apps_report() {
   echo "Looking for apps you may not need, stopping after $cap seconds at the latest..." >&2
   for dir in "${PCC_APPS_DIR:-/Applications}" "${home%/}/Applications"; do
     [ -d "$dir" ] || continue
-    perl -e 'alarm shift; exec @ARGV' 10 find "$dir" -maxdepth 2 \( -type d -name Utilities -prune \) -o \( -type d -name '*.app' -prune -print \) 2> /dev/null >> "$list"
+    pcc_capped 10 find "$dir" -maxdepth 2 \( -type d -name Utilities -prune \) -o \( -type d -name '*.app' -prune -print \) 2> /dev/null >> "$list"
     if [ $? = 142 ]; then scan="partial (time limit of $cap seconds reached)"; fi
   done
   while IFS= read -r app; do
@@ -1531,7 +1620,7 @@ pcc_apps_report() {
     secs=$((cap - (SECONDS - start)))
     if [ "$secs" -lt 1 ]; then scan="partial (time limit of $cap seconds reached)"; break; fi
     if [ "$secs" -gt 20 ]; then secs=20; fi
-    kb=$(perl -e 'alarm shift; exec @ARGV' "$secs" du -sk "$app" 2> /dev/null | awk 'NR==1 && $1 ~ /^[0-9]+$/ {print $1}')
+    kb=$(pcc_capped "$secs" du -x -sk "$app" 2> /dev/null | awk 'NR==1 && $1 ~ /^[0-9]+$/ {print $1}')
     if [ -z "$kb" ]; then scan="partial (time limit of $cap seconds reached)"; continue; fi
     if [ "$kb" -ge "$min_kb" ]; then printf '%s\t%s\t%s\n' "$kb" "$last" "$app" >> "$found"; fi
   done < "$list"
@@ -1566,7 +1655,7 @@ pcc_backups_report() {
   if ! printf '%s' "$today" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then today=$(date +%Y-%m-%d); fi
   echo "format: 1"
   echo "scanned: $today"
-  info=$(perl -e 'alarm shift; exec @ARGV' 15 tmutil destinationinfo 2>&1)
+  info=$(pcc_capped 15 tmutil destinationinfo 2>&1)
   case $info in
     *"No destinations configured"*)
       echo "timemachine: not set up"
@@ -1577,7 +1666,7 @@ pcc_backups_report() {
       if [ -n "$last" ]; then
         echo "timemachine-last: $last"
       else
-        latest=$(perl -e 'alarm shift; exec @ARGV' 15 tmutil latestbackup 2>&1)
+        latest=$(pcc_capped 15 tmutil latestbackup 2>&1)
         case $latest in
           *"No backups found"* | *"No machine directory found"*) echo "timemachine-last: none" ;;
           *) echo "timemachine-last: could not check" ;;
@@ -1754,7 +1843,7 @@ sh_section "Performance: Spotlight indexing" "mdutil -s / 2>&1; ps -axco pid,pcp
 sh_section "Performance: disk write and read speed (512 MB test)" "T=\$(mktemp \"\$HOME/.speedtest.XXXXXX\"); dd if=/dev/zero of=\"\$T\" bs=1m count=512 2>&1 | tail -1; sync; purge 2>/dev/null; dd if=\"\$T\" of=/dev/null bs=1m 2>&1 | tail -1; rm -f \"\$T\"; echo; echo 'Healthy SSD: several hundred MB/s or more. Under ~100 MB/s means a failing or full disk.'"
 sh_section "Performance: security and management agents" "ps -axco comm | grep -iE 'falcon|sophos|norton|mcafee|avast|avg|malwarebytes|jamf|kandji|crowdstrike|sentinel|defender|carbonblack|eset' | sort -u; echo; echo '(blank above means none found)'"
 sh_section "Performance: login item and startup counts" "echo LaunchAgents/Daemons:; ls /Library/LaunchAgents /Library/LaunchDaemons \"\$HOME/Library/LaunchAgents\" 2>/dev/null | grep -v '^\$' | grep -vc '^/'"
-sh_section "Performance: biggest folders in home" "END=\$((SECONDS+15)); for D in \"\$HOME\"/* \"\$HOME\"/Library/Caches; do R=\$((END-SECONDS)); [ \$R -gt 0 ] || break; perl -e 'alarm shift; exec @ARGV' \$R du -sh \"\$D\"; done 2>/dev/null | sort -rh | head -12; echo; echo '(capped at about 15 seconds; folders not reached in time are not listed)'"
+sh_section "Performance: biggest folders in home" "END=\$((SECONDS+15)); for D in \"\$HOME\"/* \"\$HOME\"/Library/Caches; do R=\$((END-SECONDS)); [ \$R -gt 0 ] || break; pcc_capped \$R du -x -sh \"\$D\"; done 2>/dev/null | sort -rh | head -12; echo; echo '(capped at about 15 seconds; folders not reached in time are not listed)'"
 section "Graphics and displays" system_profiler SPDisplaysDataType
 section "Network interfaces" networksetup -listallhardwareports
 sh_section "Wi-Fi" "system_profiler SPAirPortDataType | head -40"
@@ -1786,7 +1875,7 @@ sh_section "Homebrew" "command -v brew >/dev/null && brew list --versions 2>/dev
 sh_section "Configuration profiles and kernel/system extensions" "systemextensionsctl list 2>&1 | head -40; echo; kextstat 2>/dev/null | grep -v com.apple | head -40"
 sh_section "Startup items: LaunchAgents and LaunchDaemons" "ls -1 /Library/LaunchAgents /Library/LaunchDaemons \"\$HOME/Library/LaunchAgents\" 2>/dev/null"
 sh_section "Login items" "osascript -e 'tell application \"System Events\" to get the name of every login item' 2>&1"
-sh_section "Background items (macOS 13+)" "perl -e 'alarm 30; exec @ARGV' sfltool dumpbtm 2>&1 | grep -E 'Name:|Developer Name:|Type:|Disposition:' | head -150; echo; echo '(capped at 30 seconds; if nothing is listed above, the command timed out or needs admin rights)'"
+sh_section "Background items (macOS 13+)" "pcc_capped 30 sfltool dumpbtm 2>&1 | grep -E 'Name:|Developer Name:|Type:|Disposition:' | head -150; echo; echo '(capped at 30 seconds; if nothing is listed above, the command timed out or needs admin rights)'"
 sh_section "Cron jobs" "crontab -l 2>&1"
 
 sh_section "Listening network ports" "lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | head -40"
@@ -1794,7 +1883,7 @@ sh_section "DNS and proxy" "scutil --dns | head -25; scutil --proxy"
 sh_section "Hosts file (non-default lines)" "grep -vE '^\s*#|^\s*$' /etc/hosts"
 
 sh_section "Kernel panic reports" "ls -lt /Library/Logs/DiagnosticReports/*.panic 2>&1 | head -10; ls -lt /Library/Logs/DiagnosticReports 2>/dev/null | head -15"
-sh_section "Recent shutdown causes" "perl -e 'alarm 20; exec @ARGV' log show --predicate 'eventMessage contains \"Previous shutdown cause\"' --last 7d 2>/dev/null | tail -8; echo; echo '(last 7 days, capped at 20 seconds)'"
+sh_section "Recent shutdown causes" "pcc_capped 20 log show --predicate 'eventMessage contains \"Previous shutdown cause\"' --last 7d 2>/dev/null | tail -8; echo; echo '(last 7 days, capped at 20 seconds)'"
 sh_section "Time Machine" "tmutil destinationinfo 2>&1 | head -15; tmutil latestbackup 2>&1"
 sh_section "Privacy permissions (TCC), needs Full Disk Access for Terminal" "for DB in \"\$HOME/Library/Application Support/com.apple.TCC/TCC.db\" '/Library/Application Support/com.apple.TCC/TCC.db'; do echo \"== \$DB\"; sqlite3 \"\$DB\" \"select service, client, case auth_value when 2 then 'allowed' when 0 then 'denied' else auth_value end from access where auth_value=2 and service in ('kTCCServiceScreenCapture','kTCCServiceAccessibility','kTCCServiceSystemPolicyAllFiles','kTCCServiceCamera','kTCCServiceMicrophone','kTCCServiceListenEvent','kTCCServicePostEvent') order by service, client;\" 2>&1; done; echo; echo 'If you see an authorization error, grant Terminal Full Disk Access in System Settings > Privacy & Security and re-run.'"
 sh_section "Trusted certificates: custom trust settings" "echo '-- admin'; security dump-trust-settings -d 2>&1 | grep -E 'Cert [0-9]+:|No Trust' ; echo '-- system'; security dump-trust-settings -s 2>&1 | grep -E 'Cert [0-9]+:|No Trust'; echo '-- user'; security dump-trust-settings 2>&1 | grep -E 'Cert [0-9]+:|No Trust'"
