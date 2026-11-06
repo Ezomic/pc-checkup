@@ -12,7 +12,7 @@ defineProps<{
         class="flex flex-col text-sm"
         :class="small ? 'gap-2 text-xs' : 'gap-3'"
     >
-        <li v-for="item in items" :key="item.label">
+        <li v-for="(item, index) in items" :key="`${index}-${item.label}`">
             <div class="flex justify-between gap-4">
                 <span class="min-w-0 break-words">{{ item.label }}</span>
                 <span class="shrink-0 font-medium">{{ item.value }}</span>

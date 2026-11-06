@@ -107,3 +107,21 @@ TimeCreated           Id ProviderName
 11/1/2026 3:12:10 AM  1001 Microsoft-Windows-WER-SystemErrorReporting
 10/20/2026 8:00:00 PM 41 Microsoft-Windows-Kernel-Power
 ```
+
+## Space you can get back
+
+```
+scan: partial (time limit of 60 seconds reached)
+seconds: 60
+limit: 60
+format: 1
+reclaim|recycle|2411724|87
+reclaim|temp|1572864|412
+reclaim|systemtemp|307200|36
+reclaim|updates|2097152|14
+reclaim|installers|1363148|5
+reclaim|windowsold|15728640|6
+file|disk-image.vhdx|20971520|Other|Virtual Machines
+file|Game Recording.mp4|4194304|Videos|Videos
+file|Setup.exe|1572864|Apps|Downloads
+```

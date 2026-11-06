@@ -12,6 +12,12 @@
 # It follows no junctions or links and leaves other disks alone. If the time runs out the report
 # says the numbers are partial.
 #
+# The space step looks, for at most 60 seconds, at a few fixed places where space can be got back:
+# the Recycle Bin, the Temp folders, downloaded Windows updates, installers in Downloads and
+# Windows.old if it exists. It also notes the 10 biggest files of 50 MB or more in your user
+# profile (file name, size and the name of the folder above it, never a full path). It deletes
+# nothing.
+#
 # Optional upload: with a token the finished report is also sent to PC Checkup. The token is
 # read from, in this order: -Token, the PC_CHECKUP_TOKEN environment variable, or a file named
 # pc-checkup.token next to this script. The site is $DefaultUrl below; -Url or PC_CHECKUP_URL
@@ -210,13 +216,13 @@ function Measure-StorageTree([string]$Path, $Clock, [long]$StopAtMs, $Stats, $Sk
 
 # A folder name as the report shows it: no control characters, pipes or slashes, spaces collapsed,
 # at most 60 characters. Returns $null when nothing usable is left.
-function Get-StorageFolderLabel([string]$Name) {
+function Get-StorageFolderLabel([string]$Name, [int]$Limit = 60) {
     $label = $Name -replace '[\t\r\n\f\v]', ' '
     $label = $label -replace '[\x00-\x1F\x7F|/\\]', ''
     $label = ($label -replace ' {2,}', ' ').Trim()
-    if ($label.Length -gt 60) {
-        $label = $label.Substring(0, 60)
-        if ([char]::IsHighSurrogate($label[59])) { $label = $label.Substring(0, 59) }
+    if ($label.Length -gt $Limit) {
+        $label = $label.Substring(0, $Limit)
+        if ([char]::IsHighSurrogate($label[$Limit - 1])) { $label = $label.Substring(0, $Limit - 1) }
         $label = $label.TrimEnd()
     }
     if ($label -eq '' -or $label -eq '.' -or $label -eq '..') { return $null }
@@ -472,6 +478,207 @@ function Get-StorageBreakdown {
     if ($stats.Bare[1] -gt 0) { $output.Add("noext|$([long][math]::Round($stats.Bare[0] / 1024.0))|$($stats.Bare[1])") }
     $extensions = $stats.Ext.GetEnumerator() | Where-Object { $_.Value -is [array] } | Sort-Object @{ Expression = { $_.Value[0] }; Descending = $true }, @{ Expression = { $_.Key }; Descending = $false } | Select-Object -First 24
     foreach ($item in $extensions) { $output.Add("ext|$($item.Key)|$([long][math]::Round($item.Value[0] / 1024.0))|$($item.Value[1])") }
+    return $output.ToArray()
+}
+
+# How many entries sit directly in a folder, 0 when it cannot be read. With $Prefix only the names
+# that start with it are counted (the Recycle Bin keeps a $R file per deleted item next to a $I note).
+function Get-SpaceEntryCount([string]$Path, [string]$Prefix = '') {
+    try {
+        $count = 0
+        foreach ($entry in (New-Object System.IO.DirectoryInfo($Path)).GetFileSystemInfos()) {
+            if ($Prefix -eq '' -or $entry.Name.StartsWith($Prefix, [System.StringComparison]::OrdinalIgnoreCase)) { $count++ }
+        }
+        return $count
+    } catch {
+        return 0
+    }
+}
+
+# False when a folder cannot be listed, as with Windows.old or the Windows update downloads without
+# admin rights. Only the first entry is asked for, so a huge folder costs nothing.
+function Test-SpaceReadable([string]$Path) {
+    try {
+        [void][System.IO.Directory]::EnumerateFileSystemEntries($Path).GetEnumerator().MoveNext()
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+# Size and count of the exe, msi and iso files directly inside a folder (not deeper). Files that
+# only exist in the cloud are left out. A file with a reparse point is kept: OneDrive files that are
+# on the device have one, and a file link has a size of its own that is too small to matter.
+# Returns $null when the folder cannot be read.
+function Get-SpaceInstallers([string]$Path) {
+    $cloudOnly = 0x400000 -bor 0x40000 -bor 0x1000
+    $bytes = [long]0
+    $count = 0
+    try { $files = (New-Object System.IO.DirectoryInfo($Path)).GetFiles() } catch { return $null }
+    foreach ($file in $files) {
+        try {
+            if ([int]$file.Attributes -band $cloudOnly) { continue }
+            if (@('.exe', '.msi', '.iso') -notcontains $file.Extension.ToLowerInvariant()) { continue }
+            $bytes += [long]$file.Length
+            $count++
+        } catch {
+            continue
+        }
+    }
+    return [pscustomobject]@{ Bytes = $bytes; Count = $count }
+}
+
+# The biggest single files under $Root: at most $Limit, each of at least $MinBytes, until $StopAtMs on
+# $Clock. Hidden and system items, AppData, junctions, links and files that only exist in the cloud
+# are never entered or listed. Names and the folder directly above are kept, never a full path.
+function Get-SpaceBiggestFiles([string]$Root, $Clock, [long]$StopAtMs, [long]$MinBytes, [int]$Limit) {
+    $separators = [char[]]@('\', '/')
+    $directory = [int][System.IO.FileAttributes]::Directory
+    $reparse = [int][System.IO.FileAttributes]::ReparsePoint
+    $hiddenOrSystem = [int][System.IO.FileAttributes]::Hidden -bor [int][System.IO.FileAttributes]::System
+    $cloudOnly = 0x400000 -bor 0x40000 -bor 0x1000
+    $found = New-Object System.Collections.Generic.List[object]
+    $capped = $false
+    $start = New-Object System.IO.DirectoryInfo($Root)
+    $rootFull = $start.FullName.TrimEnd($separators)
+    $stack = New-Object 'System.Collections.Generic.Stack[object]'
+    if (-not ([int]$start.Attributes -band $reparse)) { $stack.Push($start) }
+    while ($stack.Count -gt 0) {
+        if ($Clock.ElapsedMilliseconds -ge $StopAtMs) { $capped = $true; break }
+        $current = $stack.Pop()
+        $atRoot = $current.FullName.TrimEnd($separators) -ieq $rootFull
+        try { $entries = $current.GetFileSystemInfos() } catch { continue }
+        foreach ($entry in $entries) {
+            try {
+                $attributes = [int]$entry.Attributes
+                if ($attributes -band $hiddenOrSystem) { continue }
+                if ($attributes -band $directory) {
+                    if (($attributes -band $reparse) -or ($atRoot -and $entry.Name -ieq 'AppData')) { continue }
+                    $stack.Push($entry)
+                    continue
+                }
+                if ($attributes -band $cloudOnly) { continue }
+                $length = [long]$entry.Length
+                if ($length -lt $MinBytes) { continue }
+                $folder = ''
+                if (-not $atRoot) { $folder = $current.Name }
+                $found.Add([pscustomobject]@{ Name = $entry.Name; Bytes = $length; Folder = $folder })
+                if ($found.Count -gt $Limit * 3) {
+                    $kept = @($found | Sort-Object @{ Expression = { $_.Bytes }; Descending = $true }, Name | Select-Object -First ($Limit * 2))
+                    $found.Clear()
+                    foreach ($item in $kept) { $found.Add($item) }
+                }
+            } catch {
+                continue
+            }
+        }
+    }
+    $ordered = @($found | Sort-Object @{ Expression = { $_.Bytes }; Descending = $true }, Name | Select-Object -First ($Limit * 3))
+    return [pscustomobject]@{ Files = $ordered; Capped = $capped }
+}
+
+# Looks once, read only, in the well-known places where space can be got back and for the biggest
+# files, never longer than the cap (60 seconds by default). Returns the lines of the "Space you can
+# get back" section; progress goes to the screen. Nothing is deleted or changed.
+function Get-SpaceReport {
+    $SpaceCapSeconds = 60
+    if ($env:PCC_SPACE_CAP -match '^[1-9][0-9]{0,4}$') { $SpaceCapSeconds = [int]$env:PCC_SPACE_CAP }
+    $minKb = 51200
+    if ($env:PCC_SPACE_MIN_KB -match '^[1-9][0-9]{0,8}$') { $minKb = [long]$env:PCC_SPACE_MIN_KB }
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
+    $capMs = [long]$SpaceCapSeconds * 1000
+    $capped = $false
+    $profilePath = $env:PCC_SPACE_PROFILE
+    if (-not $profilePath) { $profilePath = $env:USERPROFILE }
+    $windowsPath = $env:PCC_SPACE_WINDIR
+    if (-not $windowsPath) { $windowsPath = $env:SystemRoot }
+    $driveRoot = $env:PCC_SPACE_DRIVE
+    if (-not $driveRoot) { $driveRoot = $env:SystemDrive + '\' }
+    $recycle = $env:PCC_SPACE_RECYCLE
+    if (-not $recycle) {
+        try { $recycle = $driveRoot.TrimEnd('\') + '\$Recycle.Bin\' + [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch { $recycle = '' }
+    }
+    $temp = $env:PCC_SPACE_TEMP
+    if (-not $temp) { $temp = $env:TEMP }
+
+    Write-Host "Looking for space you can get back, stopping after $SpaceCapSeconds seconds at the latest..."
+    Write-Host '  Checking the Recycle Bin, temporary files and installers...'
+    $candidates = @(
+        @{ Key = 'recycle'; Path = $recycle; Prefix = '$R' },
+        @{ Key = 'temp'; Path = $temp; Prefix = '' },
+        @{ Key = 'systemtemp'; Path = (Join-Path $windowsPath 'Temp'); Prefix = '' },
+        @{ Key = 'updates'; Path = (Join-Path (Join-Path $windowsPath 'SoftwareDistribution') 'Download'); Prefix = '' },
+        @{ Key = 'installers'; Path = (Join-Path $profilePath 'Downloads'); Prefix = '' },
+        @{ Key = 'windowsold'; Path = (Join-Path $driveRoot 'Windows.old'); Prefix = '' }
+    )
+    $present = @($candidates | Where-Object { $_.Path -and (Test-Path -LiteralPath $_.Path -PathType Container) -and (Test-StorageFixedPath $_.Path) })
+    $output = New-Object System.Collections.Generic.List[string]
+    $lines = New-Object System.Collections.Generic.List[string]
+    $placesEnd = [long]($capMs * 40 / 100)
+    $left = [double]$present.Count
+    foreach ($place in $present) {
+        $slice = Get-StorageSlice $clock $placesEnd 1 $left
+        $left -= 1
+        if ($slice -le 0) { $capped = $true; continue }
+        if (-not (Test-SpaceReadable $place.Path)) {
+            $lines.Add("unreadable|$($place.Key)")
+            continue
+        }
+        if ($place.Key -eq 'installers') {
+            $found = Get-SpaceInstallers $place.Path
+            if ($found -and $found.Count -gt 0) { $lines.Add("reclaim|installers|$([long][math]::Round($found.Bytes / 1024.0))|$($found.Count)") }
+            continue
+        }
+        $result = Measure-StorageTree $place.Path $clock ($clock.ElapsedMilliseconds + $slice) $null $null
+        if ($result.Capped) { $capped = $true; continue }
+        $lines.Add("reclaim|$($place.Key)|$([long][math]::Round($result.Bytes / 1024.0))|$(Get-SpaceEntryCount $place.Path $place.Prefix)")
+    }
+
+    Write-Host '  Looking for the biggest files in your user folder...'
+    $files = @()
+    if ((Test-Path -LiteralPath $profilePath -PathType Container) -and (Test-StorageFixedPath $profilePath)) {
+        $kinds = @{}
+        $groups = [ordered]@{
+            Photos    = 'jpg jpeg png gif heic heif bmp tif tiff webp raw cr2 nef arw dng'
+            Videos    = 'mp4 mov avi mkv wmv m4v webm flv mpg mpeg 3gp'
+            Music     = 'mp3 m4a wav flac aac ogg wma aiff aif opus'
+            Documents = 'pdf doc docx xls xlsx ppt pptx txt rtf odt ods odp csv pages numbers key md epub'
+            Archives  = 'zip rar 7z tar gz tgz bz2 xz iso zst cab'
+            Apps      = 'exe msi dmg pkg app ipa apk appx msix'
+        }
+        foreach ($kind in $groups.Keys) {
+            foreach ($extension in $groups[$kind].Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)) { $kinds[$extension] = $kind }
+        }
+        $search = Get-SpaceBiggestFiles $profilePath $clock $capMs ([long]$minKb * 1024) 10
+        if ($search.Capped) { $capped = $true }
+        foreach ($file in $search.Files) {
+            if ($files.Count -ge 10) { break }
+            $name = Get-StorageFolderLabel $file.Name 80
+            if ($null -eq $name) { continue }
+            $folder = ''
+            if ($file.Folder -ne '') { $folder = [string](Get-StorageFolderLabel $file.Folder 60) }
+            $dot = $file.Name.LastIndexOf('.')
+            $extension = ''
+            if ($dot -gt 0 -and $dot -lt $file.Name.Length - 1) { $extension = $file.Name.Substring($dot + 1).ToLowerInvariant() }
+            $kind = 'Other'
+            if ($extension -ne '' -and $kinds.ContainsKey($extension)) { $kind = $kinds[$extension] }
+            $kb = [long][math]::Round($file.Bytes / 1024.0)
+            if ($kb -lt 1) { continue }
+            $files += "file|$name|$kb|$kind|$folder"
+        }
+    }
+
+    $scan = 'complete'
+    if ($capped) {
+        $scan = "partial (time limit of $SpaceCapSeconds seconds reached)"
+        Write-Host '  The time limit was reached, so these numbers are partial.'
+    }
+    $output.Add("scan: $scan")
+    $output.Add("seconds: $([int][math]::Floor($clock.Elapsed.TotalSeconds))")
+    $output.Add("limit: $SpaceCapSeconds")
+    $output.Add('format: 1')
+    foreach ($line in $lines) { $output.Add($line) }
+    foreach ($line in $files) { $output.Add($line) }
     return $output.ToArray()
 }
 
@@ -1290,6 +1497,10 @@ Add-Section 'Storage (volumes and free space)' {
 $storageBreakdown = Try-Run { Get-StorageBreakdown }
 Add-Section 'Storage breakdown' {
     if ($storageBreakdown.Value) { $storageBreakdown.Value } else { $storageBreakdown.Note }
+}
+$spaceReport = Try-Run { Get-SpaceReport }
+Add-Section 'Space you can get back' {
+    if ($spaceReport.Value) { $spaceReport.Value } else { $spaceReport.Note }
 }
 Add-Section 'Disk wear and errors (SMART counters, needs admin)' {
     if ($reliability.Value) { $reliability.Value | Format-Table -AutoSize } else { $reliability.Note }
