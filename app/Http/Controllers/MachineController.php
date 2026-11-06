@@ -7,6 +7,7 @@ namespace App\Http\Controllers;
 use App\Actions\Machines\BuildReportInsights;
 use App\Actions\Machines\CompareLatestReports;
 use App\Actions\Machines\CreateManualMachine;
+use App\Actions\Machines\ForgetMachine;
 use App\Http\Requests\Machines\StoreMachineRequest;
 use App\Models\Client;
 use App\Models\Machine;
@@ -85,6 +86,17 @@ final class MachineController extends Controller
             : ['type' => 'info', 'message' => 'This machine was already registered, so nothing was changed.']);
 
         return to_route('machines.show', $machine);
+    }
+
+    public function destroy(Machine $machine, ForgetMachine $action): RedirectResponse
+    {
+        $this->authorize('delete', $machine);
+
+        $action->handle($machine);
+
+        Inertia::flash('toast', ['type' => 'success', 'message' => 'Machine and all of its reports deleted permanently.']);
+
+        return to_route('machines.index');
     }
 
     public function summary(Machine $machine, ChecklistResolver $resolver): Response

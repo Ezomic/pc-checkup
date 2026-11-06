@@ -903,6 +903,7 @@ function Invoke-ReportUpload([string]$Markdown, $Found, $FoundCode, [string]$Giv
 
 $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
+Write-Host 'NL: Deze scan leest alleen hardware, schijfgebruik, map- en appnamen en beveiligingsinstellingen, wijzigt niets en verstuurt het rapport alleen als u een scancode invoert.'; Write-Host "EN: This scan only reads hardware, disk use, folder and app names and security settings, changes nothing, and uploads the report only if you enter a scan code. $DefaultUrl/privacy"
 $found = $null
 $foundCode = $null
 try { $found = Get-UploadToken $Token $PSScriptRoot } catch { Write-Host "Upload skipped: could not read the token ($(One-Line $_.Exception.Message))." }

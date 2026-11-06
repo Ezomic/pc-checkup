@@ -19,6 +19,9 @@ vi.mock('@inertiajs/vue3', () => ({
 vi.mock('@/routes', () => ({
     login: () => '/login',
     dashboard: () => '/dashboard',
+    privacy: (args: { query: { lang: string } }) => ({
+        url: '/privacy?lang=' + args.query.lang,
+    }),
 }));
 vi.mock('@/routes/scripts', () => ({
     download: (script: string) => ({ url: `/scripts/${script}` }),
@@ -51,7 +54,13 @@ describe('Welcome', () => {
 
         const hrefs = wrapper.findAll('a').map((a) => a.attributes('href'));
 
-        expect(hrefs).toEqual(['/login', '/scripts/windows', '/scripts/mac']);
+        expect(hrefs).toEqual([
+            '/login',
+            '/scripts/windows',
+            '/scripts/mac',
+            '/privacy?lang=en',
+            '/privacy?lang=nl',
+        ]);
     });
 
     it('shows the matching run command for the chosen platform', async () => {

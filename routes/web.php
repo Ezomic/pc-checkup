@@ -18,6 +18,7 @@ use App\Http\Controllers\MachineRustDeskController;
 use App\Http\Controllers\MachineStatusController;
 use App\Http\Controllers\NoteController;
 use App\Http\Controllers\PhotoController;
+use App\Http\Controllers\PrivacyController;
 use App\Http\Controllers\ReportImportController;
 use App\Http\Controllers\RustDeskInstallerController;
 use App\Http\Controllers\ScanController;
@@ -31,6 +32,8 @@ use Inertia\Inertia;
 Route::get('/', fn () => Inertia::render('Welcome'))->name('home');
 
 Route::get('health', HealthController::class)->name('health');
+
+Route::get('privacy', PrivacyController::class)->middleware(SetShareLocale::class)->name('privacy');
 
 Route::get('scripts/{script}', CheckupScriptController::class)->name('scripts.download');
 
@@ -69,6 +72,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('machines/create', [MachineController::class, 'create'])->name('machines.create');
     Route::post('machines', [MachineController::class, 'store'])->name('machines.store');
     Route::get('machines/{machine}', [MachineController::class, 'show'])->name('machines.show');
+    Route::delete('machines/{machine}', [MachineController::class, 'destroy'])->withTrashed()->name('machines.destroy');
     Route::get('machines/{machine}/history', MachineHistoryController::class)->name('machines.history');
     Route::get('machines/{machine}/summary', [MachineController::class, 'summary'])->name('machines.summary');
     Route::get('machines/{machine}/before-after', [MachineBeforeAfterController::class, 'show'])->name('machines.before-after');
