@@ -18,6 +18,7 @@ use App\Services\Reports\ReportFacts;
 use App\Services\Reports\ReportFreshness;
 use App\Services\Reports\ReportMachineAge;
 use App\Services\Reports\ReportSections;
+use App\Services\Reports\ReportUpdates;
 use App\Services\Reports\ReportVerdict;
 use App\Services\Reports\ReportWindowsSecurity;
 use Illuminate\Support\Facades\Date;
@@ -165,6 +166,7 @@ final readonly class NeedsAttention
             $this->age($sections),
             ...$this->tagged($drives->reasons($sections), AttentionFilter::Drive),
             ...$this->tagged($security->reasons($sections), null),
+            ...$this->tagged((new ReportUpdates)->reasons($sections), null),
             ...$this->flags($report->flags, [...$drives->coveredFlags($sections), ...$security->coveredFlags($sections)]),
             $this->freshness->isOlderThan($report, self::RESCAN_AFTER_DAYS) ? $this->reason(AttentionLevel::Soon, 'Last scanned more than 6 months ago', AttentionFilter::Stale) : null,
         ]));

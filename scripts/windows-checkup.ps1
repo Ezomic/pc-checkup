@@ -954,6 +954,33 @@ function Get-CrashAppLines([string[]]$Names, [datetime]$Today, [int]$Days, [bool
     return $lines.ToArray()
 }
 
+# The lines of the "Devices with problems (Device Manager)" section. Only the friendly name and the
+# problem code are kept: hardware ids carry serial numbers, so they are never printed. Disabled (22)
+# and absent or unplugged (24, 45) devices are not problems. $Failure is set when the query failed
+# or timed out.
+function Get-DeviceProblemLines($Devices, $Failure) {
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('format: 1')
+    if ($Failure) {
+        $lines.Add('scan: could not check')
+        return $lines.ToArray()
+    }
+    $rows = New-Object System.Collections.Generic.List[string]
+    foreach ($device in @($Devices)) {
+        if ($null -eq $device) { continue }
+        $code = [int]$device.ConfigManagerErrorCode
+        if ($code -eq 0 -or $code -eq 22 -or $code -eq 24 -or $code -eq 45) { continue }
+        $name = (([string]$device.Name) -replace '[\x00-\x1f\x7f|\\/]', '').Trim()
+        if ($name.Length -gt 80) { $name = $name.Substring(0, 80) }
+        if (-not $name) { $name = 'Unknown device' }
+        $rows.Add("device|$name|$code")
+    }
+    $lines.Add('scan: complete')
+    $lines.Add("total: $($rows.Count)")
+    $rows | Select-Object -First 20 | ForEach-Object { $lines.Add($_) }
+    return $lines.ToArray()
+}
+
 function Get-UsableSerial($Value) {
     $text = One-Line $Value
     if ($text -eq '' -or $PlaceholderSerials -contains $text.ToLowerInvariant() -or $text -cmatch '^(.)\1*$') { return '' }
@@ -1841,7 +1868,7 @@ if ($pendingUpdates.Value -and @($pendingUpdates.Value).Count -gt 0) { Add-Flag 
 $startup = Try-Run { @(Get-CimInstance Win32_StartupCommand) }
 if ($startup.Value -and @($startup.Value).Count -gt 15) { Add-Flag "$(@($startup.Value).Count) programs start with Windows (slows boot)." }
 
-$badDevices = Try-Run { @(Get-CimInstance Win32_PnPEntity -Filter 'ConfigManagerErrorCode <> 0 AND ConfigManagerErrorCode <> 22 AND ConfigManagerErrorCode <> 24') }
+$badDevices = Try-Run { @(Get-CimInstance Win32_PnPEntity -Filter 'ConfigManagerErrorCode <> 0 AND ConfigManagerErrorCode <> 22 AND ConfigManagerErrorCode <> 24 AND ConfigManagerErrorCode <> 45' -OperationTimeoutSec 30 -ErrorAction Stop) }
 if ($badDevices.Value -and @($badDevices.Value).Count -gt 0) { Add-Flag "$(@($badDevices.Value).Count) device(s) report a driver problem in Device Manager (see Devices with problems section)." }
 
 $since = (Get-Date).AddDays(-30)
@@ -2124,7 +2151,7 @@ Add-Section 'Startup programs' {
     if ($startup.Value) { $startup.Value | Select-Object Name, Command, Location | Format-Table -AutoSize -Wrap } else { $startup.Note }
 }
 Add-Section 'Devices with problems (Device Manager)' {
-    if ($badDevices.Value -and @($badDevices.Value).Count -gt 0) { $badDevices.Value | Select-Object Name, DeviceID, ConfigManagerErrorCode | Format-Table -AutoSize -Wrap } elseif ($badDevices.Note) { $badDevices.Note } else { '(none)' }
+    Get-DeviceProblemLines $badDevices.Value $badDevices.Note
 }
 Add-Section 'Listening network ports' {
     $names = @{}
