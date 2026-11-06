@@ -63,6 +63,8 @@ function render(machines: MachineCard[]) {
                 urgent: 0,
                 rows: [],
                 showing_all: false,
+                filter: null,
+                filters: [],
             },
         },
     });

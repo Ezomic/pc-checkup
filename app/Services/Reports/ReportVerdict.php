@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Services\Reports;
 
 use App\Services\Flags\FlagAdvisor;
-use Carbon\CarbonImmutable;
 
 /**
  * @phpstan-import-type Row from ReportDetails
@@ -33,8 +32,6 @@ final readonly class ReportVerdict
     private const AGE_STRONG_YEARS = 9;
 
     private const AGE_WEAK_YEARS = 6;
-
-    private const AGE_SANE_MAX_YEARS = 40;
 
     private const BATTERY_CAPACITY_STRONG_PERCENT = 60;
 
@@ -180,17 +177,9 @@ final readonly class ReportVerdict
      */
     private function age(ReportSections $sections): ?array
     {
-        $model = $sections->header('model');
-        $identifier = $this->capture('/\(([A-Za-z]+\d+,\d+)\)$/', $model);
-        $year = $identifier === null ? null : MacModelYears::year($identifier);
+        $years = ReportMachineAge::modelYears($sections->header('model'));
 
-        if ($year === null) {
-            return null;
-        }
-
-        $years = CarbonImmutable::now()->year - $year;
-
-        if ($years < 0 || $years > self::AGE_SANE_MAX_YEARS) {
+        if ($years === null) {
             return null;
         }
 

@@ -95,7 +95,10 @@ it('stays empty for a healthy machine', function () {
     $user = User::factory()->create();
     attentionMachine($user);
 
-    expect(attentionFor($user))->toBe(['total' => 0, 'urgent' => 0, 'rows' => [], 'showing_all' => false]);
+    $found = attentionFor($user);
+
+    expect(array_diff_key($found, ['filters' => true]))->toBe(['total' => 0, 'urgent' => 0, 'rows' => [], 'showing_all' => false, 'filter' => null])
+        ->and(array_sum(attentionCounts($found)))->toBe(0);
 });
 
 it('treats the unsupported operating system as urgent', function () {
@@ -431,5 +434,198 @@ describe('backups', function () {
 
     it('does not raise anything for a report from before the step existed', function () {
         expect(attentionReasons(attentionMarkdown()))->toBe([]);
+    });
+});
+
+function attentionBios(string $date): string
+{
+    return attentionMarkdown(['Model' => 'Contoso Voyager 14', 'macOS' => null, 'Windows' => 'Windows 11 Pro 23H2'])
+        ."\n## BIOS and firmware age\n\n```\nBIOS release date: {$date}\n```\n";
+}
+
+/**
+ * @param  array<string, mixed>  $overview
+ * @return array<string, int>
+ */
+function attentionCounts(array $overview): array
+{
+    return array_column($overview['filters'], 'count', 'key');
+}
+
+describe('age', function () {
+    it('asks to plan a replacement soon for a Mac of seven years or more', function (string $model, ?string $text) {
+        expect(attentionReasons(attentionMarkdown(['Model' => $model])))->toBe($text === null ? [] : [$text]);
+    })->with([
+        'six years' => ['Mac mini (Macmini9,1)', null],
+        'seven years' => ['MacBook Pro (MacBookPro15,4)', 'About 7 years old'],
+        'eight years' => ['Mac mini (Macmini8,1)', 'About 8 years old'],
+        'unknown identifier' => ['Mac (MacBookPro99,9)', null],
+    ]);
+
+    it('reads a PC age from its firmware date at the seven year boundary', function (string $date, ?string $text) {
+        expect(attentionReasons(attentionBios($date)))->toBe($text === null ? [] : [$text]);
+    })->with([
+        'a day short' => ['2019-11-07', null],
+        'exactly seven years' => ['2019-11-06', 'At least 7 years old, going by its firmware date'],
+        'ten years' => ['2016-03-01', 'At least 10 years old, going by its firmware date'],
+        'in the future' => ['2030-01-01', null],
+        'unreadable' => ['could not check', null],
+    ]);
+
+    it('rates age as soon', function () {
+        expect(attentionRow(attentionMarkdown(['Model' => 'Mac mini (Macmini8,1)']))['level'] ?? null)->toBe('soon');
+    });
+});
+
+describe('filters', function () {
+    beforeEach(function () {
+        $this->user = User::factory()->create();
+        attentionMachine($this->user, attentionMarkdown(['macOS' => '10.14.6']), [ATTENTION_UNSUPPORTED], name: 'Old system');
+        attentionMachine($this->user, attentionMarkdown(), ["Disk SMART status is 'Failing'."], name: 'Failing disk');
+        attentionMachine($this->user, attentionMarkdown(['Model' => 'Mac mini (Macmini8,1)']), name: 'Old mini');
+        attentionMachine($this->user, attentionBackups("timemachine: not set up\ntimemachine-last: none\nicloud-folders: none"), name: 'No backup');
+        attentionMachine($this->user, scanned: CarbonImmutable::now()->subYear(), name: 'Forgotten');
+        attentionMachine($this->user, attentionMarkdown(['Free disk' => '4%']), name: 'Full disk');
+        attentionMachine($this->user, false, name: 'Never scanned');
+    });
+
+    it('lists only the machines with the chosen reason', function (string $filter, array $names) {
+        $found = attentionFor($this->user, "?reason={$filter}");
+
+        expect(array_column($found['rows'], 'name'))->toBe($names)
+            ->and($found['total'])->toBe(count($names))
+            ->and($found['filter'])->toBe($filter);
+    })->with([
+        'unsupported system' => ['os', ['Old system']],
+        'drive problems' => ['drive', ['Failing disk']],
+        'seven years or older' => ['age', ['Old mini']],
+        'no backup' => ['backup', ['No backup']],
+        'not scanned in six months' => ['stale', ['Forgotten']],
+    ]);
+
+    it('counts every reason across all machines whichever filter is on', function (string $query) {
+        $found = attentionFor($this->user, $query);
+
+        expect(attentionCounts($found))->toBe(['os' => 1, 'drive' => 1, 'age' => 1, 'backup' => 1, 'stale' => 1])
+            ->and(array_column($found['filters'], 'label'))->toBe(['No security updates', 'Drive problems', '7+ years old', 'No recent backup', 'Not scanned in 6 months']);
+    })->with(['', '?reason=age', '?reason=stale&attention=all']);
+
+    it('shows everything for a missing or unknown filter', function (string $query) {
+        $found = attentionFor($this->user, $query);
+
+        expect($found['total'])->toBe(7)
+            ->and($found['filter'])->toBeNull();
+    })->with([
+        'none' => [''],
+        'empty' => ['?reason='],
+        'unknown' => ['?reason=bogus'],
+        'wrong case' => ['?reason=AGE'],
+        'an array' => ['?reason[]=age'],
+        'markup' => ['?reason=%3Cscript%3E'],
+    ]);
+
+    it('says when no machine has the chosen reason', function () {
+        $user = User::factory()->create();
+        attentionMachine($user, attentionMarkdown(['Free disk' => '4%']));
+
+        $found = attentionFor($user, '?reason=age');
+
+        expect($found['rows'])->toBe([])
+            ->and($found['total'])->toBe(0)
+            ->and($found['filter'])->toBe('age')
+            ->and(attentionCounts($found))->toBe(['os' => 0, 'drive' => 0, 'age' => 0, 'backup' => 0, 'stale' => 0]);
+    });
+});
+
+describe('filtered rows', function () {
+    it('shows the chosen reason even when more severe ones come first', function () {
+        $user = User::factory()->create();
+        attentionMachine($user, attentionMarkdown(['Model' => 'Mac mini (Macmini8,1)', 'Free disk' => '4%']), ['Defender real-time protection is OFF.', 'Gatekeeper is DISABLED.']);
+
+        $plain = attentionFor($user)['rows'][0];
+        $filtered = attentionFor($user, '?reason=age')['rows'][0];
+
+        expect(array_column($plain['reasons'], 'text'))->not->toContain('About 8 years old')
+            ->and($filtered['reasons'][0])->toBe(['level' => 'soon', 'text' => 'About 8 years old'])
+            ->and($filtered['reasons'])->toHaveCount(2)
+            ->and($filtered['reason_count'])->toBe($plain['reason_count'])
+            ->and($filtered['level'])->toBe('urgent');
+    });
+
+    it('caps a filtered list at twenty unless asked for all', function () {
+        $user = User::factory()->create();
+        foreach (range(1, 22) as $number) {
+            attentionMachine($user, attentionMarkdown(['Model' => 'Mac mini (Macmini8,1)']), name: sprintf('Old %02d', $number));
+        }
+        attentionMachine($user, attentionMarkdown(['Free disk' => '4%']), name: 'Full');
+
+        $capped = attentionFor($user, '?reason=age');
+
+        expect($capped['rows'])->toHaveCount(20)
+            ->and($capped['total'])->toBe(22)
+            ->and($capped['showing_all'])->toBeFalse()
+            ->and(attentionFor($user, '?reason=age&attention=all')['rows'])->toHaveCount(22);
+    });
+
+    it('counts a drive problem from the flags of a report without the health section', function (string $flag) {
+        $user = User::factory()->create();
+        attentionMachine($user, attentionMarkdown(), [$flag]);
+
+        expect(array_column(attentionFor($user, '?reason=drive')['rows'], 'name'))->toBe(['Alpha']);
+    })->with([
+        'Mac SMART' => ["Disk SMART status is 'Failing'."],
+        'Windows health' => ["Disk 'Samsung SSD' health is 'Warning'."],
+        'disk errors' => ['3 disk error event(s) in the last 30 days (bad blocks or controller errors).'],
+        'SSD wear' => ['Disk 0 SSD wear is 91% (near end of life).'],
+    ]);
+
+    it('counts a drive problem from the Windows health section', function () {
+        $user = User::factory()->create();
+        attentionMachine($user, attentionMarkdown()."\n## Windows health and security\n\n```\nDrive 1: Samsung SSD | type SSD | bus NVMe | health Unhealthy\n```\n");
+
+        expect(attentionCounts(attentionFor($user))['drive'])->toBe(1);
+    });
+
+    it('does not count free disk space as a drive problem', function () {
+        $user = User::factory()->create();
+        attentionMachine($user, attentionMarkdown(['Free disk' => '4%']), ['Only about 4% of disk is free.']);
+
+        expect(attentionCounts(attentionFor($user))['drive'])->toBe(0);
+    });
+
+    it('counts the no backup flag of a report from before backup freshness existed', function () {
+        $user = User::factory()->create();
+        attentionMachine($user, attentionMarkdown(), ['No backup was found (Time Machine is not set up).']);
+        attentionMachine($user, attentionBackups("timemachine: set up\ntimemachine-last: 2026-11-05"), ['No backup was found (Time Machine is not set up).'], name: 'Fresh card wins');
+
+        $found = attentionFor($user, '?reason=backup');
+
+        expect(array_column($found['rows'], 'name'))->toBe(['Alpha'])
+            ->and(array_column($found['rows'][0]['reasons'], 'text'))->toBe(['No recent backup']);
+    });
+
+    it('does not count a machine that was never scanned as not scanned in six months', function () {
+        $user = User::factory()->create();
+        attentionMachine($user, false);
+
+        expect(attentionCounts(attentionFor($user))['stale'])->toBe(0);
+    });
+
+    it('never counts or lists another account', function () {
+        $user = User::factory()->create();
+        $other = User::factory()->create();
+        $client = Client::factory()->for($other)->create();
+        foreach (['os' => [ATTENTION_UNSUPPORTED], 'drive' => ["Disk SMART status is 'Failing'."]] as $name => $flags) {
+            attentionMachine($other, attentionMarkdown(['Model' => 'Mac mini (Macmini8,1)']), $flags, name: "Theirs {$name}", scanned: CarbonImmutable::now()->subYear())
+                ->forceFill(['client_id' => $client->id])->save();
+        }
+        attentionMachine($user, attentionMarkdown(['Free disk' => '4%']), name: 'Mine');
+
+        foreach (['', '?reason=os', '?reason=drive', '?reason=age', '?reason=stale&attention=all'] as $query) {
+            $found = attentionFor($user, $query);
+
+            expect(array_column($found['rows'], 'name'))->not->toContain('Theirs os')->not->toContain('Theirs drive')
+                ->and(array_sum(attentionCounts($found)))->toBe(0);
+        }
     });
 });
