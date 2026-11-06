@@ -156,3 +156,22 @@ reboot    ~                         Thu Oct 29 21:41
 wtmp begins Thu Oct  1 08:00
 kern.boottime: { sec = 1793434364, usec = 123456 } Sat Oct 31 09:12:44 2026
 ```
+
+## Space you can get back
+
+```
+scan: complete
+seconds: 9
+limit: 60
+format: 1
+reclaim|trash|1258291|31
+reclaim|caches|3145728|58
+reclaim|installers|1887437|4
+reclaim|backups|9437184|3
+reclaim|derived|419430|2
+snapshots|4
+file|Wedding video 2019.mov|6291456|Videos|Movies
+file|Windows 10 install.iso|5242880|Archives|Downloads
+file|Photos export.zip|2306867|Archives|Documents
+file|Thesis backup.pdf|921600|Documents|Documents
+```

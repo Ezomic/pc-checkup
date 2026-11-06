@@ -409,6 +409,44 @@ describe('DetailCards', () => {
         expect(empty.find('[data-test="detail-summary"]').exists()).toBe(false);
     });
 
+    it('draws two bars that share a label, such as the same file name in two folders', () => {
+        const wrapper = mount(DetailCards, {
+            props: {
+                cards: [
+                    card({
+                        id: 'reclaimable',
+                        title: 'Space you can get back',
+                        rows: [],
+                        bars: [
+                            {
+                                title: 'Biggest files',
+                                items: [
+                                    {
+                                        label: 'video.mp4',
+                                        value: '4 GB',
+                                        detail: 'Videos, in Movies',
+                                        share: 100,
+                                    },
+                                    {
+                                        label: 'video.mp4',
+                                        value: '2 GB',
+                                        detail: 'Videos, in Downloads',
+                                        share: 50,
+                                    },
+                                ],
+                            },
+                        ],
+                    }),
+                ],
+            },
+        });
+        const text = wrapper.get('[data-test="detail-bars"]').text();
+
+        expect(wrapper.findAll('[data-test="detail-bar"]')).toHaveLength(2);
+        expect(text).toContain('Videos, in Movies');
+        expect(text).toContain('Videos, in Downloads');
+    });
+
     it('draws no bars or notes for a card without them', () => {
         const wrapper = mount(DetailCards, { props: { cards: [card()] } });
 
