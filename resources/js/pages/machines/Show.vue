@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
-import { ArrowLeftRight, FileText, Printer } from '@lucide/vue';
+import { ArrowLeftRight, FileText, History, Printer } from '@lucide/vue';
 import { computed } from 'vue';
 import AdviceList from '@/components/machines/AdviceList.vue';
 import AfterFixSection from '@/components/machines/AfterFixSection.vue';
@@ -9,6 +9,7 @@ import ChangesSection from '@/components/machines/ChangesSection.vue';
 import ChecklistSection from '@/components/machines/ChecklistSection.vue';
 import ClientSection from '@/components/machines/ClientSection.vue';
 import DetailCards from '@/components/machines/DetailCards.vue';
+import EstimateSection from '@/components/machines/EstimateSection.vue';
 import NotesSection from '@/components/machines/NotesSection.vue';
 import PhotosSection from '@/components/machines/PhotosSection.vue';
 import RemoteSupportSection from '@/components/machines/RemoteSupportSection.vue';
@@ -17,21 +18,25 @@ import StaleNote from '@/components/machines/StaleNote.vue';
 import StatusBadge from '@/components/machines/StatusBadge.vue';
 import StatusSection from '@/components/machines/StatusSection.vue';
 import TrendsCard from '@/components/machines/TrendsCard.vue';
+import WarrantySection from '@/components/machines/WarrantySection.vue';
 import { Button } from '@/components/ui/button';
 import { checkedOn, scannedAgo } from '@/lib/scannedAgo';
-import { beforeAfter, index, summary } from '@/routes/machines';
+import { beforeAfter, history, index, summary } from '@/routes/machines';
 import type {
     AfterFixReport,
     ChecklistItem,
     ClientOption,
     DetailCard,
+    Estimate,
     LatestReport,
     MachineBenchmark,
     MachineNote,
     MachinePhoto,
     OwnerMachineDetails,
+    PriceItem,
     ReportChanges,
     Trend,
+    Warranty,
 } from '@/types';
 
 const props = defineProps<{
@@ -41,6 +46,10 @@ const props = defineProps<{
     report: LatestReport | null;
     changes: ReportChanges | null;
     detailCards: DetailCard[];
+    warranty: Warranty | null;
+    estimate: Estimate | null;
+    priceItems: PriceItem[];
+    vatPercent: number;
     trends: Trend[];
     afterFix: AfterFixReport | null;
     benchmark: MachineBenchmark | null;
@@ -138,6 +147,12 @@ defineOptions({
                     Print / save as PDF
                 </Button>
                 <Button as-child size="sm" variant="outline">
+                    <Link :href="history(machine.id)" data-test="history-link">
+                        <History class="size-4" />
+                        Scan history
+                    </Link>
+                </Button>
+                <Button as-child size="sm" variant="outline">
                     <Link :href="summary(machine.id)">
                         <FileText class="size-4" />
                         Printable summary
@@ -201,6 +216,14 @@ defineOptions({
             <RemoteSupportSection
                 :machine-id="machine.id"
                 :rustdesk-id="machine.rustdesk_id"
+            />
+            <WarrantySection v-if="warranty" :warranty="warranty" />
+            <EstimateSection
+                v-if="priceItems.length > 0 || estimate"
+                :machine-title="title"
+                :items="priceItems"
+                :estimate="estimate"
+                :vat-percent="vatPercent"
             />
             <ClientSection
                 :machine-id="machine.id"
