@@ -175,6 +175,16 @@ describe('the Mac apps step on a fake Applications tree', function () {
             ->and($found['apps'][0][1])->toBe('Old Editor');
     });
 
+    it('lists an app that is installed in both application folders once, with the bigger size', function () {
+        $base = uasTree();
+        $meta = uasMdls('com.old.editor', '2023-05-01 10:11:12 +0000', '2021-01-01 10:11:12 +0000');
+        uasApp($base.'/home/Applications/old editor.app', 500, $meta);
+        $found = uasParse(uasRun($base)->throw()->output());
+
+        expect(array_count_values(array_map('strtolower', array_column($found['apps'], 1)))['old editor'])->toBe(1)
+            ->and((int) $found['apps'][0][2])->toBeGreaterThanOrEqual(3000);
+    });
+
     it('applies the 100 MB limit by default', function () {
         $found = uasParse(uasRun(uasTree(), ['PCC_APPS_MIN_KB' => null])->throw()->output());
 

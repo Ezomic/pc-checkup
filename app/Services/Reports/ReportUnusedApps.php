@@ -157,7 +157,7 @@ final readonly class ReportUnusedApps
             ...($more > 0 ? [number_format($more).' more '.($more === 1 ? 'app is' : 'apps are').' not listed: only the biggest '.self::ROW_LIMIT.' are shown.'] : []),
             ...($partial ? ['The scan stopped at its time limit, so there may be more apps than these.'] : []),
             ...($hasUnknown ? ['Without a record of use the scan cannot be sure an app is unused. Check before you remove one.'] : []),
-            'Apps of '.self::MINIMUM_MB.' MB or more are listed. Apple and Microsoft apps and system components are left out.',
+            'Apps of '.self::MINIMUM_MB.' MB or more are listed. Apple apps on a Mac, and Microsoft and Windows components on Windows, are left out.',
             'Only you see these app names: they are not on the pages you share with clients.',
         ];
     }

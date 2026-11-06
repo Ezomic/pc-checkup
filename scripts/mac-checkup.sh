@@ -1446,15 +1446,17 @@ pcc_apps_rows() {
       return undef if $text eq q() || $text eq q(.) || $text eq q(..);
       return encode("UTF-8", $text);
     }
-    my @apps;
+    my %seen;
     while (my $line = <STDIN>) {
       chomp $line;
       next unless $line =~ m{^(\d+)\t([^\t]+)\t(.+)$};
       my ($kb, $last, $path) = ($1, $2, $3);
       my $name = clean((split m{/}, $path)[-1] // q());
-      push @apps, [$kb, $last, $name] if defined $name;
+      next unless defined $name;
+      my $key = lc $name;
+      $seen{$key} = [$kb, $last, $name] if !$seen{$key} || $seen{$key}->[0] < $kb;
     }
-    @apps = sort { $b->[0] <=> $a->[0] or $a->[2] cmp $b->[2] } @apps;
+    my @apps = sort { $b->[0] <=> $a->[0] or $a->[2] cmp $b->[2] } values %seen;
     my $printed = 0;
     for my $app (@apps) {
       last if $printed >= $limit;
@@ -1479,10 +1481,12 @@ pcc_apps_report() {
   cutoff="$((${today%%-*} - 1))-${today#*-}"
   list=$(mktemp)
   found=$(mktemp)
+  trap 'rm -f "$list" "$found"; exit 130' INT TERM
   echo "Looking for apps you may not need, stopping after $cap seconds at the latest..." >&2
   for dir in "${PCC_APPS_DIR:-/Applications}" "${home%/}/Applications"; do
     [ -d "$dir" ] || continue
     perl -e 'alarm shift; exec @ARGV' 10 find "$dir" -maxdepth 2 \( -type d -name Utilities -prune \) -o \( -type d -name '*.app' -prune -print \) 2> /dev/null >> "$list"
+    if [ $? = 142 ]; then scan="partial (time limit of $cap seconds reached)"; fi
   done
   while IFS= read -r app; do
     if [ $((SECONDS - start)) -ge "$cap" ]; then scan="partial (time limit of $cap seconds reached)"; break; fi
@@ -1492,6 +1496,7 @@ pcc_apps_report() {
     if [ "$rc" = 142 ]; then scan="partial (time limit of $cap seconds reached)"; continue; fi
     [ -n "$last" ] || continue
     secs=$((cap - (SECONDS - start)))
+    if [ "$secs" -lt 1 ]; then scan="partial (time limit of $cap seconds reached)"; break; fi
     if [ "$secs" -gt 20 ]; then secs=20; fi
     kb=$(perl -e 'alarm shift; exec @ARGV' "$secs" du -sk "$app" 2> /dev/null | awk 'NR==1 && $1 ~ /^[0-9]+$/ {print $1}')
     if [ -z "$kb" ]; then scan="partial (time limit of $cap seconds reached)"; continue; fi
@@ -1505,6 +1510,7 @@ pcc_apps_report() {
   echo "scanned: $today"
   pcc_apps_rows 15 < "$found"
   rm -f "$list" "$found"
+  trap - INT TERM
   return 0
 }
 
