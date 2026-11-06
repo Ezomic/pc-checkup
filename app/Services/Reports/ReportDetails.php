@@ -60,6 +60,7 @@ final readonly class ReportDetails
             $this->card('stability', 'Stability', (new ReportStability)->rows($sections, $flags)),
             $this->card('slowness', 'Why is it slow?', (new ReportSlowness)->rows($sections, $freeDisk, $this->spinningDrive($sections))),
             (new ReportStartup)->card($sections),
+            (new ReportReclaimable)->card($sections),
             $this->card('verdict', 'Worth keeping?', (new ReportVerdict)->rows($sections, $flags, $freeDisk)),
         ]));
     }
@@ -144,7 +145,7 @@ final readonly class ReportDetails
 
         return $this->card('storage', 'Storage', [
             $this->row('Free', $this->freeText($capacity, $this->capture('/^(\d{1,3})%$/', $freeDisk))),
-            $capacity === null ? null : $this->row('Used', $this->format(max($capacity['size'] - $capacity['free'], 0.0)).' of '.$this->format($capacity['size'])),
+            $capacity === null ? null : $this->row('Used', ByteSize::format(max($capacity['size'] - $capacity['free'], 0.0)).' of '.ByteSize::format($capacity['size'])),
             isset($health['health']) ? $this->healthRow($health['health']) : null,
             $this->row('Drive type', $health['drive'] ?? null),
         ], $explained ? null : $this->folders($sections->text('Performance: biggest folders in home')));
@@ -227,11 +228,11 @@ final readonly class ReportDetails
         $sentence = null;
 
         if ($top !== []) {
-            $names = array_map(fn (array $item): string => $item['name'].' ('.$this->format($item['bytes']).')', $top);
+            $names = array_map(fn (array $item): string => $item['name'].' ('.ByteSize::format($item['bytes']).')', $top);
             $lead = array_sum(array_column($top, 'bytes')) * 2 >= $used && $used > 0 ? 'Most of the space is used by' : 'The biggest folders found are';
             $sentence = "{$lead} ".(count($names) > 1 ? implode(', ', array_slice($names, 0, -1)).' and '.end($names) : $names[0]).'.';
         } elseif ($read['home'] !== null && $named === null) {
-            $sentence = 'Your user folder uses '.$this->format($read['home']).'.';
+            $sentence = 'Your user folder uses '.ByteSize::format($read['home']).'.';
         }
 
         if ($named !== null) {
@@ -239,7 +240,7 @@ final readonly class ReportDetails
         }
 
         if ($notMeasured !== null) {
-            $sentence = trim("{$sentence} ".$this->format($notMeasured).' was not measured.');
+            $sentence = trim("{$sentence} ".ByteSize::format($notMeasured).' was not measured.');
         }
 
         return $sentence;
@@ -257,11 +258,11 @@ final readonly class ReportDetails
             return null;
         }
 
-        $biggest = "{$folder['name']} (".$this->format($folder['bytes']).')';
+        $biggest = "{$folder['name']} (".ByteSize::format($folder['bytes']).')';
 
         return $read['home'] === null
             ? "The biggest folder in your user folder is {$biggest}."
-            : 'Your user folder uses '.$this->format($read['home'])."; the biggest part is {$biggest}.";
+            : 'Your user folder uses '.ByteSize::format($read['home'])."; the biggest part is {$biggest}.";
     }
 
     /**
@@ -318,7 +319,7 @@ final readonly class ReportDetails
 
             return [
                 'label' => ($endings && ctype_alnum($item['name']) ? '.' : '').$item['name'],
-                'value' => $this->format($item['bytes']),
+                'value' => ByteSize::format($item['bytes']),
                 'detail' => implode(', ', array_filter([$files, $percent, $other])) ?: null,
                 'share' => $share,
             ];
@@ -335,7 +336,7 @@ final readonly class ReportDetails
      */
     private function freeText(?array $capacity, ?string $percent): ?string
     {
-        $amount = $capacity === null ? null : $this->format($capacity['free']);
+        $amount = $capacity === null ? null : ByteSize::format($capacity['free']);
 
         return match (true) {
             $amount !== null && $percent !== null => "{$amount} ({$percent}%)",
@@ -478,7 +479,7 @@ final readonly class ReportDetails
             $bytes = $this->bytes($match[1]);
 
             if ($bytes !== null) {
-                $items[] = ['label' => $this->folderName($match[2]), 'value' => $this->format($bytes), 'tone' => 'neutral'];
+                $items[] = ['label' => $this->folderName($match[2]), 'value' => ByteSize::format($bytes), 'tone' => 'neutral'];
             }
         }
 
@@ -575,18 +576,5 @@ final readonly class ReportDetails
         $amount = preg_match('/^('.LocaleNumber::PATTERN.')([BKMGTP]?)i?B?$/', $token, $match) === 1 ? LocaleNumber::float($match[1]) : null;
 
         return $amount === null ? null : $amount * self::UNITS[$match[2] === '' ? 'B' : $match[2]];
-    }
-
-    private function format(float $bytes): string
-    {
-        foreach (['TB' => 'T', 'GB' => 'G', 'MB' => 'M', 'KB' => 'K', 'B' => 'B'] as $label => $unit) {
-            if ($bytes >= self::UNITS[$unit]) {
-                $value = $bytes / self::UNITS[$unit];
-
-                return ($value >= 10 ? (string) round($value) : (string) round($value, 1))." {$label}";
-            }
-        }
-
-        return '0 B';
     }
 }

@@ -33,7 +33,7 @@ function ownerDetails(string $markdown, array $flags = [], string $deviceType = 
 it('gives the owner the three cards from a real Mac report', function () {
     $details = ownerDetails(macReportFixture(), ['macOS 10.14.6 is old and likely out of security support.']);
 
-    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'startup', 'verdict'])
+    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'startup', 'reclaimable', 'verdict'])
         ->and($details[0]['rows'][3])->toBe(['label' => 'Security support', 'value' => 'Out of security support', 'tone' => 'bad'])
         ->and($details[1]['rows'][0])->toBe(['label' => 'Free', 'value' => '14 GB (12%)', 'tone' => 'neutral'])
         ->and($details[1]['list']['items'][0])->toBe(['label' => 'Library', 'value' => '38 GB', 'tone' => 'neutral'])
@@ -114,7 +114,7 @@ it('agrees with the free disk fact tile', function () {
 it('gives the owner the cards from a Windows report', function () {
     $details = ownerDetails(windowsLaptopFixture(), ['Windows 10 Pro reached end of support on 14 October 2025, so it only gets updates with a paid extension.']);
 
-    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'startup', 'verdict'])
+    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'startup', 'reclaimable', 'verdict'])
         ->and($details[0]['rows'][2]['value'])->toBe('Out of security support')
         ->and($details[1]['rows'][0]['value'])->toBe('52 GB (22%)');
 });
@@ -167,7 +167,7 @@ it('handles a very long report', function () {
     $filler = implode("\n", array_fill(0, 20000, 'filler line'));
     $details = ownerDetails(macReportFixture()."\n## Installed apps\n\n```\n{$filler}\n```\n");
 
-    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'startup', 'verdict']);
+    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'startup', 'reclaimable', 'verdict']);
 });
 
 it('never lets report text become markup or a placeholder value', function () {
