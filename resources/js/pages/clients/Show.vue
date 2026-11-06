@@ -26,7 +26,10 @@ defineOptions({
     },
 });
 
-const form = useForm({ name: props.client.name });
+const form = useForm({
+    name: props.client.name,
+    locale: props.client.locale,
+});
 const chosen = ref<string>('');
 
 function rename(): void {
@@ -100,7 +103,7 @@ function optionLabel(machine: AssignableMachine): string {
         </div>
 
         <section class="flex flex-col gap-3">
-            <h2 class="text-lg font-semibold">Name</h2>
+            <h2 class="text-lg font-semibold">Name and share page language</h2>
             <form
                 class="flex max-w-xl items-start gap-2"
                 @submit.prevent="rename"
@@ -110,8 +113,23 @@ function optionLabel(machine: AssignableMachine): string {
                     <Input id="name" v-model="form.name" maxlength="255" />
                     <InputError :message="form.errors.name" />
                 </div>
+                <div class="grid gap-2">
+                    <Label for="locale" class="sr-only">
+                        Language of the share page
+                    </Label>
+                    <select
+                        id="locale"
+                        v-model="form.locale"
+                        class="h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                        data-test="client-locale"
+                    >
+                        <option value="nl">Share page in Dutch</option>
+                        <option value="en">Share page in English</option>
+                    </select>
+                    <InputError :message="form.errors.locale" />
+                </div>
                 <Button type="submit" size="sm" :disabled="form.processing">
-                    Rename
+                    Save
                 </Button>
             </form>
         </section>

@@ -7,6 +7,8 @@ namespace App\Http\Controllers;
 use App\Actions\Clients\CreateClient;
 use App\Actions\Clients\DeleteClient;
 use App\Actions\Clients\RenameClient;
+use App\Actions\Clients\SetClientLocale;
+use App\Enums\ShareLocale;
 use App\Http\Requests\Clients\SaveClientRequest;
 use App\Models\Client;
 use App\Models\Machine;
@@ -67,6 +69,7 @@ final class ClientController extends Controller
             'client' => [
                 'id' => $client->id,
                 'name' => $client->name,
+                'locale' => ($client->locale ?? ShareLocale::default())->value,
                 'share_url' => $client->share_token === null ? null : route('share.show', $client->share_token),
                 'last_viewed_at' => $client->last_viewed_at,
                 'created_at' => $client->created_at,
@@ -88,11 +91,15 @@ final class ClientController extends Controller
         ]);
     }
 
-    public function update(SaveClientRequest $request, Client $client, RenameClient $action): RedirectResponse
+    public function update(SaveClientRequest $request, Client $client, RenameClient $action, SetClientLocale $setLocale): RedirectResponse
     {
         $this->authorize('update', $client);
 
         $action->handle($client, $request->name());
+
+        if ($request->locale() !== null) {
+            $setLocale->handle($client, $request->locale());
+        }
 
         return to_route('clients.show', $client);
     }

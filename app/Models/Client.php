@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\ShareLocale;
 use Database\Factories\ClientFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -17,6 +18,7 @@ use Illuminate\Support\Carbon;
  * @property int $id
  * @property int $user_id
  * @property string $name
+ * @property ShareLocale|null $locale
  * @property string|null $share_token
  * @property Carbon|null $last_viewed_at
  * @property int|null $machines_count
@@ -24,11 +26,13 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['name'])]
+#[Fillable(['name', 'locale'])]
 class Client extends Model
 {
     /** @use HasFactory<ClientFactory> */
     use HasFactory, SoftDeletes;
+
+    protected $attributes = ['locale' => 'nl'];
 
     /**
      * @return array<string, string>
@@ -36,6 +40,7 @@ class Client extends Model
     protected function casts(): array
     {
         return [
+            'locale' => ShareLocale::class,
             'last_viewed_at' => 'datetime',
         ];
     }

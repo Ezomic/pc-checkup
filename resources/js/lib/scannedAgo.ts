@@ -1,3 +1,6 @@
+import { translate } from '@/lib/messages';
+import type { Locale } from '@/lib/messages';
+
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -10,24 +13,34 @@ function parseUtc(value: string): Date {
     );
 }
 
-export function scannedAgo(value: string, now: Date = new Date()): string {
+export function scannedAgo(
+    value: string,
+    now: Date = new Date(),
+    locale: Locale = 'en',
+): string {
     const elapsed = Math.max(0, now.getTime() - parseUtc(value).getTime());
 
     if (elapsed < MINUTE) {
-        return 'just now';
+        return translate(locale, 'ago.justNow');
     }
 
     if (elapsed < HOUR) {
-        return `${Math.floor(elapsed / MINUTE)} min ago`;
+        return translate(locale, 'ago.minutes', {
+            n: Math.floor(elapsed / MINUTE),
+        });
     }
 
     if (elapsed < DAY) {
-        return `${Math.floor(elapsed / HOUR)} h ago`;
+        return translate(locale, 'ago.hours', {
+            n: Math.floor(elapsed / HOUR),
+        });
     }
 
     const days = Math.floor(elapsed / DAY);
 
-    return days === 1 ? 'yesterday' : `${days} days ago`;
+    return days === 1
+        ? translate(locale, 'ago.yesterday')
+        : translate(locale, 'ago.days', { n: days });
 }
 
 export function shortDate(value: string): string {

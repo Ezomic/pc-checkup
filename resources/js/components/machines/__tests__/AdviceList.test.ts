@@ -1,7 +1,11 @@
 import { mount } from '@vue/test-utils';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import AdviceList from '@/components/machines/AdviceList.vue';
 import type { FlagAdvice } from '@/types';
+
+vi.mock('@inertiajs/vue3', () => ({
+    usePage: () => ({ props: { locale: 'en' } }),
+}));
 
 function advice(count: number): FlagAdvice[] {
     return Array.from({ length: count }, (_, index) => ({

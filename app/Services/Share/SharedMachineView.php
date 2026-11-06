@@ -84,7 +84,7 @@ final readonly class SharedMachineView
     {
         // Only a flag no rule matched has no advice, and its headline is the scanner's raw text.
         if ($advice->advice === null) {
-            return ['severity' => $advice->severity->value, 'headline' => 'Something to look at', 'advice' => null];
+            return ['severity' => $advice->severity->value, 'headline' => trans('flags.unknown.headline'), 'advice' => null];
         }
 
         return [

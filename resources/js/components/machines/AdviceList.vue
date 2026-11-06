@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import AdviceItem from '@/components/machines/AdviceItem.vue';
+import { useLocale } from '@/composables/useLocale';
 import type { SharedAdvice } from '@/types';
 
 const FIRST = 3;
@@ -8,6 +9,8 @@ const FIRST = 3;
 const props = defineProps<{
     advice: SharedAdvice[];
 }>();
+
+const { t } = useLocale();
 
 const first = computed(() => props.advice.slice(0, FIRST));
 const rest = computed(() => props.advice.slice(FIRST));
@@ -52,7 +55,7 @@ onBeforeUnmount(() => {
 
         <details v-if="rest.length > 0" ref="folded" class="text-sm">
             <summary class="cursor-pointer text-muted-foreground print:hidden">
-                {{ rest.length }} more to look at
+                {{ t('advice.more', { n: rest.length }) }}
             </summary>
             <ul class="mt-2 flex flex-col gap-2">
                 <AdviceItem

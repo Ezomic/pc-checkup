@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 import Index from '@/pages/machines/Index.vue';
 import type { MachineCard, Paginated } from '@/types';
 
+const page = vi.hoisted(() => ({ props: { locale: 'en' } }));
+
 vi.mock('@inertiajs/vue3', () => ({
+    usePage: () => page,
     Head: { template: '<span />' },
     Link: { props: ['href'], template: '<a :href="href"><slot /></a>' },
     router: { post: vi.fn() },

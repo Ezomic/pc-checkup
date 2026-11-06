@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Enums\ChecklistOutcome;
 use App\Enums\MachineStatus;
+use App\Enums\ShareLocale;
 use App\Models\ChecklistEntry;
 use App\Models\Client;
 use App\Models\Machine;
@@ -19,7 +20,7 @@ use function Pest\Laravel\assertDatabaseHas;
 
 function sharedClient(string $name = 'Acme'): Client
 {
-    return Client::factory()->withShareLink()->create(['name' => $name]);
+    return Client::factory()->withShareLink()->create(['name' => $name, 'locale' => ShareLocale::English]);
 }
 
 function assignedMachine(Client $client, array $attributes = []): Machine

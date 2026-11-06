@@ -4,7 +4,7 @@ import { ArrowLeft, CircleCheck } from '@lucide/vue';
 import { computed } from 'vue';
 import AdviceList from '@/components/machines/AdviceList.vue';
 import StatusBadge from '@/components/machines/StatusBadge.vue';
-import { scannedAgo } from '@/lib/scannedAgo';
+import { useLocale } from '@/composables/useLocale';
 import { show } from '@/routes/share';
 import type { SharedMachine, SharedReport } from '@/types';
 
@@ -15,25 +15,29 @@ const props = defineProps<{
     report: SharedReport | null;
 }>();
 
+const { t, ago, number, deviceType } = useLocale();
+
 const title = computed(
-    () => props.machine.name ?? props.machine.model ?? 'Unnamed machine',
+    () =>
+        props.machine.name ?? props.machine.model ?? t('share.unnamedMachine'),
 );
 
 const details = computed(() =>
-    [props.machine.os, props.machine.device_type, props.machine.model]
+    [
+        props.machine.os,
+        deviceType(props.machine.device_type),
+        props.machine.model,
+    ]
         .filter((part): part is string => part !== null)
         .join(' · '),
 );
 
 const verdict = computed(() => {
     if (props.report === null) {
-        return 'Not checked yet';
+        return t('share.notChecked');
     }
 
-    return (
-        props.report.advice[0]?.headline ??
-        'Nothing flagged in the latest check'
-    );
+    return props.report.advice[0]?.headline ?? t('share.nothingFlagged');
 });
 
 const tiles = computed(() => {
@@ -44,10 +48,12 @@ const tiles = computed(() => {
     const { free_disk, memory, cpu } = props.report.facts;
 
     return [
-        { label: 'Free space', value: free_disk },
-        { label: 'Memory', value: memory },
-        { label: 'Processor', value: cpu },
-    ].filter((tile) => tile.value !== null);
+        { label: t('share.freeSpace'), value: free_disk },
+        { label: t('share.memory'), value: memory },
+        { label: t('share.processor'), value: cpu },
+    ]
+        .filter((tile) => tile.value !== null)
+        .map((tile) => ({ ...tile, value: number(tile.value ?? '') }));
 });
 </script>
 
@@ -73,7 +79,7 @@ const tiles = computed(() => {
         <p class="text-sm text-muted-foreground">
             {{ details }}
             <template v-if="report && report.scanned_at">
-                · Last checked {{ scannedAgo(report.scanned_at) }}
+                · {{ t('share.lastChecked', { when: ago(report.scanned_at) }) }}
             </template>
         </p>
     </div>
@@ -91,9 +97,14 @@ const tiles = computed(() => {
             data-test="fixed-note"
         >
             <CircleCheck class="size-4" aria-hidden="true" />
-            {{ report.fixed_count }}
-            {{ report.fixed_count === 1 ? 'thing' : 'things' }} fixed since the
-            last check
+            {{
+                t(
+                    report.fixed_count === 1
+                        ? 'share.fixedOne'
+                        : 'share.fixedMany',
+                    { n: report.fixed_count },
+                )
+            }}
         </p>
 
         <div
@@ -118,7 +129,7 @@ const tiles = computed(() => {
         v-if="report && report.advice.length > 0"
         class="flex flex-col gap-3"
     >
-        <h2 class="text-lg font-semibold">What to do first</h2>
+        <h2 class="text-lg font-semibold">{{ t('share.whatFirst') }}</h2>
         <AdviceList :advice="report.advice" />
     </section>
 </template>
