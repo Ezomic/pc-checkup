@@ -169,6 +169,7 @@ final readonly class ReportDetails
             $capacity === null ? null : $this->row('Used', ByteSize::format(max($capacity['size'] - $capacity['free'], 0.0)).' of '.ByteSize::format($capacity['size'])),
             isset($health['health']) ? $this->healthRow($health['health']) : null,
             $this->row('Drive type', $health['drive'] ?? null),
+            ...(new ReportDriveHealth)->rows($sections),
         ], $explained ? null : $this->folders($sections->text('Performance: biggest folders in home')));
     }
 
