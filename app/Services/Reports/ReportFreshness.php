@@ -13,10 +13,15 @@ final class ReportFreshness
 
     public function isStale(?Report $newest): bool
     {
+        return $this->isOlderThan($newest, self::STALE_AFTER_DAYS);
+    }
+
+    public function isOlderThan(?Report $newest, int $days): bool
+    {
         if ($newest?->created_at === null) {
             return false;
         }
 
-        return $newest->created_at->lessThan(Date::now()->subDays(self::STALE_AFTER_DAYS));
+        return $newest->created_at->lessThan(Date::now()->subDays($days));
     }
 }

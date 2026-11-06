@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
 import { Plus, ScanLine, Upload } from '@lucide/vue';
+import NeedsAttention from '@/components/machines/NeedsAttention.vue';
 import StaleNote from '@/components/machines/StaleNote.vue';
 import StatusBadge from '@/components/machines/StatusBadge.vue';
 import Paginator from '@/components/Paginator.vue';
@@ -9,10 +10,11 @@ import { scannedAgo } from '@/lib/scannedAgo';
 import { create } from '@/routes/imports';
 import { create as createMachine, index, show } from '@/routes/machines';
 import { store as startScan } from '@/routes/scans';
-import type { MachineCard, Paginated } from '@/types';
+import type { MachineCard, NeedsAttentionOverview, Paginated } from '@/types';
 
 defineProps<{
     machines: Paginated<MachineCard>;
+    needsAttention: NeedsAttentionOverview;
 }>();
 
 defineOptions({
@@ -74,6 +76,8 @@ function headline(machine: MachineCard): string {
                 </Button>
             </div>
         </div>
+
+        <NeedsAttention :overview="needsAttention" />
 
         <p
             v-if="machines.data.length === 0"
