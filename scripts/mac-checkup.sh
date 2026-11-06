@@ -284,8 +284,12 @@ pcc_fix_advice() {
 
 # Runs "pcc_capped SECONDS COMMAND [ARGS]" in its own process group and relays its output. When the
 # seconds run out the whole group is killed (a du under find included), the output pipes are
-# dropped even if a process stuck on a dead mount cannot die, and the exit code is 142. Ctrl-C or a
-# closed pipe kill the group too, so nothing outlives the scan. Core perl only, 5.8 syntax and up.
+# dropped even if a process stuck on a dead mount cannot die, and the exit code is 142. When the
+# command ends, anything it left running in the group is killed and its own exit code is returned.
+# Ctrl-C, TERM, HUP or a closed reader stop the group too, and Ctrl-C ends the helper by the signal
+# so the scan aborts. Limits: a process that starts its own session (setsid) is not in the group and
+# can survive; stdout and stderr are relayed separately, so their interleaving is not kept; and the
+# cap is not enforced while whatever reads the output is itself stalled. Core perl, 5.8 syntax.
 PCC_CAP_PL='
 use strict;
 use warnings;
@@ -301,37 +305,57 @@ if (!$pid) {
   setpgrp(0, 0);
   close $rd[$_] for 0, 1;
   open(STDIN, "<", "/dev/null");
-  open(STDOUT, ">&", $wr[0]) or exit 126;
-  open(STDERR, ">&", $wr[1]) or exit 126;
+  open(STDOUT, ">&", $wr[0]) or POSIX::_exit(126);
+  open(STDERR, ">&", $wr[1]) or POSIX::_exit(126);
   close $wr[$_] for 0, 1;
   { no warnings; exec { $ARGV[0] } @ARGV; }
-  exit 127;
+  POSIX::_exit(127);
 }
 close $wr[$_] for 0, 1;
-setpgrp($pid, $pid);
 sub stop { kill "KILL", -$pid; kill "KILL", $pid; }
-for my $sig (qw(INT TERM HUP)) { $SIG{$sig} = sub { stop(); exit 130 }; }
+for my $sig (qw(INT TERM HUP)) {
+  $SIG{$sig} = sub { stop(); $SIG{$sig} = "DEFAULT"; kill $sig, $$; exit 128; };
+}
 $SIG{PIPE} = sub { stop(); exit 141 };
+sub retry { return $!{EINTR} || $!{EAGAIN}; }
 my @open = (0, 1);
-my $timedout = 0;
-while (@open) {
+my ($status, $timedout);
+while (1) {
+  if (!defined $status) {
+    my $reaped = waitpid($pid, WNOHANG);
+    if ($reaped == $pid) { $status = $?; }
+    elsif ($reaped < 0) { $status = 0; }
+  }
   my $left = $deadline - time;
   if ($left <= 0) { $timedout = 1; last; }
+  if (!@open) {
+    last if defined $status;
+    sleep($left < 0.02 ? $left : 0.02);
+    next;
+  }
   my $rin = "";
   vec($rin, fileno($rd[$_]), 1) = 1 for @open;
   my $rout = $rin;
-  my $n = select($rout, undef, undef, $left);
+  my $wait = defined $status ? 0 : ($left < 0.05 ? $left : 0.05);
+  my $n = select($rout, undef, undef, $wait);
+  last if $n == 0 && defined $status;
   next if $n <= 0;
   my @still;
   for my $i (@open) {
     if (vec($rout, fileno($rd[$i]), 1)) {
       my $buf;
       my $got = sysread($rd[$i], $buf, 65536);
-      next unless $got;
+      if (!defined $got) { push @still, $i if retry(); next; }
+      next if $got == 0;
       my $off = 0;
       while ($off < $got) {
         my $put = syswrite($i ? \*STDERR : \*STDOUT, $buf, $got - $off, $off);
-        if (!defined $put) { last if $i; stop(); exit 141; }
+        if (!defined $put) {
+          if (retry()) { sleep 0.01; next; }
+          last if $i;
+          stop();
+          exit($!{EPIPE} ? 141 : 1);
+        }
         $off += $put;
       }
     }
@@ -339,15 +363,8 @@ while (@open) {
   }
   @open = @still;
 }
-my $status = 0;
-while (!$timedout) {
-  my $reaped = waitpid($pid, WNOHANG);
-  if ($reaped == $pid) { $status = $?; last; }
-  last if $reaped < 0;
-  if (time >= $deadline) { $timedout = 1; last; }
-  sleep 0.02;
-}
-if ($timedout) { stop(); exit 142; }
+stop();
+exit 142 if $timedout;
 exit(($status & 127) ? 128 + ($status & 127) : $status >> 8);
 '
 export PCC_CAP_PL

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
+use Symfony\Component\Process\Exception\ProcessSignaledException;
 use Tests\Support\ScriptTemp;
 
 const CAP_STUBBORN = 'trap "" TERM ALRM HUP INT; sleep 120 & wait';
@@ -110,7 +111,48 @@ describe('the capped runner', function () {
     it('stops the command when it is told to stop, so Ctrl-C leaves nothing behind', function () {
         $result = capRun('perl -e "$PCC_CAP_PL" 60 sleep 117 & runner=$!; sleep 1; kill -TERM $runner; wait $runner; echo "rc=$?"; sleep 0.5; pgrep -f "^[s]leep 117" > /dev/null && echo alive || echo gone', [], '/usr/bin:/bin');
 
-        expect($result->output())->toBe("rc=130\ngone\n");
+        expect($result->output())->toBe("rc=143\ngone\n");
+    });
+
+    it('returns the real exit code at once when the command ends but something it started keeps the pipes open', function () {
+        $start = microtime(true);
+        $result = capRun('pcc_capped 8 sh -c "echo hi; sleep 116 & exit 0"; echo "rc=$?"; sleep 0.5; pgrep -f "^[s]leep 116" > /dev/null && echo alive || echo gone', [], '/usr/bin:/bin');
+
+        expect(microtime(true) - $start)->toBeLessThan(5)->and($result->output())->toBe("hi\nrc=0\ngone\n");
+    });
+
+    it('keeps a non zero exit code of a command that left a helper behind', function () {
+        $result = capRun('pcc_capped 8 sh -c "echo oops >&2; sleep 115 & exit 4"; echo "rc=$?"', [], '/usr/bin:/bin');
+
+        expect($result->output())->toBe("rc=4\n")->and($result->errorOutput())->toBe("oops\n");
+    });
+
+    it('ends by the signal on Ctrl-C so the scan aborts instead of going on', function () {
+        $process = Process::path(base_path())->env(['PATH' => '/usr/bin:/bin'])
+            ->start(['setsid', 'bash', '-c', 'source scripts/mac-checkup.sh; echo ready; pcc_capped 60 sleep 114; echo continued']);
+        $deadline = microtime(true) + 10;
+
+        while (! str_contains($process->output(), 'ready') && microtime(true) < $deadline) {
+            usleep(50_000);
+        }
+
+        usleep(500_000);
+        Process::run(['kill', '-INT', '--', '-'.$process->id()]);
+
+        try {
+            $process->wait();
+        } catch (ProcessSignaledException) {
+        }
+
+        expect($process->output())->not->toContain('continued')
+            ->and(Process::run(['bash', '-c', 'pgrep -f "^[s]leep 114" > /dev/null && echo alive || echo gone'])->output())->toBe("gone\n");
+    });
+
+    it('relays everything to a slow reader', function () {
+        $result = capRun('pcc_capped 20 seq 1 300000 | { sleep 1; cksum; }', [], '/usr/bin:/bin');
+        $expected = Process::run(['bash', '-c', 'seq 1 300000 | cksum'])->output();
+
+        expect($result->output())->toBe($expected);
     });
 
     it('stops the command when the reader of its output goes away', function () {
@@ -211,6 +253,14 @@ describe('the script', function () {
         preg_match_all('/^use ([A-Za-z:]+)/m', $perl, $modules);
 
         expect($modules[1])->toBe(['strict', 'warnings', 'POSIX', 'Time::HiRes']);
+    });
+
+    it('leaves the forked child with _exit, retries interrupted reads and writes, and sets the group once in the child', function () use ($script) {
+        preg_match("/^PCC_CAP_PL='(.*?)^'$/ms", $script(), $match);
+        $perl = $match[1] ?? '';
+
+        expect($perl)->toContain('POSIX::_exit(127)')->toContain('EINTR')->toContain('EAGAIN')->toContain('EPIPE')
+            ->and($perl)->not->toContain('setpgrp($pid')->and(substr_count($perl, 'setpgrp('))->toBe(1);
     });
 
     it('passes the runner through perl -c', function () use ($script) {
