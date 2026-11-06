@@ -18,7 +18,7 @@ trait PriceItemRules
     protected function priceItemRules(?PriceItem $current): array
     {
         return [
-            'name' => ['bail', 'required', 'string', 'max:80', 'not_regex:/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u',$this->uniqueName($current)],
+            'name' => ['bail', 'required', 'string', 'max:80', 'not_regex:/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u', $this->uniqueName($current)],
             'unit' => ['nullable', 'string', 'max:20', 'not_regex:/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u'],
             'price' => ['bail', 'required', 'string', function (string $attribute, mixed $value, Closure $fail): void {
                 $cents = EuroAmount::toCents(is_string($value) ? $value : '');
