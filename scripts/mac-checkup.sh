@@ -1755,7 +1755,7 @@ pcc_crashes_report() {
   names=$(sed -e 's|.*/||' "$list" \
     | sed -n -e 's/[-_][0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].*$//p' \
     | tr -d '\000-\011\013-\037\177|' \
-    | grep -viE '^(JetsamEvent|ResetCounter|Kernel|stacks|panic)' \
+    | grep -viE '^(JetsamEvent|ResetCounter|Kernel|stacks|panic-full)$' \
     | grep -v '^[[:space:]]*$' \
     | cut -c1-80)
   echo "scan: $scan"

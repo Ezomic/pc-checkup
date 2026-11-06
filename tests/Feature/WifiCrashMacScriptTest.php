@@ -202,6 +202,7 @@ describe('the Mac crash step', function () {
         wcmTouch($user.'/ResetCounter-2026-11-05-101010.diag');
         wcmTouch($user.'/Kernel-2026-11-05-101010.ips');
         wcmTouch($user.'/stacks-2026-11-05-101010.ips');
+        wcmTouch($user.'/Panic Viewer-2026-11-05-101010.ips');
         wcmTouch($user.'/Old-2026-09-01-101010.ips', 60);
         wcmTouch($user.'/Edge-2026-10-08-101010.ips', 29);
         wcmTouch($user.'/Retired/Hidden-2026-11-05-101010.ips');
@@ -212,7 +213,7 @@ describe('the Mac crash step', function () {
 
         $names = array_filter(wcmLines(wcmReport($user, $system)), fn (string $line): bool => str_starts_with($line, 'app|'));
 
-        expect(array_values($names))->toBe(['app|App|1', 'app|Edge|1']);
+        expect(array_values($names))->toBe(['app|App|1', 'app|Edge|1', 'app|Panic Viewer|1']);
     })->skip(wcmMissing(), 'perl is not installed here');
 
     it('strips pipes and control characters from names and keeps unicode', function () {

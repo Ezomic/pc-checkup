@@ -408,6 +408,12 @@ describe('masking of crash names', function () {
             ->not->toContain('Johannes')->toContain('app|Jan Planner|5242880|2020-01-01');
     });
 
+    it('still masks the names when one app name holds invalid UTF-8', function () {
+        $markdown = wbcImport(wbcCrashBody("app|Bad\xC3\x28|1\napp|Johannes Notes.exe|4", total: '5'));
+
+        expect($markdown)->not->toContain('Johannes')->toContain('<user> Notes.exe');
+    });
+
     it('does not turn a longer word into a placeholder', function () {
         $markdown = wbcImport(wbcCrashBody("app|Janitor Pro|4\napp|Jan.exe|2", total: '6'));
 

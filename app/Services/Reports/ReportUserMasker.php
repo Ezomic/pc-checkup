@@ -83,7 +83,7 @@ final class ReportUserMasker
         $words = array_slice(array_values($words), 0, self::MAX_GLOBAL_NAMES);
         usort($words, fn (string $a, string $b): int => mb_strlen($b) <=> mb_strlen($a));
         $pattern = '~(?<![\p{L}\p{N}_])(?:'.implode('|', array_map(fn (string $word): string => preg_quote($word, '~'), $words)).')(?![\p{L}\p{N}_])~iu';
-        $masked = preg_replace_callback('~^(app\|)([^|\n]*)~mu', fn (array $m): string => $m[1].(preg_replace($pattern, self::PLACEHOLDER, $m[2]) ?? $m[2]), $section[0][0]) ?? $section[0][0];
+        $masked = preg_replace_callback('~^(app\|)([^|\n]*)~mu', fn (array $m): string => $m[1].(preg_replace($pattern, self::PLACEHOLDER, $m[2]) ?? self::PLACEHOLDER), mb_scrub($section[0][0])) ?? '';
 
         return substr_replace($markdown, $masked, (int) $section[0][1], strlen($section[0][0]));
     }
