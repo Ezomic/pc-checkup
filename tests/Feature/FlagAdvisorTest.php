@@ -141,3 +141,14 @@ it('keys a flag no rule recognises by its text without digits', function () {
 it('keeps the key out of the front end payload', function () {
     expect((new FlagAdvisor)->advise('FileVault is OFF.')->toArray())->not->toHaveKey('key');
 });
+
+it('translates every known flag into Dutch', function (string $flag, mixed $severity, string $english) {
+    $dutch = (new FlagAdvisor)->advise($flag, 'nl');
+    $en = (new FlagAdvisor)->advise($flag, 'en');
+
+    expect($en->headline)->toBe($english)
+        ->and($dutch->headline)->not->toBe($en->headline)
+        ->and($dutch->advice)->not->toBeNull()->not->toBe($en->advice)
+        ->and($dutch->key)->toBe($en->key)
+        ->and($dutch->severity)->toBe($en->severity);
+})->with('flags');

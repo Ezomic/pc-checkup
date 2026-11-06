@@ -1,9 +1,12 @@
 import { mount } from '@vue/test-utils';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Show from '@/pages/share/Show.vue';
 import type { SharedMachineCard } from '@/types';
 
+const page = vi.hoisted(() => ({ props: { locale: 'en' } }));
+
 vi.mock('@inertiajs/vue3', () => ({
+    usePage: () => page,
     Head: { template: '<span />' },
     Link: { props: ['href'], template: '<a :href="href"><slot /></a>' },
 }));
@@ -106,5 +109,58 @@ describe('share/Show', () => {
 
     it('says when a client has no machines', () => {
         expect(render([]).text()).toContain('No computers to show yet.');
+    });
+});
+
+describe('share/Show in Dutch', () => {
+    beforeEach(() => {
+        page.props.locale = 'nl';
+    });
+
+    afterEach(() => {
+        page.props.locale = 'en';
+        vi.useRealTimers();
+    });
+
+    it('speaks Dutch around the server text', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-11-02T12:00:00Z'));
+
+        const text = render([
+            card({ scanned_at: '2026-11-02T09:00:00.000000Z' }),
+        ]).text();
+
+        expect(text).toContain(
+            'De laatste controle van elke computer en het grootste probleem.',
+        );
+        expect(text).toContain('+2 om naar te kijken');
+        expect(text).toContain('Laatst gecontroleerd: 3 uur geleden');
+        expect(text).toContain('Aandacht nodig');
+        expect(text).toContain('Windows desktop');
+        expect(text).not.toMatch(/Last checked|more to look at|Needs work/);
+    });
+
+    it('says so in Dutch when nothing is flagged, nothing was checked, or there are no machines', () => {
+        const wrapper = render([
+            card({ top_issue: null, issue_count: 0 }),
+            card({
+                id: 2,
+                name: null,
+                model: null,
+                scanned_at: null,
+                top_issue: null,
+                issue_count: 0,
+            }),
+        ]);
+        const headlines = wrapper.findAll('[data-test="headline"]');
+
+        expect(headlines[0].text()).toBe(
+            'Bij de laatste controle viel niets op.',
+        );
+        expect(headlines[1].text()).toBe('Nog niet gecontroleerd.');
+        expect(wrapper.text()).toContain('Computer zonder naam');
+        expect(render([]).text()).toContain(
+            'Er zijn nog geen computers om te laten zien.',
+        );
     });
 });

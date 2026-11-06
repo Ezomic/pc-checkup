@@ -6,6 +6,7 @@ use App\Http\Middleware\AuthenticateBenchmarkClient;
 use App\Http\Middleware\BlockLocalCredentials;
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Services\Share\ShareLocaleResolver;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -72,9 +73,15 @@ return Application::configure(basePath: dirname(__DIR__))
             }
 
             // A share link is opened by someone with no account, so its errors must not point at the owner app.
-            $component = $request->is('c/*') ? 'share/Unavailable' : 'Error';
+            if ($request->is('c/*')) {
+                $locale = app(ShareLocaleResolver::class)->apply($request);
 
-            return Inertia::render($component, ['status' => $response->getStatusCode()])
+                return Inertia::render('share/Unavailable', ['status' => $response->getStatusCode(), 'locale' => $locale->value])
+                    ->toResponse($request)
+                    ->setStatusCode($response->getStatusCode());
+            }
+
+            return Inertia::render('Error', ['status' => $response->getStatusCode()])
                 ->toResponse($request)
                 ->setStatusCode($response->getStatusCode());
         });

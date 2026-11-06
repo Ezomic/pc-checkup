@@ -18,6 +18,7 @@ declare module '@inertiajs/core' {
     export interface InertiaConfig {
         sharedPageProps: {
             name: string;
+            locale: string;
             auth: Auth;
             workflow: { enabled: boolean };
             scriptVersions: { windows: string; mac: string };

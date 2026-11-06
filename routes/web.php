@@ -22,6 +22,7 @@ use App\Http\Controllers\ScanController;
 use App\Http\Controllers\SharedClientController;
 use App\Http\Controllers\ToolController;
 use App\Http\Middleware\HardenSharePage;
+use App\Http\Middleware\SetShareLocale;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -34,7 +35,7 @@ Route::get('scripts/{script}', CheckupScriptController::class)->name('scripts.do
 Route::get('tools/rustdesk/windows', RustDeskInstallerController::class)
     ->middleware('throttle:20,1')->name('tools.rustdesk.download');
 
-Route::middleware([HardenSharePage::class, 'throttle:share'])->prefix('c/{token}')->group(function () {
+Route::middleware([SetShareLocale::class, HardenSharePage::class, 'throttle:share'])->prefix('c/{token}')->group(function () {
     Route::get('/', [SharedClientController::class, 'show'])->name('share.show');
     Route::get('machines/{machine}', [SharedClientController::class, 'machine'])->name('share.machine');
 });
