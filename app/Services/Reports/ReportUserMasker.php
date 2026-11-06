@@ -14,6 +14,10 @@ final class ReportUserMasker
 
     private const MAX_GLOBAL_NAMES = 50;
 
+    private const MIN_CRASH_LENGTH = 3;
+
+    private const CRASH_SECTION = '~^## Recent app crashes\n.*?(?=^## |\z)~ms';
+
     private const SYSTEM_NAMES = [
         'root', 'daemon', 'nobody', 'wheel', 'shared', 'guest', 'public', 'default', 'default user', 'all users',
         'defaultuser0', 'administrator', 'defaultaccount', 'wdagutilityaccount', 'system', 'localservice', 'networkservice',
@@ -56,7 +60,32 @@ final class ReportUserMasker
             $lines[$index] = $this->maskLine($section, $line, $state, $names);
         }
 
-        return $this->maskElsewhere(implode("\n", $lines), $names);
+        return $this->maskCrashNames($this->maskElsewhere(implode("\n", $lines), $names), $names);
+    }
+
+    /**
+     * App names in the crash list come from log file names and can carry a user name of any length.
+     *
+     * @param  array<string, string>  $names
+     */
+    private function maskCrashNames(string $markdown, array $names): string
+    {
+        $words = array_filter(
+            $names,
+            fn (string $name, string $key): bool => mb_strlen($key) >= self::MIN_CRASH_LENGTH && ! in_array($key, self::COMMON_WORDS, true),
+            ARRAY_FILTER_USE_BOTH,
+        );
+
+        if ($words === [] || preg_match(self::CRASH_SECTION, $markdown, $section, PREG_OFFSET_CAPTURE) !== 1) {
+            return $markdown;
+        }
+
+        $words = array_slice(array_values($words), 0, self::MAX_GLOBAL_NAMES);
+        usort($words, fn (string $a, string $b): int => mb_strlen($b) <=> mb_strlen($a));
+        $pattern = '~(?<![\p{L}\p{N}_])(?:'.implode('|', array_map(fn (string $word): string => preg_quote($word, '~'), $words)).')(?![\p{L}\p{N}_])~iu';
+        $masked = preg_replace_callback('~^(app\|)([^|\n]*)~mu', fn (array $m): string => $m[1].(preg_replace($pattern, self::PLACEHOLDER, $m[2]) ?? self::PLACEHOLDER), mb_scrub($section[0][0])) ?? '';
+
+        return substr_replace($markdown, $masked, (int) $section[0][1], strlen($section[0][0]));
     }
 
     /**

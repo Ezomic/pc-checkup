@@ -10,8 +10,8 @@ use Illuminate\Support\Str;
 
 /**
  * @phpstan-type Point array{at: string, value: float, label: string}
- * @phpstan-type Trend array{id: 'disk'|'battery'|'memory', title: string, points: list<Point>, latest: string, change: string, sentence: string|null, tone: 'bad'|'neutral'}
- * @phpstan-type Reading array{at: CarbonInterface, gb: float|null, percent: float|null, cycles: float|null, memory: float|null}
+ * @phpstan-type Trend array{id: 'disk'|'battery'|'memory'|'boot', title: string, points: list<Point>, latest: string, change: string, sentence: string|null, tone: 'bad'|'neutral'}
+ * @phpstan-type Reading array{at: CarbonInterface, gb: float|null, percent: float|null, cycles: float|null, memory: float|null, boot: float|null}
  * @phpstan-type Sample array{at: CarbonInterface, value: float}
  */
 final readonly class ReportTrends
@@ -33,6 +33,10 @@ final readonly class ReportTrends
     private const SHORT_SPAN_DAYS = 45;
 
     private const MEMORY_STEADY_WITHIN = 5.0;
+
+    private const BOOT_MIN_CHANGE_SECONDS = 15.0;
+
+    private const BOOT_MIN_CHANGE_SHARE = 0.25;
 
     private const MAX_CYCLES = 20000;
 
@@ -91,6 +95,7 @@ final readonly class ReportTrends
     {
         $sections = ReportSections::parse($markdown);
         $capacity = $this->details->capacity($sections);
+        $boot = (new ReportBootTime)->seconds($sections);
         $usable = $capacity !== null && $capacity['size'] > 0.0 && $capacity['size'] <= self::MAX_GIGABYTES * self::GIGABYTE && $capacity['free'] <= $capacity['size'];
 
         return [
@@ -99,6 +104,7 @@ final readonly class ReportTrends
             'percent' => $this->number($this->facts->from($markdown)['free_disk'], '/^(\d{1,3})%$/', self::MAX_PERCENT),
             'cycles' => $this->number($sections->header('battery'), '/^(\d{1,5}) cycles\b/i', self::MAX_CYCLES),
             'memory' => $this->number($sections->text('Memory pressure'), '/free percentage:\s*(\d{1,3})%/i', self::MAX_PERCENT),
+            'boot' => $boot === null ? null : (float) $boot,
         ];
     }
 
@@ -121,12 +127,13 @@ final readonly class ReportTrends
             $this->disk($readings),
             $this->battery($readings),
             $this->memory($readings),
+            $this->boot($readings),
         ]));
     }
 
     /**
      * @param  list<Reading>  $readings
-     * @param  'gb'|'percent'|'cycles'|'memory'  $key
+     * @param  'gb'|'percent'|'cycles'|'memory'|'boot'  $key
      * @return list<Sample>
      */
     private function samples(array $readings, string $key): array
@@ -273,8 +280,32 @@ final readonly class ReportTrends
     }
 
     /**
-     * @param  'disk'|'battery'|'memory'  $id
-     * @param  'gb'|'percent'|'cycles'|'memory'  $key
+     * @param  list<Reading>  $readings
+     * @return Trend|null
+     */
+    private function boot(array $readings): ?array
+    {
+        $samples = $this->samples($readings, 'boot');
+
+        if (! $this->qualifies($samples)) {
+            return null;
+        }
+
+        $first = $samples[0]['value'];
+        $delta = $samples[count($samples) - 1]['value'] - $first;
+        $material = abs($delta) >= self::BOOT_MIN_CHANGE_SECONDS && abs($delta) >= $first * self::BOOT_MIN_CHANGE_SHARE;
+        $sentence = match (true) {
+            ! $material => 'Startup time has stayed about the same.',
+            $delta > 0 => 'Starting up is getting slower.',
+            default => 'Starting up is getting faster.',
+        };
+
+        return $this->trend('boot', 'Startup time', 'boot', $samples, $sentence, $material && $delta > 0 ? 'bad' : 'neutral');
+    }
+
+    /**
+     * @param  'disk'|'battery'|'memory'|'boot'  $id
+     * @param  'gb'|'percent'|'cycles'|'memory'|'boot'  $key
      * @param  list<Sample>  $samples
      * @param  'bad'|'neutral'  $tone
      * @return Trend
@@ -299,11 +330,12 @@ final readonly class ReportTrends
     }
 
     /**
-     * @param  'gb'|'percent'|'cycles'|'memory'  $key
+     * @param  'gb'|'percent'|'cycles'|'memory'|'boot'  $key
      */
     private function label(string $key, float $value): string
     {
         return match ($key) {
+            'boot' => ReportBootTime::duration((int) round($value)),
             'gb' => $this->gigabytes($value),
             'cycles' => (int) $value.' '.Str::plural('cycle', (int) $value),
             default => (int) round($value).'%',
@@ -311,7 +343,7 @@ final readonly class ReportTrends
     }
 
     /**
-     * @param  'gb'|'percent'|'cycles'|'memory'  $key
+     * @param  'gb'|'percent'|'cycles'|'memory'|'boot'  $key
      */
     private function change(string $key, float $delta): string
     {
@@ -322,6 +354,7 @@ final readonly class ReportTrends
         }
 
         $text = match ($key) {
+            'boot' => ReportBootTime::duration((int) round($size)),
             'gb' => $this->gigabytes($size),
             'cycles' => (int) round($size).' '.Str::plural('cycle', (int) round($size)),
             default => (int) round($size).' '.Str::plural('point', (int) round($size)),

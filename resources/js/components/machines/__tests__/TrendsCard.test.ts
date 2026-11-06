@@ -151,6 +151,30 @@ describe('TrendsCard', () => {
         expect(wrapper.text()).toContain('<img src=x onerror=alert(1)>');
     });
 
+    it('shows a slower startup in red', () => {
+        const wrapper = mount(TrendsCard, {
+            props: {
+                trends: [
+                    trend({
+                        id: 'boot',
+                        title: 'Startup time',
+                        latest: '1 min 25 sec',
+                        change: '+45 sec',
+                        sentence: 'Starting up is getting slower.',
+                        tone: 'bad',
+                    }),
+                ],
+            },
+        });
+        const boot = wrapper.get('[data-test="trend-boot"]');
+
+        expect(boot.get('svg').classes()).toContain('text-red-600');
+        expect(boot.text()).toContain('1 min 25 sec');
+        expect(boot.get('[data-test="trend-sentence"]').text()).toBe(
+            'Starting up is getting slower.',
+        );
+    });
+
     it('prints', () => {
         const wrapper = mount(TrendsCard, { props: { trends: [trend()] } });
 

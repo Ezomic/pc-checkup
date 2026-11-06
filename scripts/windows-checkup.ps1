@@ -843,6 +843,117 @@ function Get-BackupFreshnessLines([datetime]$Today, $FileHistoryNote, [bool]$Fil
     return $lines.ToArray()
 }
 
+# Runs a read in a background job for at most $Seconds so a stuck query cannot hang the scan. Value is
+# what it returned, Note says why it could not. The block must not use the helpers of this script.
+function Read-CappedJob([scriptblock]$Block, [int]$Seconds = 20, [object[]]$Arguments = @()) {
+    $job = $null
+    try {
+        $job = Start-Job -ScriptBlock $Block -ArgumentList $Arguments
+        if (-not (Wait-Job -Job $job -Timeout $Seconds)) {
+            return [pscustomobject]@{ Value = $null; Note = "took longer than $Seconds seconds" }
+        }
+        return [pscustomobject]@{ Value = @(Receive-Job -Job $job -ErrorAction Stop); Note = $null }
+    } catch {
+        return [pscustomobject]@{ Value = $null; Note = (Explain-Error $_) }
+    } finally {
+        if ($null -ne $job) { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+# The lines of the "Wi-Fi signal" section from the text of "netsh wlan show interfaces". Only the
+# signal percentage and the band of the connection in use are kept: a value counts only when its
+# label is a known one and its value has the exact shape of a percentage, a band or a channel, so
+# a network or profile name can never be mistaken for one. Labels in languages not listed here give
+# no signal, and the card is then left out. Nothing else (network name, BSSID, profile) is printed.
+function Get-WifiQualityLines([string[]]$Netsh) {
+    $signal = $null
+    $band = $null
+    $channel = $null
+    foreach ($raw in @($Netsh)) {
+        if ($raw -notmatch '^\s{2,}([^:]+?)\s*:\s*(\S.*?)\s*$') { continue }
+        $key = $Matches[1]
+        $value = $Matches[2]
+        if ($null -eq $signal -and $key -match '^(Signal|Signaal|Signalst|Se.al|Segnale|Sinal|Sygna)' -and $value -match '^(\d{1,3})%$' -and [int]$Matches[1] -le 100) {
+            $signal = [int]$Matches[1]
+        } elseif ($null -eq $band -and $key -match '^(Band|Banda|Bande|Frequenzband)\b' -and $value -match '^(2[.,]4|5|6)\s*GHz$') {
+            $band = ($Matches[1] -replace ',', '.') + ' GHz'
+        } elseif ($null -eq $channel -and $key -match '^(Channel|Kanaal|Kanal|Canal|Canale|Kana)' -and $value -match '^\d{1,3}$') {
+            $channel = [int]$value
+        }
+    }
+    if ($null -eq $signal) { return @('format: 1', 'status: not connected or could not check') }
+    if ($null -eq $band -and $null -ne $channel) {
+        if ($channel -ge 1 -and $channel -le 14) { $band = '2.4 GHz' } elseif ($channel -ge 32 -and $channel -le 177) { $band = '5 GHz' }
+    }
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('format: 1')
+    $lines.Add("signal-percent: $signal")
+    if ($band) { $lines.Add("band: $band") }
+    return $lines.ToArray()
+}
+
+# "yyyy-MM-dd|milliseconds" rows from the XML of boot performance events (event 100 of the
+# Diagnostics-Performance log). An event without a readable BootTime or time stamp gives no row.
+function Get-BootRowsFromXml([string[]]$Xml) {
+    foreach ($text in @($Xml)) {
+        try {
+            $record = ([xml]$text).Event
+            $data = @($record.EventData.Data) | Where-Object { $_.Name -eq 'BootTime' } | Select-Object -First 1
+            $at = ([datetime]::Parse([string]$record.System.TimeCreated.SystemTime, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal)).ToLocalTime()
+            "$($at.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture))|$($data.'#text')"
+        } catch {
+            continue
+        }
+    }
+}
+
+# The lines of the "Boot time" section from "yyyy-MM-dd|milliseconds" rows of the boot performance
+# event (newest first). The typical time is the median of up to the five newest usable boots, so one
+# slow start after an update does not stand for the machine.
+function Get-BootTimeLines([string[]]$Rows, [datetime]$Today) {
+    $usable = New-Object System.Collections.Generic.List[object]
+    foreach ($row in @($Rows)) {
+        if ($row -notmatch '^(\d{4}-\d{2}-\d{2})\|(\d{1,9})$') { continue }
+        $seconds = [int][math]::Round([double]$Matches[2] / 1000)
+        if ($seconds -ge 1 -and $seconds -le 7200) { $usable.Add([pscustomobject]@{ Date = $Matches[1]; Seconds = $seconds }) }
+    }
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('format: 1')
+    $lines.Add("scanned: $($Today.ToString('yyyy-MM-dd'))")
+    if ($usable.Count -eq 0) {
+        $lines.Add('boot-samples: 0')
+        return $lines.ToArray()
+    }
+    $recent = @($usable | Select-Object -First 5)
+    $sorted = @($recent | ForEach-Object { $_.Seconds } | Sort-Object)
+    $middle = [int][math]::Floor($sorted.Count / 2)
+    $typical = if ($sorted.Count % 2 -eq 1) { $sorted[$middle] } else { [int][math]::Round(($sorted[$middle - 1] + $sorted[$middle]) / 2) }
+    $lines.Add("boot-seconds: $typical")
+    $lines.Add("boot-latest-seconds: $($recent[0].Seconds)")
+    $lines.Add("boot-latest: $($recent[0].Date)")
+    $lines.Add("boot-samples: $($recent.Count)")
+    return $lines.ToArray()
+}
+
+# The lines of the "Recent app crashes" section from the program names of recent "Application Error"
+# events. Names only (no paths, no modules), at most ten, counted case-insensitively. $Capped says
+# the read stopped at its limit; $Failure is set when the log could not be read.
+function Get-CrashAppLines([string[]]$Names, [datetime]$Today, [int]$Days, [bool]$Capped, $Failure) {
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('format: 1')
+    $lines.Add("scanned: $($Today.ToString('yyyy-MM-dd'))")
+    $lines.Add("window-days: $Days")
+    if ($Failure) {
+        $lines.Add('scan: could not check')
+        return $lines.ToArray()
+    }
+    $clean = @(@($Names) | ForEach-Object { (([string]$_) -replace '[\x00-\x1f\x7f|\\/]', '').Trim() } | Where-Object { $_ -and $_ -ne '.' -and $_ -ne '..' } | ForEach-Object { if ($_.Length -gt 80) { $_.Substring(0, 80) } else { $_ } })
+    $lines.Add($(if ($Capped) { 'scan: partial (event limit reached)' } else { 'scan: complete' }))
+    $lines.Add("total: $($clean.Count)")
+    $clean | Group-Object | Sort-Object @{ Expression = { $_.Count }; Descending = $true }, Name | Select-Object -First 10 | ForEach-Object { $lines.Add("app|$($_.Name)|$($_.Count)") }
+    return $lines.ToArray()
+}
+
 function Get-UsableSerial($Value) {
     $text = One-Line $Value
     if ($text -eq '' -or $PlaceholderSerials -contains $text.ToLowerInvariant() -or $text -cmatch '^(.)\1*$') { return '' }
@@ -2027,6 +2138,30 @@ Add-Section 'Crashes and unexpected shutdowns (last 30 days)' {
     if ($crashEvents.Value -and @($crashEvents.Value).Count -gt 0) {
         $crashEvents.Value | Select-Object -First 15 TimeCreated, Id, ProviderName | Format-Table -AutoSize
     } elseif ($crashEvents.Note) { $crashEvents.Note } else { '(none)' }
+}
+Add-Section 'Wi-Fi signal' {
+    $read = Read-CappedJob { netsh wlan show interfaces } 20
+    if ($read.Note) { 'format: 1'; 'status: could not check' } else { Get-WifiQualityLines $read.Value }
+}
+Add-Section 'Boot time' {
+    $read = Read-CappedJob {
+        foreach ($entry in @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Diagnostics-Performance/Operational'; Id = 100 } -MaxEvents 10 -ErrorAction Stop)) { $entry.ToXml() }
+    } 25
+    Get-BootTimeLines $(if ($read.Note) { @() } else { Get-BootRowsFromXml $read.Value }) (Get-Date)
+}
+Add-Section 'Recent app crashes' {
+    $days = 30
+    $limit = 500
+    $read = Read-CappedJob {
+        param($Days, $Limit)
+        try {
+            $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'Application Error'; Id = 1000; StartTime = (Get-Date).AddDays(-$Days) } -MaxEvents $Limit -ErrorAction Stop)
+        } catch {
+            if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') { $events = @() } else { throw }
+        }
+        foreach ($entry in $events) { "$(@(([xml]$entry.ToXml()).Event.EventData.Data)[0].'#text')" }
+    } 25 @($days, $limit)
+    Get-CrashAppLines $read.Value (Get-Date) $days (@($read.Value).Count -ge $limit) $read.Note
 }
 Add-Section 'Disk error events (last 30 days)' {
     if ($diskEvents.Value -and @($diskEvents.Value).Count -gt 0) {
