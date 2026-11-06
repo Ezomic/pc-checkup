@@ -2,6 +2,7 @@ export * from './api-token';
 export * from './attention';
 export * from './auth';
 export * from './client';
+export * from './history';
 export * from './machine';
 export * from './navigation';
 export * from './note';

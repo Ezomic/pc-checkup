@@ -101,6 +101,16 @@ final readonly class ReportVerdict
     }
 
     /**
+     * @param  list<Row>  $rows
+     */
+    public static function outcome(array $rows): ?string
+    {
+        $verdict = array_column($rows, 'value', 'label')['Verdict'] ?? null;
+
+        return in_array($verdict, [self::VERDICT_KEEP, self::VERDICT_REPAIR, self::VERDICT_REPLACE], true) ? $verdict : null;
+    }
+
+    /**
      * @param  array<string, Signal>  $signals
      * @return array{string, 'good'|'bad'|'neutral'}
      */
