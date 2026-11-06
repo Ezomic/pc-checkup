@@ -10,6 +10,7 @@ use Laravel\Sanctum\Sanctum;
 use Laravel\Socialite\Contracts\Factory as Socialite;
 use Laravel\Socialite\Two\User as SocialiteUser;
 use Symfony\Component\HttpFoundation\Response;
+use Tests\Support\ScriptTemp;
 use Tests\TestCase;
 
 use function Pest\Laravel\call;
@@ -30,6 +31,8 @@ use function Pest\Laravel\mock;
 pest()->extend(TestCase::class)
     ->use(RefreshDatabase::class)
     ->in('Feature');
+
+pest()->afterEach(fn () => ScriptTemp::cleanUp())->in('Feature');
 
 /*
 |--------------------------------------------------------------------------
@@ -115,6 +118,17 @@ function apiUser(array $abilities = ['read', 'write']): User
     Sanctum::actingAs($user, $abilities);
 
     return $user;
+}
+
+/**
+ * Builds a directory of fake system commands, so the Mac checks read canned output
+ * and never the real machine.
+ *
+ * @param  array<string, string>  $scripts  command name => script body
+ */
+function fakeMacBin(array $scripts): string
+{
+    return ScriptTemp::bin('pcc-script-bin', $scripts);
 }
 
 function fixtureReport(): string

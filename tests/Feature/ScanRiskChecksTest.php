@@ -9,25 +9,6 @@ use App\Services\Reports\ReportParser;
 use Illuminate\Support\Facades\Process;
 
 /**
- * Builds a directory of fake system commands, so the Mac checks read canned output
- * and never the real machine.
- *
- * @param  array<string, string>  $scripts  command name => script body
- */
-function fakeMacBin(array $scripts): string
-{
-    $dir = sys_get_temp_dir().'/pcc-risk-'.bin2hex(random_bytes(4));
-    mkdir($dir, 0777, true);
-
-    foreach ($scripts as $name => $body) {
-        file_put_contents($dir.'/'.$name, "#!/bin/bash\n".$body."\n");
-        chmod($dir.'/'.$name, 0755);
-    }
-
-    return $dir;
-}
-
-/**
  * @param  array<string, string>  $env
  * @return array{flags: list<string>, facts: string}
  */
