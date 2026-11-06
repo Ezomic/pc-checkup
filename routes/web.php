@@ -11,6 +11,7 @@ use App\Http\Controllers\LoginLinkController;
 use App\Http\Controllers\LoginLinkRequestController;
 use App\Http\Controllers\MachineClientController;
 use App\Http\Controllers\MachineController;
+use App\Http\Controllers\MachineHistoryController;
 use App\Http\Controllers\MachineNoteController;
 use App\Http\Controllers\MachineRustDeskController;
 use App\Http\Controllers\MachineStatusController;
@@ -66,6 +67,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('machines/create', [MachineController::class, 'create'])->name('machines.create');
     Route::post('machines', [MachineController::class, 'store'])->name('machines.store');
     Route::get('machines/{machine}', [MachineController::class, 'show'])->name('machines.show');
+    Route::get('machines/{machine}/history', MachineHistoryController::class)->name('machines.history');
     Route::get('machines/{machine}/summary', [MachineController::class, 'summary'])->name('machines.summary');
     Route::put('machines/{machine}/client', [MachineClientController::class, 'update'])->name('machines.client.update');
     Route::put('machines/{machine}/rustdesk', [MachineRustDeskController::class, 'update'])->name('machines.rustdesk.update');
