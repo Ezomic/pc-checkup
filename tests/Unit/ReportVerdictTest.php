@@ -266,7 +266,35 @@ it('lists the reasons strongest first, at most five', function () {
             'Only 2 GB of memory',
             'It still has a spinning hard drive',
         ])
-        ->and($rows[1]['value'])->toBe('Update it if the machine allows, otherwise it is time to replace it.');
+        ->and($rows[1]['value'])->toBe('No macOS that still gets security updates runs on this Mac, so it is time to replace it.');
+});
+
+describe('a Mac that cannot run a supported macOS', function () {
+    it('keeps the update advice when a supported macOS fits', function () {
+        $rows = verdictRows(verdictReport(['Model' => 'Mac (MacBookPro18,1)', 'macOS' => '10.14.6', 'Memory' => '16 GB', 'Free disk' => '50%']), VERDICT_UNSUPPORTED);
+
+        expect($rows[1]['value'])->toBe('Update it if the machine allows, otherwise it is time to replace it.')
+            ->and($rows[0]['value'])->toBe('Repair');
+    });
+
+    it('calls the unsupported system unfixable and advises replacing the Mac', function () {
+        $rows = verdictRows(verdictReport(['Model' => 'Mac (MacBookAir7,2)', 'macOS' => '10.14.6', 'Memory' => '16 GB', 'Free disk' => '50%']), VERDICT_UNSUPPORTED);
+
+        expect($rows[1]['value'])->toBe('No macOS that still gets security updates runs on this Mac, so it is time to replace it.');
+    });
+
+    it('says replace even when the age of the model is not known', function () {
+        $rows = verdictRows(verdictReport(['Model' => 'Mac (MacBookPro6,1)', 'macOS' => '10.13.6', 'Memory' => '16 GB', 'Free disk' => '50%']), VERDICT_UNSUPPORTED);
+
+        expect($rows[0])->toBe(['label' => 'Verdict', 'value' => 'Replace', 'tone' => 'bad']);
+    });
+
+    it('does not decide anything for a model it has no macOS answer for', function () {
+        $rows = verdictRows(verdictReport(['Model' => 'Mac (MacBookAir99,9)', 'macOS' => '10.14.6', 'Memory' => '16 GB', 'Free disk' => '50%']), VERDICT_UNSUPPORTED);
+
+        expect($rows[0]['value'])->toBe('Repair')
+            ->and($rows[1]['value'])->toBe('Update it if the machine allows, otherwise it is time to replace it.');
+    });
 });
 
 it('puts strong reasons before weak ones', function () {
