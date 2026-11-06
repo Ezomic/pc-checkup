@@ -324,7 +324,7 @@ describe('the time limit of the space step', function () {
 describe('what the space step may not do', function () {
     it('only reads: no delete, move, write or network command in the new functions', function () {
         $script = (string) file_get_contents(base_path('scripts/mac-checkup.sh'));
-        preg_match('/^pcc_space_count\(\).*?^# Sourcing this file/ms', $script, $match);
+        preg_match('/^pcc_space_count\(\).*?^# The first 10 characters/ms', $script, $match);
 
         expect($match)->not->toBeEmpty()
             ->and(str_replace('rm -f "$rc_file"', '', $match[0]))->not->toMatch('/\b(rm|mv|cp|curl|tmutil (delete|thinlocalsnapshots)|chmod|touch|tee)\b/');
