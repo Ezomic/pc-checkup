@@ -4,6 +4,13 @@ declare(strict_types=1);
 
 namespace App\Services\Reports;
 
+use App\Enums\CheckupScript;
+
+/**
+ * Both scans print some sections under the same title in different formats (the listening ports
+ * are lsof on a Mac and a process table on Windows), so a rule that reads a section only runs on
+ * the platform whose scan printed it.
+ */
 final class ReportUserMasker
 {
     public const PLACEHOLDER = '<user>';
@@ -21,7 +28,7 @@ final class ReportUserMasker
     private const SYSTEM_NAMES = [
         'root', 'daemon', 'nobody', 'wheel', 'shared', 'guest', 'public', 'default', 'default user', 'all users',
         'defaultuser0', 'administrator', 'defaultaccount', 'wdagutilityaccount', 'system', 'localservice', 'networkservice',
-        'reboot', 'shutdown', 'wtmp',
+        'reboot', 'shutdown', 'wtmp', 'gast',
     ];
 
     private const COMMON_WORDS = [
@@ -41,9 +48,14 @@ final class ReportUserMasker
 
     private const NAME_CHARACTERS = '~\A[^<>$%*{}\[\]?\\\\/\x00-\x1f\x7f]+\z~u';
 
+    private const TITLE = '~\A# (Windows|Mac) checkup:~';
+
+    private const OS_LINE = '~^- OS:(.*)$~m';
+
     public function mask(string $markdown): string
     {
         $lines = explode("\n", $markdown);
+        $platform = $this->platform($markdown);
         $names = [];
         $section = '';
         $state = ['mode' => 'none', 'console' => false];
@@ -57,10 +69,25 @@ final class ReportUserMasker
                 $state = ['mode' => 'list', 'console' => false];
             }
 
-            $lines[$index] = $this->maskLine($section, $line, $state, $names);
+            $lines[$index] = $this->maskLine($platform, $section, $line, $state, $names);
         }
 
         return $this->maskCrashNames($this->maskElsewhere(implode("\n", $lines), $names), $names);
+    }
+
+    /**
+     * A report that names its platform nowhere gets only the home folder rules, which cannot be
+     * mistaken for anything else.
+     */
+    private function platform(string $markdown): ?CheckupScript
+    {
+        $head = explode("\n## ", $markdown, 2)[0];
+
+        if (preg_match(self::TITLE, $head, $match) === 1) {
+            return $match[1] === 'Windows' ? CheckupScript::Windows : CheckupScript::Mac;
+        }
+
+        return preg_match(self::OS_LINE, $head, $match) === 1 ? CheckupScript::forOs($match[1]) : null;
     }
 
     /**
@@ -92,21 +119,38 @@ final class ReportUserMasker
      * @param  array{mode: string, console: bool}  $state
      * @param  array<string, string>  $names
      */
-    private function maskLine(string $section, string $line, array &$state, array &$names): string
+    private function maskLine(?CheckupScript $platform, string $section, string $line, array &$state, array &$names): string
     {
         if (str_starts_with($line, '```')) {
             return $line;
         }
 
-        $line = $this->maskPaths($line, $names);
-        $line = preg_replace_callback('~(\bno crontab for )(\S+)~i', function (array $m) use (&$names): string {
-            return $m[1].$this->name($m[2], $names);
-        }, $line) ?? $line;
+        if ($platform !== CheckupScript::Windows) {
+            $line = $this->macPath($line, $names);
+        }
 
+        if ($platform !== CheckupScript::Mac) {
+            $line = $this->windowsPath($line, $names);
+        }
+
+        return match ($platform) {
+            CheckupScript::Mac => $this->macSectionLine($section, $line, $state, $names),
+            CheckupScript::Windows => str_starts_with($section, 'user accounts') ? $this->windowsAccountLine($line, $state, $names) : $line,
+            null => $line,
+        };
+    }
+
+    /**
+     * @param  array{mode: string, console: bool}  $state
+     * @param  array<string, string>  $names
+     */
+    private function macSectionLine(string $section, string $line, array &$state, array &$names): string
+    {
         return match (true) {
-            str_starts_with($section, 'user accounts') => $this->accountLine($line, $state, $names),
+            str_starts_with($section, 'user accounts') => $this->macAccountLine($line, $state, $names),
             str_starts_with($section, 'logged in users') => $this->sessionLine($line, $names),
             str_starts_with($section, 'listening network ports') => $this->listenerLine($line, $names),
+            str_starts_with($section, 'cron jobs') => $this->crontabLine($line, $names),
             default => $line,
         };
     }
@@ -114,12 +158,18 @@ final class ReportUserMasker
     /**
      * @param  array<string, string>  $names
      */
-    private function maskPaths(string $line, array &$names): string
+    private function macPath(string $line, array &$names): string
     {
-        $line = preg_replace_callback(self::MAC_PATH, function (array $m) use (&$names): string {
+        return preg_replace_callback(self::MAC_PATH, function (array $m) use (&$names): string {
             return $m[1].$this->name($m[2], $names);
         }, $line) ?? $line;
+    }
 
+    /**
+     * @param  array<string, string>  $names
+     */
+    private function windowsPath(string $line, array &$names): string
+    {
         return preg_replace_callback(self::WINDOWS_PATH, function (array $m) use (&$names): string {
             $quoted = $m[2] ?? '';
             $name = $quoted !== '' ? $quoted : ($m[3] ?? '');
@@ -129,10 +179,20 @@ final class ReportUserMasker
     }
 
     /**
+     * @param  array<string, string>  $names
+     */
+    private function crontabLine(string $line, array &$names): string
+    {
+        return preg_replace_callback('~(\bno crontab for )(\S+)~i', function (array $m) use (&$names): string {
+            return $m[1].$this->name($m[2], $names);
+        }, $line) ?? $line;
+    }
+
+    /**
      * @param  array{mode: string, console: bool}  $state
      * @param  array<string, string>  $names
      */
-    private function accountLine(string $line, array &$state, array &$names): string
+    private function macAccountLine(string $line, array &$state, array &$names): string
     {
         $trimmed = trim($line);
 
@@ -159,26 +219,32 @@ final class ReportUserMasker
             return $match[1].implode(' ', $masked);
         }
 
-        $mode = $this->accountMode($line, $trimmed, $state['mode']);
-        $state['mode'] = $mode;
+        if ($trimmed === '' || str_ends_with($trimmed, ':')) {
+            $state['mode'] = 'none';
+        }
 
-        return match ($mode) {
-            'list' => preg_match('~^\S+$~', $trimmed) === 1 ? $this->name($trimmed, $names) : $line,
+        return $state['mode'] === 'list' && preg_match('~^\S+$~', $trimmed) === 1 ? $this->name($trimmed, $names) : $line;
+    }
+
+    /**
+     * @param  array{mode: string, console: bool}  $state
+     * @param  array<string, string>  $names
+     */
+    private function windowsAccountLine(string $line, array &$state, array &$names): string
+    {
+        $state['mode'] = match (true) {
+            preg_match('~^\s*Name\s+Enabled\b~', $line) === 1 => 'header-users',
+            preg_match('~^\s*Name\s+ObjectClass\b~', $line) === 1 => 'header-group',
+            $state['mode'] === 'header-users' => 'users',
+            $state['mode'] === 'header-group' => 'group',
+            str_ends_with(trim($line), ':') => 'none',
+            default => $state['mode'],
+        };
+
+        return match ($state['mode']) {
             'users' => $this->tableName($line, $names, false),
             'group' => $this->tableName($line, $names, true),
             default => $line,
-        };
-    }
-
-    private function accountMode(string $line, string $trimmed, string $mode): string
-    {
-        return match (true) {
-            preg_match('~^\s*Name\s+Enabled\b~', $line) === 1 => 'header-users',
-            preg_match('~^\s*Name\s+ObjectClass\b~', $line) === 1 => 'header-group',
-            $mode === 'header-users' => 'users',
-            $mode === 'header-group' => 'group',
-            $trimmed === '' && $mode === 'list', str_ends_with($trimmed, ':') => 'none',
-            default => $mode,
         };
     }
 
@@ -187,9 +253,9 @@ final class ReportUserMasker
      */
     private function tableName(string $line, array &$names, bool $isGroup): string
     {
-        $next = $isGroup ? '(?:User|Group|Computer)' : '(?:True|False)';
+        $next = $isGroup ? '\s+User\s*' : '\s+(?:True|False)\b.*';
 
-        if (preg_match('~^(\s*)(\S.*?)(\s+'.$next.'\b.*)$~s', $line, $match) !== 1) {
+        if (preg_match('~^(\s*)(\S.*?)('.$next.')$~s', $line, $match) !== 1) {
             return $line;
         }
 
