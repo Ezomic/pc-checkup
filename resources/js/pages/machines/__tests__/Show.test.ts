@@ -5,6 +5,7 @@ import ChangesSection from '@/components/machines/ChangesSection.vue';
 import ClientSection from '@/components/machines/ClientSection.vue';
 import DetailCards from '@/components/machines/DetailCards.vue';
 import RemoteSupportSection from '@/components/machines/RemoteSupportSection.vue';
+import ReportProblems from '@/components/machines/ReportProblems.vue';
 import ScriptVersionNote from '@/components/machines/ScriptVersionNote.vue';
 import StaleNote from '@/components/machines/StaleNote.vue';
 import TrendsCard from '@/components/machines/TrendsCard.vue';
@@ -36,6 +37,7 @@ function report(overrides: Partial<LatestReport> = {}): LatestReport {
         created_at: '2026-08-04T12:00:00.000000Z',
         stale: false,
         script: null,
+        problems: [],
         advice: [
             {
                 severity: 'high',
@@ -168,6 +170,24 @@ describe('machines/Show', () => {
         expect(render(null).findComponent(ScriptVersionNote).exists()).toBe(
             false,
         );
+    });
+
+    it('shows what looks wrong with the report above the verdict, and nothing for a report that looks fine', () => {
+        const problems = [
+            'The report stops early: its last part is missing, so the scan or the upload was probably cut off.',
+        ];
+        const broken = render(report({ problems }));
+
+        expect(broken.findComponent(ReportProblems).props('problems')).toEqual(
+            problems,
+        );
+        expect(broken.html().indexOf('report-problems-stub')).toBeLessThan(
+            broken.html().indexOf('data-test="verdict"'),
+        );
+        expect(render(report()).findComponent(ReportProblems).exists()).toBe(
+            false,
+        );
+        expect(render(null).findComponent(ReportProblems).exists()).toBe(false);
     });
 
     it('swaps the relative scanned time for the full date in print', () => {

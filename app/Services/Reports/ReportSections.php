@@ -9,8 +9,9 @@ final readonly class ReportSections
     /**
      * @param  array<string, string>  $header
      * @param  array<string, string>  $sections  Section text by lower-cased title, first occurrence only.
+     * @param  list<string>  $titles  The titles as written, first occurrence only, in report order.
      */
-    private function __construct(private array $header, private array $sections) {}
+    private function __construct(private array $header, private array $sections, private array $titles) {}
 
     public static function parse(string $markdown): self
     {
@@ -25,7 +26,7 @@ final readonly class ReportSections
 
             if (! $inFence && str_starts_with($line, '## ')) {
                 $current = count($titles);
-                $titles[] = mb_strtolower(trim(substr($line, 3)));
+                $titles[] = trim(substr($line, 3));
                 $bodies[] = [];
 
                 continue;
@@ -45,12 +46,26 @@ final readonly class ReportSections
         }
 
         $sections = [];
+        $written = [];
 
         foreach ($titles as $index => $title) {
-            $sections[$title] ??= trim(implode("\n", $bodies[$index]));
+            $key = mb_strtolower($title);
+
+            if (! isset($sections[$key])) {
+                $sections[$key] = trim(implode("\n", $bodies[$index]));
+                $written[] = $title;
+            }
         }
 
-        return new self($header, $sections);
+        return new self($header, $sections, $written);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function titles(): array
+    {
+        return $this->titles;
     }
 
     public function header(string $key): ?string

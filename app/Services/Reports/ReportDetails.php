@@ -47,34 +47,45 @@ final readonly class ReportDetails
      */
     public function cards(string $markdown, array $flags, ?string $deviceType): array
     {
+        return $this->build($markdown, $flags, $deviceType)['cards'];
+    }
+
+    /**
+     * The cards, and the titles of the ones that threw while they were built.
+     *
+     * @param  list<string>  $flags
+     * @return array{cards: list<Card>, failed: list<string>}
+     */
+    public function build(string $markdown, array $flags, ?string $deviceType): array
+    {
         $sections = ReportSections::parse($markdown);
         $freeDisk = $this->facts->from($markdown)['free_disk'];
 
-        return array_values(array_filter([
-            $this->age($sections, $flags),
-            $this->storage($sections, $freeDisk),
-            $this->storageBreakdown($sections),
-            $this->battery($sections, $deviceType),
-            $this->card('security', 'Security summary', (new ReportSecurity)->rows($sections)),
-            $this->card('stability', 'Stability', (new ReportStability)->rows($sections, $flags)),
-            $this->card('slowness', 'Why is it slow?', (new ReportSlowness)->rows($sections, $freeDisk, $this->spinningDrive($sections))),
-            (new ReportStartup)->card($sections),
-            (new ReportReclaimable)->card($sections),
-            (new ReportUpgrade)->card($sections),
-            (new ReportUnusedApps)->card($sections),
-            (new ReportBackups)->card($sections),
-            (new ReportWifi)->card($sections),
-            (new ReportBootTime)->card($sections),
-            (new ReportCrashes)->card($sections),
-            (new ReportUpdates)->card($sections),
-            (new ReportDeviceProblems)->card($sections),
-            (new ReportRemoteAccess)->card($sections),
-            (new ReportNetworkSettings)->card($sections),
-            (new ReportAntivirusProducts)->card($sections),
-            (new ReportActivationBitLocker)->card($sections),
-            (new ReportParts)->card($sections),
-            $this->card('verdict', 'Worth keeping?', (new ReportVerdict)->rows($sections, $flags, $freeDisk)),
-        ]));
+        return GuardedCards::build([
+            'Age and support' => fn (): ?array => $this->age($sections, $flags),
+            'Storage' => fn (): ?array => $this->storage($sections, $freeDisk),
+            'Storage breakdown' => fn (): ?array => $this->storageBreakdown($sections),
+            'Battery' => fn (): ?array => $this->battery($sections, $deviceType),
+            'Security summary' => fn (): ?array => $this->card('security', 'Security summary', (new ReportSecurity)->rows($sections)),
+            'Stability' => fn (): ?array => $this->card('stability', 'Stability', (new ReportStability)->rows($sections, $flags)),
+            'Why is it slow?' => fn (): ?array => $this->card('slowness', 'Why is it slow?', (new ReportSlowness)->rows($sections, $freeDisk, $this->spinningDrive($sections))),
+            'Startup items' => fn (): ?array => (new ReportStartup)->card($sections),
+            'Space you can get back' => fn (): ?array => (new ReportReclaimable)->card($sections),
+            'Can this PC run Windows 11?' => fn (): ?array => (new ReportUpgrade)->card($sections),
+            'Apps you may not need' => fn (): ?array => (new ReportUnusedApps)->card($sections),
+            'Backups' => fn (): ?array => (new ReportBackups)->card($sections),
+            'Wi-Fi connection' => fn (): ?array => (new ReportWifi)->card($sections),
+            'Startup time' => fn (): ?array => (new ReportBootTime)->card($sections),
+            'Apps that crashed' => fn (): ?array => (new ReportCrashes)->card($sections),
+            'Updates' => fn (): ?array => (new ReportUpdates)->card($sections),
+            'Devices with problems' => fn (): ?array => (new ReportDeviceProblems)->card($sections),
+            'Remote-access tools' => fn (): ?array => (new ReportRemoteAccess)->card($sections),
+            'Network settings' => fn (): ?array => (new ReportNetworkSettings)->card($sections),
+            'Antivirus programs' => fn (): ?array => (new ReportAntivirusProducts)->card($sections),
+            'Activation and BitLocker' => fn (): ?array => (new ReportActivationBitLocker)->card($sections),
+            'Parts' => fn (): ?array => (new ReportParts)->card($sections),
+            'Worth keeping?' => fn (): ?array => $this->card('verdict', 'Worth keeping?', (new ReportVerdict)->rows($sections, $flags, $freeDisk)),
+        ]);
     }
 
     private function spinningDrive(ReportSections $sections): bool
