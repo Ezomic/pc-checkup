@@ -278,6 +278,13 @@ describe('the parts card', function () {
             ->and(count($labels))->toBe(count(array_unique($labels)));
     });
 
+    it('leaves out the memory amount when no size is known anywhere, and says yes without a slot count', function () {
+        expect(prtRows(prtMac("format: 1\nmemory: complete\nmemory-upgradeable: yes\ndrives: complete\ndrive|SSD|SATA|251 GB", 'n/a')))->toBe([
+            'Upgradeable' => 'Yes',
+            'Drive 1' => 'SATA SSD, 251 GB',
+        ]);
+    });
+
     it('names a slot by its place when the scan gave no name', function () {
         $rows = prtRows(prtWindows(prtWindowsModules('module||4096 MB|DDR4|2400 MHz|DIMM', 'module|   |4096 MB|DDR4|2400 MHz|DIMM')));
 
