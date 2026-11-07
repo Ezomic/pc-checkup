@@ -7,7 +7,7 @@ namespace App\Services\Reports;
 use Illuminate\Support\Str;
 
 /**
- * @phpstan-type Drive array{name: string, bus: string|null, usb: bool, health: string|null, wear: float|null, temperature: int|null, readErrors: int|null}
+ * @phpstan-type Drive array{name: string, bus: string|null, usb: bool, health: string|null, wear: float|null, temperature: int|null, readErrors: int|null, media: string|null, bytes: float|null}
  * @phpstan-type Facts array{drives: list<Drive>, values: array<string, string>}
  */
 final readonly class ReportWindowsHealth
@@ -30,7 +30,9 @@ final readonly class ReportWindowsHealth
 
     private const MAX_DRIVES = 8;
 
-    private const DRIVE_FIELDS = ['bus', 'health', 'wear', 'temperature', 'read errors'];
+    private const DRIVE_FIELDS = ['bus', 'health', 'wear', 'temperature', 'read errors', 'type', 'size'];
+
+    private const MEDIA = ['ssd' => 'SSD', 'hdd' => 'HDD'];
 
     /**
      * @return Facts|null
@@ -123,6 +125,8 @@ final readonly class ReportWindowsHealth
             'wear' => $this->bounded($fields['wear'] ?? null, self::MAX_WEAR),
             'temperature' => ($temperature = $this->bounded($fields['temperature'] ?? null, (float) self::MAX_TEMPERATURE)) === null || $temperature <= 0 ? null : (int) round($temperature),
             'readErrors' => $this->errors($fields['read errors'] ?? null),
+            'media' => self::MEDIA[strtolower((string) $this->known($fields['type'] ?? null))] ?? null,
+            'bytes' => ByteSize::parse((string) $this->known($fields['size'] ?? null)),
         ];
     }
 

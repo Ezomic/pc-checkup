@@ -127,4 +127,20 @@ describe('share/Privacy', () => {
         expect(wrapper.text()).toContain('Apparaatbeheer');
         expect(wrapper.text()).toContain("geen hardware-id's of serienummers");
     });
+
+    it('says which parts details the scan reads, and that it keeps no serial or part numbers', () => {
+        const dutch = render({ contactConfigured: false, contactEmail: 'x' });
+
+        expect(dutch.text()).toContain(
+            'Voor onderdelen leest hij per geheugenmodule de grootte, het type en de snelheid, hoeveel geheugensloten er zijn en van elke interne schijf het soort, de aansluiting en de grootte (geen serie- of onderdeelnummers).',
+        );
+
+        page.props.locale = 'en';
+        const english = render({ contactConfigured: false, contactEmail: 'x' });
+        page.props.locale = 'nl';
+
+        expect(english.text()).toContain(
+            'For parts it reads the size, type and speed of each memory module, how many memory slots there are and the kind, connection and size of each internal drive (no serial or part numbers).',
+        );
+    });
 });

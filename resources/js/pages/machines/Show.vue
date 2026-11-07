@@ -19,6 +19,7 @@ import StaleNote from '@/components/machines/StaleNote.vue';
 import StatusBadge from '@/components/machines/StatusBadge.vue';
 import StatusSection from '@/components/machines/StatusSection.vue';
 import TrendsCard from '@/components/machines/TrendsCard.vue';
+import UpgradeAdviceLine from '@/components/machines/UpgradeAdviceLine.vue';
 import WarrantySection from '@/components/machines/WarrantySection.vue';
 import { Button } from '@/components/ui/button';
 import { checkedOn, scannedAgo } from '@/lib/scannedAgo';
@@ -37,6 +38,7 @@ import type {
     PriceItem,
     ReportChanges,
     Trend,
+    UpgradeAdvice,
     Warranty,
 } from '@/types';
 
@@ -47,6 +49,7 @@ const props = defineProps<{
     report: LatestReport | null;
     changes: ReportChanges | null;
     detailCards: DetailCard[];
+    upgradeAdvice: UpgradeAdvice | null;
     warranty: Warranty | null;
     estimate: Estimate | null;
     priceItems: PriceItem[];
@@ -171,7 +174,7 @@ defineOptions({
             </div>
         </div>
 
-        <section class="flex flex-col gap-4">
+        <section class="flex flex-col gap-4" data-test="summary">
             <p class="text-3xl font-semibold" data-test="verdict">
                 {{ verdict }}
             </p>
@@ -196,6 +199,8 @@ defineOptions({
                     <p class="text-2xl font-semibold">{{ tile.value }}</p>
                 </div>
             </div>
+
+            <UpgradeAdviceLine v-if="upgradeAdvice" :advice="upgradeAdvice" />
         </section>
 
         <ChangesSection v-if="changes" :changes="changes" />
