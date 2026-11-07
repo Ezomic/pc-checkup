@@ -95,4 +95,12 @@ describe('share/Privacy', () => {
             expect(english.text()).toContain(words);
         }
     });
+
+    it('says the scan reads update status and devices with problems', () => {
+        const wrapper = render({ contactConfigured: false, contactEmail: 'x' });
+
+        expect(wrapper.text()).toContain('of er een herstart klaarstaat');
+        expect(wrapper.text()).toContain('Apparaatbeheer');
+        expect(wrapper.text()).toContain("geen hardware-id's of serienummers");
+    });
 });

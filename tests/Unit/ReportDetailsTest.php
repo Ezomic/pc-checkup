@@ -74,7 +74,6 @@ describe('age and support', function () {
                 'Operating system' => 'macOS 10.14.6',
                 'Security support' => 'Out of security support',
                 'Newest macOS this Mac can run' => 'macOS 12 Monterey',
-                'Last update installed' => '24 January 2022, 1744 days before the scan',
             ])
             ->and(toneOf($card, 'Security support'))->toBe('bad');
     });
@@ -122,30 +121,29 @@ describe('age and support', function () {
             'Model' => 'Contoso Voyager 14',
             'Operating system' => 'Windows 10 Pro 22H2 (build 19045.5000)',
             'Security support' => 'Out of security support',
-            'Last update installed' => '20 October 2026, 14 days before the scan',
         ]);
     });
 
-    it('uses the singular for one day', function () {
+    it('uses the singular for one day in the updates card', function () {
         $markdown = withBlock(macReportFixture(), '(1744 days ago)', '(1 day ago)');
 
-        expect(detailRows($markdown)['age'])->toHaveKey('Last update installed', '24 January 2022, 1 day before the scan');
+        expect(detailRows($markdown)['updates'])->toHaveKey('Last update installed', '24 January 2022, 1 day before the scan');
     });
 
-    it('leaves the update row out when the date or the section is unusable', function (string $line) {
+    it('leaves the updates card out when the date or the section is unusable', function (string $line) {
         $markdown = withBlock(macReportFixture(), 'Newest installed macOS update: 2022-01-24 (1744 days ago)', $line);
 
-        expect(detailRows($markdown)['age'])->not->toHaveKey('Last update installed');
+        expect(detailRows($markdown))->not->toHaveKey('updates');
     })->with([
         'cannot check' => 'Newest installed macOS update: could not check (no readable update history)',
         'impossible date' => 'Newest installed macOS update: 2022-13-45 (5 days ago)',
         'not a date' => 'Newest installed macOS update: sometime',
     ]);
 
-    it('leaves the update row out when the report has no update section', function () {
+    it('leaves the updates card out when the report has no update section', function () {
         $markdown = substr(macReportFixture(), 0, (int) strpos(macReportFixture(), '## Software update age'));
 
-        expect(detailRows($markdown)['age'])->not->toHaveKey('Last update installed');
+        expect(detailRows($markdown))->not->toHaveKey('updates');
     });
 
     it('never turns markup into anything but text', function () {

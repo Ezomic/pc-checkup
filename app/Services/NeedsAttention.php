@@ -21,6 +21,7 @@ use App\Services\Reports\ReportMachineAge;
 use App\Services\Reports\ReportNetworkSettings;
 use App\Services\Reports\ReportRemoteAccess;
 use App\Services\Reports\ReportSections;
+use App\Services\Reports\ReportUpdates;
 use App\Services\Reports\ReportVerdict;
 use App\Services\Reports\ReportWindowsSecurity;
 use Illuminate\Support\Facades\Date;
@@ -168,6 +169,7 @@ final readonly class NeedsAttention
             $this->age($sections),
             ...$this->tagged($drives->reasons($sections), AttentionFilter::Drive),
             ...$this->tagged($security->reasons($sections), null),
+            ...$this->tagged((new ReportUpdates)->reasons($sections), null),
             ...$this->tagged((new ReportNetworkSettings)->reasons($sections), null),
             ...$this->tagged((new ReportAntivirusProducts)->reasons($sections), null),
             ...$this->tagged((new ReportRemoteAccess)->reasons($sections), null),

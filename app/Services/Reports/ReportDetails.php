@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Services\Reports;
 
 use App\Services\Flags\FlagAdvisor;
-use Carbon\CarbonImmutable;
 use Illuminate\Support\Str;
 
 /**
@@ -67,6 +66,8 @@ final readonly class ReportDetails
             (new ReportWifi)->card($sections),
             (new ReportBootTime)->card($sections),
             (new ReportCrashes)->card($sections),
+            (new ReportUpdates)->card($sections),
+            (new ReportDeviceProblems)->card($sections),
             (new ReportRemoteAccess)->card($sections),
             (new ReportNetworkSettings)->card($sections),
             (new ReportAntivirusProducts)->card($sections),
@@ -99,7 +100,6 @@ final readonly class ReportDetails
             $this->row('Operating system', $system),
             $system === null ? null : $this->support($flags),
             ...$this->newestMacOs($model, $sections),
-            $this->row('Last update installed', $this->lastUpdate($sections)),
         ]);
     }
 
@@ -146,20 +146,6 @@ final readonly class ReportDetails
         $version = $this->capture('/^ProductVersion:\s*(\S+)/m', $sections->text('macOS version'));
 
         return $version === null ? $sections->header('windows') : 'macOS '.$version;
-    }
-
-    private function lastUpdate(ReportSections $sections): ?string
-    {
-        $text = $sections->text('Software update age') ?? $sections->text('Windows Update');
-        $found = $text !== null && preg_match('/^Newest installed (?:macOS )?update:\s*(\d{4})-(\d{2})-(\d{2})\s*\((\d+) days? ago\)/m', $text, $match) === 1;
-
-        if (! $found || ! checkdate((int) $match[2], (int) $match[3], (int) $match[1])) {
-            return null;
-        }
-
-        $days = (int) $match[4];
-
-        return CarbonImmutable::createFromDate((int) $match[1], (int) $match[2], (int) $match[3])->format('j F Y').", {$days} ".Str::plural('day', $days).' before the scan';
     }
 
     /**
