@@ -36,10 +36,13 @@ final class RedeemPairingToken
 
             // The conditional update is what makes the token single use, as for scan codes: of two
             // simultaneous uploads only one still finds the row unused.
-            $claimed = $pairing === null ? 0 : ScanPairing::query()->whereKey($pairing->id)->redeemable($token)->update(['used_at' => now()]);
-            $client = $pairing?->client;
+            if ($pairing === null || ScanPairing::query()->whereKey($pairing->id)->redeemable($token)->update(['used_at' => now()]) !== 1) {
+                return null;
+            }
 
-            if ($claimed !== 1 || $pairing === null || $client === null) {
+            $client = $pairing->client;
+
+            if ($client === null) {
                 return null;
             }
 
