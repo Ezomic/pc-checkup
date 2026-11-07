@@ -11,12 +11,15 @@ use App\Models\Machine;
 use App\Models\Report;
 use App\Models\User;
 use App\Services\Flags\FlagAdvisor;
+use App\Services\Reports\ReportAntivirusProducts;
 use App\Services\Reports\ReportBackups;
 use App\Services\Reports\ReportDetails;
 use App\Services\Reports\ReportDriveHealth;
 use App\Services\Reports\ReportFacts;
 use App\Services\Reports\ReportFreshness;
 use App\Services\Reports\ReportMachineAge;
+use App\Services\Reports\ReportNetworkSettings;
+use App\Services\Reports\ReportRemoteAccess;
 use App\Services\Reports\ReportSections;
 use App\Services\Reports\ReportUpdates;
 use App\Services\Reports\ReportVerdict;
@@ -167,6 +170,9 @@ final readonly class NeedsAttention
             ...$this->tagged($drives->reasons($sections), AttentionFilter::Drive),
             ...$this->tagged($security->reasons($sections), null),
             ...$this->tagged((new ReportUpdates)->reasons($sections), null),
+            ...$this->tagged((new ReportNetworkSettings)->reasons($sections), null),
+            ...$this->tagged((new ReportAntivirusProducts)->reasons($sections), null),
+            ...$this->tagged((new ReportRemoteAccess)->reasons($sections), null),
             ...$this->flags($report->flags, [...$drives->coveredFlags($sections), ...$security->coveredFlags($sections)]),
             $this->freshness->isOlderThan($report, self::RESCAN_AFTER_DAYS) ? $this->reason(AttentionLevel::Soon, 'Last scanned more than 6 months ago', AttentionFilter::Stale) : null,
         ]));

@@ -68,6 +68,9 @@ final readonly class ReportDetails
             (new ReportCrashes)->card($sections),
             (new ReportUpdates)->card($sections),
             (new ReportDeviceProblems)->card($sections),
+            (new ReportRemoteAccess)->card($sections),
+            (new ReportNetworkSettings)->card($sections),
+            (new ReportAntivirusProducts)->card($sections),
             $this->card('verdict', 'Worth keeping?', (new ReportVerdict)->rows($sections, $flags, $freeDisk)),
         ]));
     }

@@ -1768,6 +1768,183 @@ pcc_crashes_report() {
   return 0
 }
 
+PCC_REMOTE_CAP="${PCC_REMOTE_CAP:-15}"
+PCC_REMOTE_DIRS="${PCC_REMOTE_DIRS:-/Applications:${HOME:-}/Applications:/Library/LaunchDaemons:/Library/LaunchAgents}"
+PCC_NETWORK_CAP="${PCC_NETWORK_CAP:-10}"
+PCC_HOSTS_FILE="${PCC_HOSTS_FILE:-/etc/hosts}"
+PCC_HOSTS_LINE_LIMIT=50000
+
+# Known remote-access tools as "name|pattern". Only the name is ever printed. The app holds the same
+# list of names.
+pcc_remote_tools() {
+  cat << 'EOF'
+TeamViewer|teamviewer
+AnyDesk|anydesk
+RustDesk|rustdesk
+Supremo|^supremo
+ScreenConnect|screenconnect|connectwisecontrol
+LogMeIn|logmein
+Splashtop|splashtop
+Chrome Remote Desktop|chrome remote desktop|chromoting|remoting_me2me_host
+RealVNC|realvnc|^vnc (server|viewer)$
+NoMachine|nomachine|^nxserver
+Zoho Assist|zoho ?assist
+DWService|dwservice|dwagent
+HopToDesk|hoptodesk
+GoTo Resolve|goto ?resolve|gotoassist
+BeyondTrust|bomgar|beyondtrust remote support
+Parsec|^parsecd?$
+EOF
+}
+
+# Sites whose redirection in the hosts file is a sign of hijacking. The app holds the same list.
+PCC_WATCHED_SITES="google.com,google.nl,gmail.com,youtube.com,microsoft.com,live.com,outlook.com,office.com,microsoftonline.com,windowsupdate.com,apple.com,icloud.com,facebook.com,paypal.com,ing.nl,rabobank.nl,abnamro.nl,snsbank.nl,asnbank.nl,regiobank.nl,triodos.nl,knab.nl,bunq.com,digid.nl,belastingdienst.nl"
+
+# The "Remote access tools" section: which known tools are installed (an app, or a launch item, in the
+# folders of PCC_REMOTE_DIRS) or running. The other names are only compared in memory and never
+# printed, so this is not an app inventory. LogMeIn Hamachi is a VPN, not remote control.
+pcc_remote_report() {
+  local installed running rc scan="complete" readable=0 dir line name pattern states old_ifs
+  installed=$(mktemp)
+  old_ifs=$IFS
+  IFS=:
+  set -- $PCC_REMOTE_DIRS
+  IFS=$old_ifs
+  for dir in ${1+"$@"}; do
+    [ -n "$dir" ] && [ -d "$dir" ] && [ -r "$dir" ] && [ -x "$dir" ] || continue
+    readable=1
+    pcc_capped "$PCC_REMOTE_CAP" find "$dir" -mindepth 1 -maxdepth 1 -print 2> /dev/null >> "$installed"
+    rc=$?
+    if [ "$rc" = 142 ]; then scan="partial (time limit of $PCC_REMOTE_CAP seconds reached)"; elif [ "$rc" != 0 ]; then readable=0; break; fi
+  done
+  if [ "$readable" = 0 ]; then scan="partial (installed apps could not be read)"; fi
+  running=$(pcc_capped "$PCC_REMOTE_CAP" ps -axco comm 2> /dev/null)
+  rc=$?
+  if [ "$rc" = 142 ]; then scan="partial (time limit of $PCC_REMOTE_CAP seconds reached)"; fi
+  echo "format: 1"
+  if [ "$rc" != 0 ] && [ "$rc" != 142 ]; then
+    if [ "$readable" = 0 ]; then
+      echo "scan: could not check"
+      rm -f "$installed"
+      return 0
+    fi
+    scan="partial (running programs could not be read)"
+  fi
+  echo "scan: $scan"
+  running=$(printf '%s\n' "$running" | grep -iv hamachi)
+  printf '%s\n' "$(sed -e 's|.*/||' -e 's|\.app$||' "$installed" | grep -iv hamachi)" > "$installed"
+  while IFS= read -r line; do
+    name=${line%%|*}
+    pattern=${line#*|}
+    states=""
+    if grep -iEq "$pattern" "$installed"; then states="installed"; fi
+    if printf '%s\n' "$running" | grep -iEq "$pattern"; then states="${states:+$states,}running"; fi
+    if [ -n "$states" ]; then echo "tool|$name|$states"; fi
+  done << EOF
+$(pcc_remote_tools)
+EOF
+  rm -f "$installed"
+  return 0
+}
+
+# Hosts file summary: how many host names it maps besides the defaults, and which of the watched
+# sites it sends elsewhere (redirected) or to nowhere (blocked). No line of the file is printed.
+pcc_hosts_summary() {
+  local out rc
+  if [ ! -r "$PCC_HOSTS_FILE" ]; then echo "hosts: could not check"; return 0; fi
+  out=$(pcc_capped "$PCC_NETWORK_CAP" awk -v limit="$PCC_HOSTS_LINE_LIMIT" -v sites="$PCC_WATCHED_SITES" '
+    BEGIN {
+      n = split(sites, s, ",")
+      split("localhost localhost.localdomain broadcasthost ip6-localhost ip6-loopback", d, " ")
+      for (i in d) def[d[i]] = 1
+    }
+    NR > limit { partial = 1; exit }
+    {
+      gsub(/\r/, "")
+      sub(/#.*/, "")
+      if (NF < 2) next
+      nowhere = (tolower($1) ~ /^(0\.0\.0\.0|127\.[0-9]+\.[0-9]+\.[0-9]+|::1?|::0)$/)
+      for (f = 2; f <= NF; f++) {
+        name = tolower($f)
+        sub(/\.$/, "", name)
+        if (name in def) continue
+        entries++
+        for (i = 1; i <= n; i++) {
+          site = s[i]
+          if (name != site && !(length(name) > length(site) && substr(name, length(name) - length(site)) == "." site)) continue
+          if (nowhere && !(site in blocked)) { blocked[site] = 1; blist = blist (blist == "" ? "" : ", ") site }
+          if (!nowhere && !(site in redirected)) { redirected[site] = 1; rlist = rlist (rlist == "" ? "" : ", ") site }
+        }
+      }
+    }
+    END {
+      print (partial ? "hosts: partial (only the first " limit " lines were read)" : "hosts: complete")
+      print "hosts-entries: " entries + 0
+      if (rlist != "") print "hosts-redirected: " rlist
+      if (blist != "") print "hosts-blocked: " blist
+    }' "$PCC_HOSTS_FILE" 2> /dev/null)
+  rc=$?
+  if [ "$rc" != 0 ]; then echo "hosts: could not check"; return 0; fi
+  printf '%s\n' "$out"
+}
+
+# Whether a proxy is set, with only its host and port (and only the host of a proxy script): never a
+# user name, password or path.
+pcc_proxy_summary() {
+  local out rc
+  out=$(pcc_capped "$PCC_NETWORK_CAP" scutil --proxy 2> /dev/null)
+  rc=$?
+  if [ "$rc" != 0 ]; then echo "proxy: could not check"; return 0; fi
+  printf '%s\n' "$out" | awk '
+    function clean(t) {
+      sub(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, "", t)
+      sub(/^.*@/, "", t)
+      sub(/[\/?#].*$/, "", t)
+      return ((t ~ /^[A-Za-z0-9._:-]+$/ || t ~ /^\[[0-9A-Fa-f:.]+\](:[0-9]+)?$/) && length(t) <= 100) ? t : ""
+    }
+    function at(kind) { return v[kind "Proxy"] (v[kind "Port"] != "" ? ":" v[kind "Port"] : "") }
+    /^  [A-Za-z]+ : / { v[$1] = $3 }
+    END {
+      host = ""
+      if (v["HTTPSEnable"] == "1" && v["HTTPSProxy"] != "") host = at("HTTPS")
+      else if (v["HTTPEnable"] == "1" && v["HTTPProxy"] != "") host = at("HTTP")
+      else if (v["SOCKSEnable"] == "1" && v["SOCKSProxy"] != "") host = at("SOCKS")
+      on = (v["HTTPEnable"] == "1" || v["HTTPSEnable"] == "1" || v["SOCKSEnable"] == "1")
+      script = ""
+      if (v["ProxyAutoConfigEnable"] == "1") { on = 1; script = v["ProxyAutoConfigURLString"] }
+      if (!on) { print "proxy: off"; exit }
+      print "proxy: on"
+      host = clean(host)
+      script = clean(script)
+      if (host != "") print "proxy-host: " host
+      if (script != "") print "proxy-script-host: " script
+    }'
+}
+
+pcc_dns_summary() {
+  local out rc
+  out=$(pcc_capped "$PCC_NETWORK_CAP" scutil --dns 2> /dev/null)
+  rc=$?
+  if [ "$rc" != 0 ]; then echo "dns: could not check"; return 0; fi
+  echo "dns: complete"
+  printf '%s\n' "$out" | awk '
+    /^ *nameserver\[[0-9]+\] *: / {
+      a = $NF
+      if (a !~ /^[0-9A-Za-z:.%]+$/ || a in seen) next
+      seen[a] = 1
+      if (n < 8) { print "dns-server: " a; n++ }
+    }'
+}
+
+# The "Network settings" section: the hosts file summary, the proxy and the DNS servers in use.
+pcc_network_report() {
+  echo "format: 1"
+  pcc_hosts_summary
+  pcc_proxy_summary
+  pcc_dns_summary
+  return 0
+}
+
 # Sourcing this file (for tests) stops here instead of running the checkup.
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
 
@@ -1969,6 +2146,8 @@ sh_section "Cron jobs" "crontab -l 2>&1"
 sh_section "Listening network ports" "lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | head -40"
 sh_section "DNS and proxy" "scutil --dns | head -25; scutil --proxy"
 sh_section "Hosts file (non-default lines)" "grep -vE '^\s*#|^\s*$' /etc/hosts"
+section "Remote access tools" pcc_remote_report
+section "Network settings" pcc_network_report
 
 sh_section "Kernel panic reports" "ls -lt /Library/Logs/DiagnosticReports/*.panic 2>&1 | head -10; ls -lt /Library/Logs/DiagnosticReports 2>/dev/null | head -15"
 section "Recent app crashes" pcc_crashes_report
