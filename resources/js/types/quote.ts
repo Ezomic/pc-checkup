@@ -5,6 +5,11 @@ export type PriceItem = {
     unit: string | null;
 };
 
+export type UpgradeAdvice = {
+    text: string;
+    price: Pick<PriceItem, 'name' | 'price_cents' | 'unit'> | null;
+};
+
 export type EstimateVerdict = 'Repair' | 'Replace';
 
 export type Estimate = {

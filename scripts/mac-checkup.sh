@@ -26,6 +26,10 @@
 # own apps and utilities. The backup step reads when Time Machine last ran and whether iCloud Drive
 # keeps Desktop and Documents in sync. Neither step changes anything.
 #
+# The memory and drives step reads, for at most 15 seconds per system report, whether the memory can
+# be upgraded, the size, type and speed of each memory slot and the kind, connection and size of each
+# internal drive, so parts that fit can be bought. It never prints a serial number, part number or maker.
+#
 # --benchmark also runs short CPU, memory, disk and network speed tests (a minute or so, with a
 # 512 MB temp file that is removed afterwards) and adds a Benchmark section to the report. The
 # network tests need a token or scan code and are skipped without one.
@@ -1969,6 +1973,105 @@ pcc_trust_report() {
   return 0
 }
 
+PCC_PARTS_CAP="${PCC_PARTS_CAP:-15}"
+PCC_PARTS_MAX_MODULES=16
+PCC_PARTS_MAX_DRIVES=8
+
+# Reads "system_profiler SPMemoryDataType" on stdin: whether the memory can be upgraded and per slot its
+# size, type and speed. Apple silicon lists no slots, only its unified memory and its type. Makers, part
+# numbers and serial numbers are never printed, and a value of an unexpected shape is left blank.
+pcc_parts_memory() {
+  awk -v max="$PCC_PARTS_MAX_MODULES" '
+    function indent(s) { match(s, /^ */); return RLENGTH }
+    function value(s) { sub(/^[^:]*: */, "", s); gsub(/[\001-\037\177|]/, "", s); sub(/ +$/, "", s); return s }
+    function flush() {
+      if (slot != "" && n < max) { print "module|" slot "|" size "|" type "|" speed "|"; n++ }
+      slot = ""
+    }
+    /^ *Memory Slots: *$/ { slots = indent($0); next }
+    /^ *Upgradeable Memory: / { v = tolower(value($0)); if (v == "yes" || v == "no") print "memory-upgradeable: " v; next }
+    slots != "" && /^ *[^ :][^:]*: *$/ && indent($0) > slots {
+      flush()
+      name = $0
+      sub(/^ */, "", name); sub(/: *$/, "", name)
+      gsub(/[\001-\037\177]/, " ", name); gsub(/\|/, "", name); gsub(/  +/, " ", name)
+      slot = substr(name, 1, 40); sub(/ +$/, "", slot)
+      size = ""; type = ""; speed = ""
+      next
+    }
+    slot != "" && /^ *Size: / { v = value($0); if (v ~ /^[0-9]+([.,][0-9]+)? (MB|GB|TB)$/) size = v; else if (v == "Empty") size = "empty"; next }
+    slot != "" && /^ *Type: / { v = value($0); if (v ~ /^[A-Za-z0-9]+( ECC)?$/ && length(v) <= 12 && v != "Empty") type = v; next }
+    slot != "" && /^ *Speed: / { v = value($0); if (v ~ /^[0-9]+ MHz$/) speed = v; next }
+    slots == "" && /^ +Memory: +[0-9]/ { unified = 1; next }
+    slots == "" && /^ +Type: / { v = value($0); if (v ~ /^[A-Za-z0-9]+$/ && length(v) <= 12) utype = v; next }
+    END {
+      flush()
+      if (unified && slots == "") { print "memory-unified: yes"; if (utype != "") print "memory-type: " utype }
+    }'
+}
+
+# Reads "system_profiler SPNVMeDataType SPSerialATADataType" on stdin: per internal drive whether it is
+# solid state or spinning, how it is connected (NVMe, SATA, or PCIe for the older Apple AHCI blades) and
+# its size. Removable and detachable drives, volumes and controllers are skipped, and no drive name,
+# model or serial number is printed.
+pcc_parts_drives() {
+  awk -v max="$PCC_PARTS_MAX_DRIVES" '
+    function indent(s) { match(s, /^ */); return RLENGTH }
+    function value(s) { sub(/^[^:]*: */, "", s); gsub(/[\001-\037\177|]/, "", s); sub(/ +$/, "", s); return s }
+    function close_to(i) { while (depth > 0 && ind[stack[depth]] >= i) depth-- }
+    /^[^ ][^:]*: *$/ { nvme = ($0 ~ /NVM/); depth = 0; next }
+    /^ +[^ :][^:]*: *$/ {
+      i = indent($0)
+      close_to(i)
+      n++; ind[n] = i; nv[n] = nvme; up[n] = depth > 0 ? stack[depth] : 0
+      depth++; stack[depth] = n
+      next
+    }
+    /^ +[^ :][^:]*: / {
+      close_to(indent($0))
+      if (depth == 0) next
+      r = stack[depth]; key = $0; sub(/^ */, "", key); sub(/:.*$/, "", key); v = value($0)
+      if (key == "Capacity") { sub(/ *\(.*$/, "", v); if (v ~ /^[0-9]+([.,][0-9]+)? (MB|GB|TB)$/) cap[r] = v }
+      else if (key == "Medium Type") med[r] = (v == "Solid State") ? "SSD" : ((v == "Rotational") ? "HDD" : "")
+      else if (key == "Model") model[r] = 1
+      else if (key == "Physical Interconnect") link[r] = v
+      else if ((key == "Detachable Drive" || key == "Removable Media") && v == "Yes") gone[r] = 1
+    }
+    END {
+      for (r = 1; r <= n && shown < max; r++) {
+        if (!model[r] || cap[r] == "" || gone[r]) continue
+        l = link[r] != "" ? link[r] : link[up[r]]
+        bus = nv[r] ? "NVMe" : (l ~ /^PCI/ ? "PCIe" : "SATA")
+        print "drive|" (nv[r] ? "SSD" : med[r]) "|" bus "|" cap[r]
+        shown++
+      }
+    }'
+}
+
+pcc_parts_status() {
+  case $2 in
+    0) echo "$1: complete" ;;
+    142) echo "$1: partial (time limit of $PCC_PARTS_CAP seconds reached)" ;;
+    *) echo "$1: could not check" ;;
+  esac
+}
+
+# The "Memory and drives" section, for buying parts that fit. Each system report gets PCC_PARTS_CAP
+# seconds; what was read before the cap is kept and flagged as partial.
+pcc_parts_report() {
+  local out rc
+  echo "format: 1"
+  out=$(pcc_capped "$PCC_PARTS_CAP" system_profiler SPMemoryDataType 2> /dev/null)
+  rc=$?
+  pcc_parts_status memory "$rc"
+  if [ "$rc" = 0 ] || [ "$rc" = 142 ]; then printf '%s\n' "$out" | pcc_parts_memory; fi
+  out=$(pcc_capped "$PCC_PARTS_CAP" system_profiler SPNVMeDataType SPSerialATADataType 2> /dev/null)
+  rc=$?
+  pcc_parts_status drives "$rc"
+  if [ "$rc" = 0 ] || [ "$rc" = 142 ]; then printf '%s\n' "$out" | pcc_parts_drives; fi
+  return 0
+}
+
 # Sourcing this file (for tests) stops here instead of running the checkup.
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
 
@@ -2185,6 +2288,7 @@ sh_section "Reboot history and boot time" "last reboot | head -8; sysctl kern.bo
 sh_section "Fans and temperatures (needs sudo)" "if [ \"\$(id -u)\" = 0 ]; then powermetrics -n 1 -i 1000 --samplers thermal 2>&1 | head -20; powermetrics -n 1 -i 1000 --samplers smc 2>&1 | grep -iE 'fan|temp' | head -10; else echo 'Run with sudo to include this section.'; fi"
 sh_section "Locale and time" "date; systemsetup -gettimezone 2>&1; defaults read NSGlobalDomain AppleLanguages 2>/dev/null"
 sh_section "Developer tools" "xcode-select -p 2>&1; git --version 2>&1; python3 --version 2>&1"
+section "Memory and drives" pcc_parts_report
 
 BENCH=$(mktemp)
 if [ "$PCC_BENCHMARK" = 1 ]; then pcc_run_benchmark "$BENCH"; fi
