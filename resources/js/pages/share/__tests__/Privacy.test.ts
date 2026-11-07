@@ -96,6 +96,30 @@ describe('share/Privacy', () => {
         }
     });
 
+    it('says plainly that networks, VPNs, certificates, permissions and hosts lines are not recorded', () => {
+        const dutch = render({ contactConfigured: false, contactEmail: 'x' });
+
+        expect(dutch.text()).toContain(
+            'Hij legt niets vast over wifi-netwerken in de buurt of opgeslagen wifi-netwerken, namen van vpn-verbindingen, de namen van certificaten of welke apps privacytoestemmingen hebben, en geen enkele regel van het hosts-bestand',
+        );
+        expect(dutch.text()).toContain(
+            'Op een Mac telt hij hoeveel certificaten een aangepaste vertrouwensinstelling hebben (alleen het aantal).',
+        );
+        expect(dutch.text()).not.toContain('Op een Mac staan ook');
+
+        page.props.locale = 'en';
+        const english = render({ contactConfigured: false, contactEmail: 'x' });
+        page.props.locale = 'nl';
+
+        expect(english.text()).toContain(
+            'It records nothing about nearby or saved Wi-Fi networks, VPN names, the names of certificates or which apps hold privacy permissions, and no line of the hosts file',
+        );
+        expect(english.text()).toContain(
+            'On a Mac it counts how many certificates have custom trust settings (only the number).',
+        );
+        expect(english.text()).not.toContain('On a Mac it also lists');
+    });
+
     it('says the scan reads update status and devices with problems', () => {
         const wrapper = render({ contactConfigured: false, contactEmail: 'x' });
 
