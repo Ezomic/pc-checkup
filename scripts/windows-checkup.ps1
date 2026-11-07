@@ -39,6 +39,10 @@
 # DNS servers in use, and the names of the antivirus programs Windows Security Center knows and whether
 # each is active. Every read has a time limit.
 #
+# The activation and BitLocker step records whether Windows is activated (the licence status only,
+# never the product key) and, for each fixed drive, whether BitLocker is on, off or suspended, read
+# from the drive property Explorer shows, for at most 20 seconds. It never reads a recovery key.
+#
 # The memory modules step reads, for at most 25 seconds, the slot name, size, type, speed and form factor
 # of each installed memory module, so a matching part can be bought. It never reads a serial or part
 # number. The drives for the parts card come from the health step above.
@@ -1130,6 +1134,38 @@ function Get-DeviceProblemLines($Devices, $Failure) {
     $lines.Add('scan: complete')
     $lines.Add("total: $($rows.Count)")
     $rows | Select-Object -First 20 | ForEach-Object { $lines.Add($_) }
+    return $lines.ToArray()
+}
+
+# The lines of the "Activation and BitLocker" section. $LicenceStatus is the LicenseStatus number of
+# the Windows licence; only that number is used, never the product key. $Drives holds "letter|code"
+# rows of Explorer's System.Volume.BitLockerProtection drive property, which needs no admin rights
+# and says only whether a drive is protected; no recovery key or key protector is read. Codes that
+# are not known give could not check. $DrivesFailure is set when that read failed or timed out.
+function Get-ActivationBitLockerLines($LicenceStatus, $LicenceNote, [string[]]$Drives, $DrivesFailure) {
+    $licenceWords = @{ 0 = 'unlicensed'; 1 = 'licensed'; 2 = 'grace period'; 3 = 'grace period'; 4 = 'non-genuine grace period'; 5 = 'notification'; 6 = 'grace period' }
+    $driveWords = @{ 0 = 'off'; 1 = 'on'; 2 = 'off'; 3 = 'encrypting'; 4 = 'decrypting'; 5 = 'suspended'; 6 = 'locked'; 8 = 'waiting' }
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('format: 1')
+    $activation = 'could not check'
+    if (-not $LicenceNote -and "$LicenceStatus" -cmatch '^[0-9]\z' -and $licenceWords.ContainsKey([int]"$LicenceStatus")) { $activation = $licenceWords[[int]"$LicenceStatus"] }
+    $lines.Add("activation: $activation")
+    if ($DrivesFailure) {
+        $lines.Add('bitlocker: could not check')
+        return $lines.ToArray()
+    }
+    $lines.Add('bitlocker: complete')
+    $seen = New-Object System.Collections.Generic.List[string]
+    foreach ($row in @($Drives)) {
+        if ("$row" -cnotmatch '^([A-Za-z]:)\|([0-9]{0,2})\z') { continue }
+        $letter = $Matches[1].ToUpperInvariant()
+        $protection = $Matches[2]
+        if ($seen.Contains($letter)) { continue }
+        $seen.Add($letter)
+        $state = 'could not check'
+        if ($protection -ne '' -and $driveWords.ContainsKey([int]$protection)) { $state = $driveWords[[int]$protection] }
+        $lines.Add("drive|$letter|$state")
+    }
     return $lines.ToArray()
 }
 
@@ -2423,6 +2459,18 @@ Add-Section 'Antivirus products' {
         foreach ($product in @(Get-CimInstance -Namespace root\SecurityCenter2 -ClassName AntiVirusProduct -OperationTimeoutSec 15 -ErrorAction Stop)) { "$($product.productState)|$($product.displayName)" }
     } 20
     Get-AntivirusProductLines $read.Value $read.Note
+}
+Add-Section 'Activation and BitLocker' {
+    $drives = Read-CappedJob {
+        $shell = New-Object -ComObject Shell.Application
+        foreach ($drive in @([System.IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq 'Fixed' })) {
+            $letter = $drive.Name.TrimEnd('\')
+            $protection = $null
+            try { $protection = $shell.NameSpace("$letter\").Self.ExtendedProperty('System.Volume.BitLockerProtection') } catch { $protection = $null }
+            "$letter|$protection"
+        }
+    } 20
+    Get-ActivationBitLockerLines $licence.Value.LicenseStatus $licence.Note $drives.Value $drives.Note
 }
 Add-Section 'Memory modules' {
     $read = Read-CappedJob {
