@@ -83,6 +83,7 @@ final readonly class ReportDetails
             'Network settings' => fn (): ?array => (new ReportNetworkSettings)->card($sections),
             'Antivirus programs' => fn (): ?array => (new ReportAntivirusProducts)->card($sections),
             'Activation and BitLocker' => fn (): ?array => (new ReportActivationBitLocker)->card($sections),
+            'Parts' => fn (): ?array => (new ReportParts)->card($sections),
             'Worth keeping?' => fn (): ?array => $this->card('verdict', 'Worth keeping?', (new ReportVerdict)->rows($sections, $flags, $freeDisk)),
         ]);
     }

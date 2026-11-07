@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Actions\Machines\BuildReportInsights;
+use App\Actions\Machines\BuildUpgradeAdvice;
 use App\Actions\Machines\CompareLatestReports;
 use App\Actions\Machines\CreateManualMachine;
 use App\Actions\Machines\ForgetMachine;
@@ -124,13 +125,14 @@ final class MachineController extends Controller
         ]);
     }
 
-    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts, BuildReportInsights $insights, ReportFreshness $freshness, CompareLatestReports $changes, ReportDetails $details, ReportTrends $trends, ReportScriptVersion $scriptVersion, WarrantyLink $warranty, EstimateContext $estimate, ReportHealth $health): Response
+    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts, BuildReportInsights $insights, ReportFreshness $freshness, CompareLatestReports $changes, ReportDetails $details, ReportTrends $trends, ReportScriptVersion $scriptVersion, WarrantyLink $warranty, EstimateContext $estimate, BuildUpgradeAdvice $upgrade, ReportHealth $health): Response
     {
         $this->authorize('view', $machine);
 
         $report = $machine->latestReport();
         $built = $report === null ? ['cards' => [], 'failed' => []] : $details->build($report->markdown, $report->flags, $machine->device_type);
         $cards = $built['cards'];
+        $priceItems = array_values($machine->user?->priceItems()->get(['id', 'name', 'price_cents', 'unit'])->all() ?? []);
 
         return Inertia::render('machines/Show', [
             'machine' => $machine->only(['id', 'name', 'serial', 'hardware_uuid', 'os', 'device_type', 'model', 'rustdesk_id', 'status']),
@@ -146,9 +148,10 @@ final class MachineController extends Controller
             ],
             'changes' => $changes->handle($machine),
             'detailCards' => $cards,
+            'upgradeAdvice' => $upgrade->handle($report, $cards, $priceItems),
             'warranty' => $report === null ? null : $warranty->for($report->markdown),
             'estimate' => $estimate->from($cards),
-            'priceItems' => $machine->user?->priceItems()->get(['id', 'name', 'price_cents', 'unit']) ?? [],
+            'priceItems' => $priceItems,
             'vatPercent' => EuroAmount::VAT_PERCENT,
             'trends' => $trends->forMachine($machine),
             'client' => $machine->client?->only(['id', 'name']),
