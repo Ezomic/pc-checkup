@@ -120,6 +120,28 @@ describe('share/Privacy', () => {
         expect(english.text()).not.toContain('On a Mac it also lists');
     });
 
+    it('says the scan reads activation and BitLocker but never the product key or recovery keys', () => {
+        const dutch = render({ contactConfigured: false, contactEmail: 'x' });
+
+        expect(dutch.text()).toContain(
+            'Op Windows leest hij of Windows is geactiveerd en of BitLocker elke vaste schijf beveiligt (aan, uit of onderbroken).',
+        );
+        expect(dutch.text()).toContain(
+            'De productcode van Windows en BitLocker-herstelsleutels leest hij nooit.',
+        );
+
+        page.props.locale = 'en';
+        const english = render({ contactConfigured: false, contactEmail: 'x' });
+        page.props.locale = 'nl';
+
+        expect(english.text()).toContain(
+            'On Windows it reads whether Windows is activated and whether BitLocker protects each fixed drive (on, off or suspended).',
+        );
+        expect(english.text()).toContain(
+            'It never reads the Windows product key or BitLocker recovery keys.',
+        );
+    });
+
     it('says the scan reads update status and devices with problems', () => {
         const wrapper = render({ contactConfigured: false, contactEmail: 'x' });
 
