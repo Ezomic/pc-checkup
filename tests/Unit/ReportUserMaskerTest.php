@@ -15,6 +15,12 @@ function macSection(string $title, string $lines): string
     return "## {$title}\n\n```\n{$lines}\n```\n";
 }
 
+/** Windows PowerShell 5.1 pads every column, so a short program name is followed by spaces. */
+function windowsPortsTable(): string
+{
+    return "LocalAddress LocalPort Process           \n------------ --------- -------           \n0.0.0.0            135 svchost           \n0.0.0.0            445 System            \n127.0.0.1         2375 com.docker.backend\n127.0.0.1         7768 Spotify           ";
+}
+
 describe('home paths', function () {
     it('masks the name in a Mac home path', function () {
         $out = maskReport(macSection('Performance: biggest folders in home', "38G\t/Users/robbin/Library\n21G\t/Users/robbin/Movies"));
@@ -25,7 +31,7 @@ describe('home paths', function () {
     });
 
     it('masks a Windows profile folder, with a space in the name, either slash and any case', function () {
-        $out = maskReport(macSection('Startup programs', "C:\\Users\\John Smith\\AppData\\Roaming\\x.exe\nc:/users/bob/Desktop\nC:\\Users\\kim --flag"));
+        $out = maskReport(macSection('Startup programs', "C:\\Users\\John Smith\\AppData\\Roaming\\x.exe\nc:/users/bob/Desktop\nC:\\Users\\kim --flag"), 'Windows checkup: TEST-PC');
 
         expect($out)->toContain('C:\\Users\\<user>\\AppData\\Roaming\\x.exe')
             ->toContain('c:/users/<user>/Desktop')
@@ -113,6 +119,67 @@ describe('account lines', function () {
             ->toContain('_mdnsresponder')->toContain('sshd      1 root')
             ->toContain('COMMAND   PID   USER   FD   TYPE')
             ->not->toContain('robbin');
+    });
+});
+
+describe('formats that belong to one platform', function () {
+    it('never learns a name on Windows from a section that only a Mac prints that way', function (string $title, string $lines) {
+        $text = "# Windows checkup: TEST-PC\n\n- Format: 1\n\n".macSection($title, $lines)."## Notes\n\nSpotify svchost Discord\n";
+
+        expect((new ReportUserMasker)->mask($text))->toBe($text);
+    })->with([
+        'the listening ports, padded the way Windows PowerShell 5.1 prints them' => ['Listening network ports', windowsPortsTable()],
+        'a login session' => ['Logged in users and recent logins', 'Spotify   console  Nov  3 09:00'],
+        'an account list' => ['User accounts', "Spotify\nDiscord"],
+        'the admin group members' => ['User accounts', 'GroupMembership: root Spotify'],
+        'the console user' => ['User accounts', "Console user:\nSpotify"],
+        'the crontab message' => ['Cron jobs', 'crontab: no crontab for Spotify'],
+        'a Mac home folder' => ['Startup programs', '/Users/Spotify/Library'],
+    ]);
+
+    it('never learns a name on a Mac from a format that only Windows prints', function (string $title, string $lines) {
+        $text = maskReport(macSection($title, $lines)."## Notes\n\nSpotify\n");
+
+        expect((new ReportUserMasker)->mask($text))->toBe($text)->toContain('Spotify')->not->toContain('<user>');
+    })->with([
+        'a Windows profile folder' => ['Folders', 'C:\\Users\\Spotify\\AppData'],
+        'the Windows accounts table' => ['User accounts', "Name    Enabled LastLogon\n----    ------- ---------\nSpotify True    1-11-2026"],
+        'the Windows Administrators group' => ['User accounts', "Name               ObjectClass\n----               -----------\nTEST-PC\\Spotify     User"],
+        'a crontab message outside the cron jobs' => ['Folders', 'crontab: no crontab for Spotify'],
+    ]);
+
+    it('takes a user from the Administrators group but not a group or a computer', function () {
+        $lines = "Name                       ObjectClass\n----                       -----------\nTEST-PC\\robbin             User\nCONTOSO\\Domain Admins      Group\nCONTOSO\\Helpdesk           Group\nCONTOSO\\PRINTSRV01\$        Computer";
+        $out = maskReport(macSection('User accounts', $lines)."## Notes\n\nDomain Admins, Helpdesk and PRINTSRV01 stay.\n", 'Windows checkup: TEST-PC');
+
+        expect($out)->toContain('TEST-PC\\<user>             User')
+            ->toContain('CONTOSO\\Domain Admins      Group')->toContain('CONTOSO\\Helpdesk           Group')
+            ->toContain('CONTOSO\\PRINTSRV01$        Computer')
+            ->toContain('Domain Admins, Helpdesk and PRINTSRV01 stay.');
+    });
+
+    it('does not take the Dutch built-in guest account for a user', function () {
+        $lines = "Name          Enabled LastLogon\n----          ------- ---------\nAdministrator False\nGast          False\nEigenaar      True    6-11-2026 18:02:41";
+        $out = maskReport(macSection('User accounts', $lines), 'Windows checkup: TEST-PC');
+
+        expect($out)->toContain('Gast          False')->toContain('<user>      True')->not->toContain('Eigenaar');
+    });
+
+    it('tells the platform from the OS line when the title is missing', function () {
+        $windows = "- Format: 1\n- OS: Windows\n\n## Listening network ports\n\n```\n".windowsPortsTable()."\n```\n";
+        $mac = "- Format: 1\n- OS: macOS\n\n## Listening network ports\n\n```\nrapportd  412 robbin    8u  IPv4\n```\n\n## Notes\n\n- OS: Windows\n";
+
+        expect((new ReportUserMasker)->mask($windows))->toBe($windows)
+            ->and((new ReportUserMasker)->mask($mac))->toContain('rapportd  412 <user>    8u');
+    });
+
+    it('reads only the profile folders when the report does not say which scan wrote it', function () {
+        $text = "## Folders\n\n```\n/Users/robbin/x\nC:\\Users\\anna\\y\n```\n\n## Listening network ports\n\n```\n".windowsPortsTable()."\nrapportd  412 mireille    8u  IPv4\n```\n\n## Logged in users and recent logins\n\n```\nmireille   console  Nov  3 09:00\n```\n";
+        $out = (new ReportUserMasker)->mask($text);
+
+        expect($out)->toContain("/Users/<user>/x\nC:\\Users\\<user>\\y")
+            ->toContain('127.0.0.1         7768 Spotify           ')
+            ->toContain('rapportd  412 mireille    8u')->toContain('mireille   console');
     });
 });
 
