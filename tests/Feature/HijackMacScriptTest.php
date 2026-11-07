@@ -305,10 +305,10 @@ describe('the Mac script as a whole', function () {
             ->and(hmsBody('pcc_dns_summary'))->toContain('pcc_capped "$PCC_NETWORK_CAP" scutil --dns');
     });
 
-    it('adds the two sections after the hosts file and keeps the update check and the privacy notice', function () {
+    it('adds the two sections after the listening ports and keeps the update check and the privacy notice', function () {
         $script = (string) file_get_contents(base_path('scripts/mac-checkup.sh'));
 
-        expect(strpos($script, 'section "Remote access tools" pcc_remote_report'))->toBeGreaterThan(strpos($script, 'sh_section "Hosts file (non-default lines)"'))
+        expect(strpos($script, 'section "Remote access tools" pcc_remote_report'))->toBeGreaterThan(strpos($script, 'sh_section "Listening network ports"'))
             ->and($script)->toContain('section "Network settings" pcc_network_report')
             ->toContain("\npcc_update_check || exit 1")
             ->and(substr_count($script, 'EN: This scan only reads'))->toBe(1);

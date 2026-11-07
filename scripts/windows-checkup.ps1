@@ -2306,9 +2306,6 @@ Add-Section 'Listening network ports' {
     foreach ($p in Get-Process) { $names[$p.Id] = $p.ProcessName }
     Get-NetTCPConnection -State Listen | Sort-Object LocalPort | Select-Object -First 40 LocalAddress, LocalPort, @{ N = 'Process'; E = { $names[[int]$_.OwningProcess] } } | Format-Table -AutoSize
 }
-Add-Section 'Hosts file (non-default lines)' {
-    Get-Content -LiteralPath "$env:SystemRoot\System32\drivers\etc\hosts" | Where-Object { $_ -notmatch '^\s*#' -and $_.Trim() }
-}
 Add-Section 'Crashes and unexpected shutdowns (last 30 days)' {
     if ($crashEvents.Value -and @($crashEvents.Value).Count -gt 0) {
         $crashEvents.Value | Select-Object -First 15 TimeCreated, Id, ProviderName | Format-Table -AutoSize

@@ -1945,6 +1945,30 @@ pcc_network_report() {
   return 0
 }
 
+PCC_TRUST_CAP="${PCC_TRUST_CAP:-15}"
+
+# The "Trusted certificates: custom trust settings" section: per trust domain, only how many
+# certificates were given custom trust settings, never their names. "No Trust Settings" can come
+# with a non-zero exit, so it counts as none rather than as a failure.
+pcc_trust_report() {
+  local domain out rc count
+  echo "format: 1"
+  for domain in admin system user; do
+    case $domain in admin) set -- -d ;; system) set -- -s ;; *) set -- ;; esac
+    out=$(pcc_capped "$PCC_TRUST_CAP" security dump-trust-settings ${1+"$@"} 2>&1)
+    rc=$?
+    count=$(printf '%s\n' "$out" | grep -c '^Cert [0-9][0-9]*:')
+    if [ "$rc" = 0 ]; then
+      echo "$domain: $count"
+    elif [ "$rc" != 142 ] && [ "$count" = 0 ] && printf '%s\n' "$out" | grep -q 'No Trust Settings'; then
+      echo "$domain: 0"
+    else
+      echo "$domain: could not check"
+    fi
+  done
+  return 0
+}
+
 # Sourcing this file (for tests) stops here instead of running the checkup.
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
 
@@ -2039,7 +2063,8 @@ PANICS=$(ls /Library/Logs/DiagnosticReports/*.panic 2>/dev/null | wc -l | tr -d 
 
 UPDATES=$(softwareupdate -l 2>&1)
 [ "$(profiles list 2>/dev/null | grep -c 'profileIdentifier')" -gt 0 ] && flag "Configuration profiles are installed (see MDM and enrolment section)."
-[ "$(security dump-trust-settings -d 2>&1 | grep -c 'Cert [0-9]*:')" -gt 0 ] && flag "Custom admin-trusted certificates are installed (see Trusted certificates section)."
+TRUST_REPORT=$(pcc_trust_report)
+printf '%s\n' "$TRUST_REPORT" | grep -q '^admin: [1-9]' && flag "Custom admin-trusted certificates are installed (see Trusted certificates section)."
 
 echo "$UPDATES" | grep -q "^\* Label" && flag "Software updates are pending (see Software updates section)."
 
@@ -2110,7 +2135,6 @@ sh_section "Performance: login item and startup counts" "echo LaunchAgents/Daemo
 sh_section "Performance: biggest folders in home" "END=\$((SECONDS+15)); for D in \"\$HOME\"/* \"\$HOME\"/Library/Caches; do R=\$((END-SECONDS)); [ \$R -gt 0 ] || break; pcc_capped \$R du -x -sh \"\$D\"; done 2>/dev/null | sort -rh | head -12; echo; echo '(capped at about 15 seconds; folders not reached in time are not listed)'"
 section "Graphics and displays" system_profiler SPDisplaysDataType
 section "Network interfaces" networksetup -listallhardwareports
-sh_section "Wi-Fi" "system_profiler SPAirPortDataType | head -40"
 section "Wi-Fi signal" pcc_wifi_report
 section "Bluetooth" system_profiler SPBluetoothDataType
 section "USB devices" system_profiler SPUSBDataType
@@ -2144,8 +2168,6 @@ sh_section "Background items (macOS 13+)" "pcc_capped 30 sfltool dumpbtm 2>&1 | 
 sh_section "Cron jobs" "crontab -l 2>&1"
 
 sh_section "Listening network ports" "lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | head -40"
-sh_section "DNS and proxy" "scutil --dns | head -25; scutil --proxy"
-sh_section "Hosts file (non-default lines)" "grep -vE '^\s*#|^\s*$' /etc/hosts"
 section "Remote access tools" pcc_remote_report
 section "Network settings" pcc_network_report
 
@@ -2153,13 +2175,10 @@ sh_section "Kernel panic reports" "ls -lt /Library/Logs/DiagnosticReports/*.pani
 section "Recent app crashes" pcc_crashes_report
 sh_section "Recent shutdown causes" "pcc_capped 20 log show --predicate 'eventMessage contains \"Previous shutdown cause\"' --last 7d 2>/dev/null | tail -8; echo; echo '(last 7 days, capped at 20 seconds)'"
 sh_section "Time Machine" "tmutil destinationinfo 2>&1 | head -15; tmutil latestbackup 2>&1"
-sh_section "Privacy permissions (TCC), needs Full Disk Access for Terminal" "for DB in \"\$HOME/Library/Application Support/com.apple.TCC/TCC.db\" '/Library/Application Support/com.apple.TCC/TCC.db'; do echo \"== \$DB\"; sqlite3 \"\$DB\" \"select service, client, case auth_value when 2 then 'allowed' when 0 then 'denied' else auth_value end from access where auth_value=2 and service in ('kTCCServiceScreenCapture','kTCCServiceAccessibility','kTCCServiceSystemPolicyAllFiles','kTCCServiceCamera','kTCCServiceMicrophone','kTCCServiceListenEvent','kTCCServicePostEvent') order by service, client;\" 2>&1; done; echo; echo 'If you see an authorization error, grant Terminal Full Disk Access in System Settings > Privacy & Security and re-run.'"
-sh_section "Trusted certificates: custom trust settings" "echo '-- admin'; security dump-trust-settings -d 2>&1 | grep -E 'Cert [0-9]+:|No Trust' ; echo '-- system'; security dump-trust-settings -s 2>&1 | grep -E 'Cert [0-9]+:|No Trust'; echo '-- user'; security dump-trust-settings 2>&1 | grep -E 'Cert [0-9]+:|No Trust'"
-sh_section "Certificates in System keychain" "security find-certificate -a /Library/Keychains/System.keychain 2>/dev/null | grep '\"labl\"' | sort -u"
+section "Trusted certificates: custom trust settings" echo "$TRUST_REPORT"
 sh_section "Browser extensions: Chrome" "for M in \"\$HOME\"/Library/Application\\ Support/Google/Chrome/*/Extensions/*/*/manifest.json; do [ -f \"\$M\" ] || continue; ID=\$(echo \"\$M\" | awk -F/ '{print \$(NF-2)}'); N=\$(grep -m1 '\"name\"' \"\$M\" | sed 's/.*: *\"\\(.*\\)\".*/\\1/'); echo \"\$ID  \$N\"; done | sort -u"
 sh_section "Browser extensions: Firefox" "for F in \"\$HOME\"/Library/Application\\ Support/Firefox/Profiles/*/extensions.json; do [ -f \"\$F\" ] && grep -o '\"defaultLocale\":{\"name\":\"[^\"]*' \"\$F\" | sed 's/.*\"name\":\"//' | sort -u; done"
 sh_section "Browser extensions: Safari" "pluginkit -mAv -p com.apple.Safari.extension 2>&1"
-sh_section "Saved Wi-Fi networks and VPNs" "networksetup -listpreferredwirelessnetworks en0 2>&1; echo; scutil --nc list 2>&1"
 sh_section "SSD wear (smartctl, optional)" "if command -v smartctl >/dev/null; then smartctl -a disk0 2>&1 | head -60; else echo 'smartctl not installed. Optional: brew install smartmontools, then re-run.'; fi"
 sh_section "Intel apps running under Rosetta (Apple silicon only)" "if [ \"\$(uname -m)\" = arm64 ]; then system_profiler SPApplicationsDataType 2>/dev/null | awk '/^    [^ ].*:\$/ {name=\$0} /Kind: Intel/ {print name}'; else echo 'Intel Mac, not applicable'; fi"
 sh_section "Reboot history and boot time" "last reboot | head -8; sysctl kern.boottime"
