@@ -43,6 +43,10 @@
 # never the product key) and, for each fixed drive, whether BitLocker is on, off or suspended, read
 # from the drive property Explorer shows, for at most 20 seconds. It never reads a recovery key.
 #
+# The memory modules step reads, for at most 25 seconds, the slot name, size, type, speed and form factor
+# of each installed memory module, so a matching part can be bought. It never reads a serial or part
+# number. The drives for the parts card come from the health step above.
+#
 # Optional upload: with a token the finished report is also sent to PC Checkup. The token is
 # read from, in this order: -Token, the PC_CHECKUP_TOKEN environment variable, or a file named
 # pc-checkup.token next to this script. The site is $DefaultUrl below; -Url or PC_CHECKUP_URL
@@ -1168,6 +1172,48 @@ function Get-ActivationBitLockerLines($LicenceStatus, $LicenceNote, [string[]]$D
         $state = 'could not check'
         if ($protection -ne '' -and $driveWords.ContainsKey([int]$protection)) { $state = $driveWords[[int]$protection] }
         $lines.Add("drive|$letter|$state")
+    }
+    return $lines.ToArray()
+}
+
+# The lines of the "Memory modules" section, so a matching part can be bought: per installed module its
+# slot name, size, memory type (from the SMBIOS type code, or the older type code), rated speed and form
+# factor. Serial and part numbers are never handed to this function, so they cannot be printed. $Failure
+# is set when the query failed or timed out.
+function Get-MemoryModuleLines($Modules, $Failure) {
+    $types = @{ 20 = 'DDR'; 21 = 'DDR2'; 22 = 'DDR2'; 24 = 'DDR3'; 26 = 'DDR4'; 27 = 'LPDDR'; 28 = 'LPDDR2'; 29 = 'LPDDR3'; 30 = 'LPDDR4'; 34 = 'DDR5'; 35 = 'LPDDR5' }
+    $forms = @{ 8 = 'DIMM'; 12 = 'SODIMM' }
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('format: 1')
+    if ($Failure) {
+        $lines.Add('scan: could not check')
+        return $lines.ToArray()
+    }
+    $lines.Add('scan: complete')
+    $listed = 0
+    foreach ($module in @($Modules)) {
+        $bytes = 0.0
+        if ($null -eq $module -or $listed -ge 16) { continue }
+        if (-not [double]::TryParse("$($module.Capacity)", [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$bytes) -or $bytes -lt 1MB) { continue }
+        $slot = (("$($module.DeviceLocator)" -replace '[\x00-\x1f\x7f|]', ' ') -replace '\s+', ' ').Trim()
+        if (-not $slot) { $slot = (("$($module.BankLabel)" -replace '[\x00-\x1f\x7f|]', ' ') -replace '\s+', ' ').Trim() }
+        if ($slot.Length -gt 40) { $slot = $slot.Substring(0, 40).Trim() }
+        $code = 0
+        $type = ''
+        if ([int]::TryParse("$($module.SMBIOSMemoryType)", [ref]$code) -and $types.ContainsKey($code)) {
+            $type = $types[$code]
+        } elseif ([int]::TryParse("$($module.MemoryType)", [ref]$code) -and $types.ContainsKey($code)) {
+            $type = $types[$code]
+        }
+        $speed = ''
+        foreach ($value in @($module.Speed, $module.ConfiguredClockSpeed)) {
+            $number = 0
+            if (-not $speed -and [int]::TryParse("$value", [ref]$number) -and $number -gt 0 -and $number -le 20000) { $speed = "$number MHz" }
+        }
+        $form = ''
+        if ([int]::TryParse("$($module.FormFactor)", [ref]$code) -and $forms.ContainsKey($code)) { $form = $forms[$code] }
+        $lines.Add("module|$slot|$([math]::Round($bytes / 1MB)) MB|$type|$speed|$form")
+        $listed++
     }
     return $lines.ToArray()
 }
@@ -2608,6 +2654,18 @@ Add-Section 'Activation and BitLocker' {
         }
     } 20
     Get-ActivationBitLockerLines $licence.Value.LicenseStatus $licence.Note $drives.Value $drives.Note
+}
+Add-Section 'Memory modules' {
+    $read = Read-CappedJob {
+        foreach ($module in @(Get-CimInstance Win32_PhysicalMemory -OperationTimeoutSec 15 -ErrorAction Stop)) {
+            [pscustomobject]@{
+                Capacity = $module.Capacity; Speed = $module.Speed; ConfiguredClockSpeed = $module.ConfiguredClockSpeed
+                SMBIOSMemoryType = $module.SMBIOSMemoryType; MemoryType = $module.MemoryType; FormFactor = $module.FormFactor
+                DeviceLocator = $module.DeviceLocator; BankLabel = $module.BankLabel
+            }
+        }
+    } 25
+    Get-MemoryModuleLines $read.Value $read.Note
 }
 
 # ---------- Assemble ----------

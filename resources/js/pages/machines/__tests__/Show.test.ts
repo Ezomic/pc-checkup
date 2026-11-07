@@ -5,12 +5,19 @@ import ChangesSection from '@/components/machines/ChangesSection.vue';
 import ClientSection from '@/components/machines/ClientSection.vue';
 import DetailCards from '@/components/machines/DetailCards.vue';
 import RemoteSupportSection from '@/components/machines/RemoteSupportSection.vue';
+import ReportProblems from '@/components/machines/ReportProblems.vue';
 import ScriptVersionNote from '@/components/machines/ScriptVersionNote.vue';
 import StaleNote from '@/components/machines/StaleNote.vue';
 import TrendsCard from '@/components/machines/TrendsCard.vue';
+import UpgradeAdviceLine from '@/components/machines/UpgradeAdviceLine.vue';
 import { Button } from '@/components/ui/button';
 import Show from '@/pages/machines/Show.vue';
-import type { LatestReport, ReportChanges, Trend } from '@/types';
+import type {
+    LatestReport,
+    ReportChanges,
+    Trend,
+    UpgradeAdvice,
+} from '@/types';
 
 vi.mock('@inertiajs/vue3', () => ({
     Head: { template: '<span />' },
@@ -30,6 +37,7 @@ function report(overrides: Partial<LatestReport> = {}): LatestReport {
         created_at: '2026-08-04T12:00:00.000000Z',
         stale: false,
         script: null,
+        problems: [],
         advice: [
             {
                 severity: 'high',
@@ -48,6 +56,7 @@ function render(
     latest: LatestReport | null,
     changes: ReportChanges | null = null,
     trends: Trend[] = [],
+    upgradeAdvice: UpgradeAdvice | null = null,
 ) {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-11-02T12:00:00Z'));
@@ -69,6 +78,7 @@ function render(
             report: latest,
             changes,
             detailCards: [],
+            upgradeAdvice,
             warranty: null,
             estimate: null,
             priceItems: [],
@@ -87,6 +97,26 @@ function render(
 }
 
 describe('machines/Show', () => {
+    it('shows the upgrade advice under the tiles of the summary, and nothing without one', () => {
+        const advice: UpgradeAdvice = {
+            text: 'Swap the spinning hard drive for an SSD.',
+            price: { name: 'SSD 500 GB', price_cents: 6900, unit: null },
+        };
+        const wrapper = render(report(), null, [], advice);
+        const line = wrapper.findComponent(UpgradeAdviceLine);
+
+        expect(line.props('advice')).toEqual(advice);
+        expect(
+            wrapper.get('[data-test="summary"]').element.contains(line.element),
+        ).toBe(true);
+        expect(render(report()).findComponent(UpgradeAdviceLine).exists()).toBe(
+            false,
+        );
+        expect(render(null).findComponent(UpgradeAdviceLine).exists()).toBe(
+            false,
+        );
+    });
+
     it('hands the trends prop to the trends card, outside the owner-only block', () => {
         const trends: Trend[] = [
             {
@@ -140,6 +170,24 @@ describe('machines/Show', () => {
         expect(render(null).findComponent(ScriptVersionNote).exists()).toBe(
             false,
         );
+    });
+
+    it('shows what looks wrong with the report above the verdict, and nothing for a report that looks fine', () => {
+        const problems = [
+            'The report stops early: its last part is missing, so the scan or the upload was probably cut off.',
+        ];
+        const broken = render(report({ problems }));
+
+        expect(broken.findComponent(ReportProblems).props('problems')).toEqual(
+            problems,
+        );
+        expect(broken.html().indexOf('report-problems-stub')).toBeLessThan(
+            broken.html().indexOf('data-test="verdict"'),
+        );
+        expect(render(report()).findComponent(ReportProblems).exists()).toBe(
+            false,
+        );
+        expect(render(null).findComponent(ReportProblems).exists()).toBe(false);
     });
 
     it('swaps the relative scanned time for the full date in print', () => {

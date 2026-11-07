@@ -18,6 +18,7 @@ use App\Services\Reports\ReportDetails;
 use App\Services\Reports\ReportDriveHealth;
 use App\Services\Reports\ReportFacts;
 use App\Services\Reports\ReportFreshness;
+use App\Services\Reports\ReportHealth;
 use App\Services\Reports\ReportMachineAge;
 use App\Services\Reports\ReportNetworkSettings;
 use App\Services\Reports\ReportRemoteAccess;
@@ -52,6 +53,8 @@ final readonly class NeedsAttention
 
     public const int LIST_LIMIT = 20;
 
+    public const string BROKEN_REPORT = 'The latest report looks broken';
+
     private const string COVERED_FLAGS = '/end of support|out of security support|^Only about \d+% of (?:drive|disk)|^Battery /';
 
     private const string DRIVE_FLAGS = '/^Disk (?:SMART status|.+? (?:health|status)) is |disk error event|SSD wear is /';
@@ -63,6 +66,7 @@ final readonly class NeedsAttention
         private ReportFacts $facts,
         private ReportFreshness $freshness,
         private FlagAdvisor $advisor,
+        private ReportHealth $health,
     ) {}
 
     /**
@@ -155,13 +159,15 @@ final readonly class NeedsAttention
             return ['reasons' => $this->unscanned($machine), 'verdict' => null];
         }
 
-        $cards = array_column($this->details->cards($report->markdown, $report->flags, $machine->device_type), null, 'id');
+        $built = $this->details->build($report->markdown, $report->flags, $machine->device_type);
+        $cards = array_column($built['cards'], null, 'id');
 
         $sections = ReportSections::parse($report->markdown);
         $drives = new ReportDriveHealth;
         $security = new ReportWindowsSecurity;
 
         $reasons = array_values(array_filter([
+            $this->health->problems($report->markdown, $built['failed']) === [] ? null : $this->reason(AttentionLevel::Soon, self::BROKEN_REPORT),
             $this->operatingSystem($report->flags),
             ...$this->battery($cards),
             $this->disk($this->facts->from($report->markdown)['free_disk']),

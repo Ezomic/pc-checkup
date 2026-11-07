@@ -47,6 +47,7 @@ export type LatestReport = {
     created_at: string;
     stale: boolean;
     script: ReportScript | null;
+    problems: string[];
     advice: FlagAdvice[];
     facts: ReportFacts;
     markdown: string;
