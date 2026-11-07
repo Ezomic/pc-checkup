@@ -17,11 +17,13 @@ use App\Http\Controllers\MachineNoteController;
 use App\Http\Controllers\MachineRustDeskController;
 use App\Http\Controllers\MachineStatusController;
 use App\Http\Controllers\NoteController;
+use App\Http\Controllers\PairingController;
 use App\Http\Controllers\PhotoController;
 use App\Http\Controllers\PrivacyController;
 use App\Http\Controllers\ReportImportController;
 use App\Http\Controllers\RustDeskInstallerController;
 use App\Http\Controllers\ScanController;
+use App\Http\Controllers\ScriptPairingController;
 use App\Http\Controllers\ScriptVersionController;
 use App\Http\Controllers\SharedClientController;
 use App\Http\Controllers\ToolController;
@@ -46,10 +48,17 @@ Route::get('privacy', PrivacyController::class)->middleware(SetShareLocale::clas
 
 Route::get('scripts/{script}', CheckupScriptController::class)->name('scripts.download');
 
+$scriptCalls = [EncryptCookies::class, AddQueuedCookiesToResponse::class, StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class, HandleAppearance::class, HandleInertiaRequests::class, AddLinkHeadersForPreloadedAssets::class];
+
 Route::get('scripts/version/{script}', ScriptVersionController::class)
     ->middleware('throttle:60,1')
-    ->withoutMiddleware([EncryptCookies::class, AddQueuedCookiesToResponse::class, StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class, HandleAppearance::class, HandleInertiaRequests::class, AddLinkHeadersForPreloadedAssets::class])
+    ->withoutMiddleware($scriptCalls)
     ->name('scripts.version');
+
+Route::withoutMiddleware($scriptCalls)->group(function () {
+    Route::post('scripts/pair', [ScriptPairingController::class, 'store'])->middleware('throttle:pairing')->name('scripts.pair.store');
+    Route::get('scripts/pair/{pairing}', [ScriptPairingController::class, 'show'])->middleware('throttle:pairing-poll')->name('scripts.pair.show');
+});
 
 Route::get('tools/rustdesk/windows', RustDeskInstallerController::class)
     ->middleware('throttle:20,1')->name('tools.rustdesk.download');
@@ -108,6 +117,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('scans', [ScanController::class, 'store'])->name('scans.store');
     Route::get('imports/create', [ReportImportController::class, 'create'])->name('imports.create');
     Route::post('imports', [ReportImportController::class, 'store'])->name('imports.store');
+
+    Route::middleware('throttle:60,1')->group(function () {
+        Route::get('p/{pairing}', [PairingController::class, 'show'])->name('pairings.show');
+        Route::post('p/{pairing}/approve', [PairingController::class, 'approve'])->name('pairings.approve');
+        Route::post('p/{pairing}/reject', [PairingController::class, 'reject'])->name('pairings.reject');
+    });
 });
 
 require __DIR__.'/settings.php';

@@ -46,8 +46,15 @@
 # the report or printed.
 #
 # Without a token the script takes the 6 digit code of "Start a scan" in the app: -Code, the
-# PC_CHECKUP_CODE environment variable, or a prompt when run in a console (an empty answer
-# skips the upload). A token always wins over a code.
+# PC_CHECKUP_CODE environment variable, or a prompt when run in a console. A token always wins
+# over a code.
+#
+# Pressing Enter at that prompt approves the upload with a QR code instead. Once the report is saved
+# the script asks the site for a pairing (that request carries nothing about this PC) and shows a QR
+# code, a link and a 4 character check code. The owner opens it on a phone, checks the code and
+# approves; only then is the report sent, with a token that works once. The script asks every 3
+# seconds for at most 10 minutes; Ctrl-C stops it and nothing is sent. Without a console it never
+# pairs.
 
 param(
     [string]$Token,
@@ -1203,7 +1210,8 @@ function Test-ScanCode([string]$Value) { return $Value -cmatch '^[0-9]{6}$' }
 function Clean-ScanCode($Value) { return ([string]$Value) -replace '\s', '' }
 
 # Returns the code and where it came from, or $null: parameter, environment, then a prompt
-# when there is a console to ask on. An empty answer skips the upload.
+# when there is a console to ask on. An empty answer there returns the source 'qr': the upload
+# is then approved with a QR code once the report is saved.
 function Get-ScanCode([string]$Given) {
     $candidates = @(
         [pscustomobject]@{ Source = 'parameter'; Value = $Given },
@@ -1214,8 +1222,10 @@ function Get-ScanCode([string]$Given) {
         if ($value -ne '') { return [pscustomobject]@{ Source = $candidate.Source; Value = $value } }
     }
     if ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
-        $value = Clean-ScanCode (Read-Host 'Scan code from the app, 6 digits (Enter to skip the upload)')
+        Write-Host 'NL: typ de scancode uit de app (6 cijfers), of druk op Enter om de upload na de scan met een QR-code te laten goedkeuren.'
+        $value = Clean-ScanCode (Read-Host 'EN: scan code from the app, 6 digits, or Enter to approve the upload with a QR code after the scan')
         if ($value -ne '') { return [pscustomobject]@{ Source = 'prompt'; Value = $value } }
+        if (-not [Console]::IsOutputRedirected) { return [pscustomobject]@{ Source = 'qr'; Value = '' } }
     }
     return $null
 }
@@ -1224,11 +1234,11 @@ function Test-UploadUrl([string]$Value) {
     return $Value -match '^(https://[A-Za-z0-9.-]+|http://(localhost|127\.0\.0\.1))(:[0-9]+)?(/[^\s\\?#]*)?$'
 }
 
-# The request body: {"markdown": "..."}, with a "code" first when a scan code is given, as
-# UTF-8 bytes without a byte order mark.
-function New-UploadBody([string]$Markdown, [string]$ScanCode) {
+# The request body: {"markdown": "..."}, with a "code" first when a scan code is given, or an
+# "upload_token" first for the token of a QR approval, as UTF-8 bytes without a byte order mark.
+function New-UploadBody([string]$Markdown, [string]$ScanCode, [string]$UploadToken = '') {
     $fields = [ordered]@{}
-    if ($ScanCode) { $fields['code'] = $ScanCode }
+    if ($UploadToken) { $fields['upload_token'] = $UploadToken } elseif ($ScanCode) { $fields['code'] = $ScanCode }
     $fields['markdown'] = $Markdown
     $json = ConvertTo-Json -InputObject $fields -Compress
     return , (New-Object System.Text.UTF8Encoding($false)).GetBytes($json)
@@ -1251,7 +1261,7 @@ function Read-FailedResponse($ErrorRecord) {
 }
 
 # Never throws: Status is the HTTP status (0 when there was none), Data the parsed JSON body.
-function Send-Report([string]$Markdown, [string]$BaseUrl, [string]$ApiToken, [string]$ScanCode) {
+function Send-Report([string]$Markdown, [string]$BaseUrl, [string]$ApiToken, [string]$ScanCode, [string]$UploadToken = '') {
     $result = [pscustomobject]@{ Status = 0; Data = $null; Failure = $null }
     $content = $null
     try {
@@ -1264,7 +1274,7 @@ function Send-Report([string]$Markdown, [string]$BaseUrl, [string]$ApiToken, [st
             $ScanCode = ''
         }
         $response = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$BaseUrl$path" -Headers $headers `
-            -ContentType 'application/json; charset=utf-8' -Body (New-UploadBody $Markdown $ScanCode) -TimeoutSec 30 -MaximumRedirection 0
+            -ContentType 'application/json; charset=utf-8' -Body (New-UploadBody $Markdown $ScanCode $UploadToken) -TimeoutSec 30 -MaximumRedirection 0
         $result.Status = [int]$response.StatusCode
         $content = $response.Content
     } catch {
@@ -1311,10 +1321,181 @@ function Show-UploadResult($Result, [string]$BaseUrl, [bool]$WithCode = $false) 
     }
 }
 
+function Show-UploadHelp {
+    Write-Host 'To upload this report: choose Start a scan in the app and run again with -Code (or PC_CHECKUP_CODE set), or create a token with only the Write ability (Settings, API tokens) and set PC_CHECKUP_TOKEN or put a pc-checkup.token file next to this script.'
+}
+
+# ---------- QR approval (Enter at the scan code prompt) ----------
+# One request to the pairing endpoints. Never throws: Status is the HTTP status (0 without an
+# answer), Data the parsed JSON. The secret travels as a bearer token, never in the URL.
+function Invoke-PairingRequest([string]$Method, [string]$Uri, [string]$Secret) {
+    $result = [pscustomobject]@{ Status = 0; Data = $null }
+    $content = $null
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        $headers = @{ Accept = 'application/json' }
+        if ($Secret) { $headers['Authorization'] = "Bearer $Secret" }
+        $response = Invoke-WebRequest -UseBasicParsing -Method $Method -Uri $Uri -Headers $headers -TimeoutSec 15 -MaximumRedirection 0
+        $result.Status = [int]$response.StatusCode
+        $content = $response.Content
+    } catch {
+        $failed = Read-FailedResponse $_
+        if ($failed) {
+            $result.Status = $failed.Status
+            $content = $failed.Content
+        }
+    }
+    try { if ($content) { $result.Data = ConvertFrom-Json -InputObject ([string]$content) } } catch { $result.Data = $null }
+    return $result
+}
+
+# True only when every field of a new pairing has the shape the site gives it, so nothing else
+# from the answer is ever printed.
+function Test-PairingStart($Data) {
+    if ($null -eq $Data) { return $false }
+    $lines = @($Data.qr)
+    if ($lines.Count -lt 10 -or $lines.Count -gt 100) { return $false }
+    $blocks = '\A[ #' + [char]0x2580 + [char]0x2584 + [char]0x2588 + ']{1,200}\z'
+    foreach ($line in $lines) {
+        if ($line -isnot [string] -or $line -cnotmatch $blocks) { return $false }
+    }
+    return ([string]$Data.id -cmatch '\A[A-Za-z0-9]{24}\z') -and ([string]$Data.secret -cmatch '\A[A-Za-z0-9]{40}\z') -and
+        ([string]$Data.check_code -cmatch '\A[A-Z0-9]{4}\z') -and ([string]$Data.url -cmatch '\Ahttps?://[\x21-\x7e]{1,300}\z')
+}
+
+# Switches the console to UTF-8 for the half blocks and returns the encoding to switch back to,
+# or $null when this console cannot switch: then the ASCII QR code is asked for instead.
+function Enable-Utf8Output {
+    try {
+        $previous = [Console]::OutputEncoding
+        [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+        return $previous
+    } catch {
+        return $null
+    }
+}
+
+# Prints the QR code dark on light whatever the console colours are. The ASCII version is painted
+# with background colours, because # signs alone scan badly. Into a file it is written as it is.
+function Show-PairingQr([string[]]$Lines, [bool]$Ascii) {
+    $plain = $true
+    try { $plain = [Console]::IsOutputRedirected } catch { $plain = $true }
+    foreach ($line in $Lines) {
+        if ($plain) {
+            Write-Host $line
+        } elseif (-not $Ascii) {
+            Write-Host $line -ForegroundColor Black -BackgroundColor White
+        } else {
+            foreach ($run in [regex]::Matches($line, '#+| +')) {
+                $color = if ($run.Value[0] -eq '#') { 'Black' } else { 'White' }
+                Write-Host (' ' * $run.Length) -BackgroundColor $color -NoNewline
+            }
+            Write-Host ''
+        }
+    }
+}
+
+# True when Ctrl-C was pressed while it arrives as a key. Without a console it never is.
+function Test-CancelKey {
+    try {
+        while ([Console]::KeyAvailable) {
+            $key = [Console]::ReadKey($true)
+            if ($key.Key -eq [ConsoleKey]::C -and ($key.Modifiers -band [ConsoleModifiers]::Control)) { return $true }
+        }
+    } catch {
+        return $false
+    }
+    return $false
+}
+
+# Asks every 3 seconds, for at most $Seconds, whether the owner decided. The outcome is approved
+# (with the upload token), rejected, expired, stopped or timeout. A failed poll is asked again.
+# The time is counted both in polls and on the clock, so a slow network cannot stretch it.
+function Wait-PairingApproval([string]$BaseUrl, [string]$Id, [string]$Secret, [int]$Seconds) {
+    $waited = 0
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while ($waited -lt $Seconds -and $clock.Elapsed.TotalSeconds -lt $Seconds) {
+        $answer = Invoke-PairingRequest 'Get' "$BaseUrl/scripts/pair/$Id" $Secret
+        $status = ''
+        if ($answer.Status -eq 404) { $status = 'expired' } elseif ($answer.Status -eq 200 -and $answer.Data) { $status = [string]$answer.Data.status }
+        $token = if ($answer.Data) { [string]$answer.Data.upload_token } else { '' }
+        if ($status -eq 'approved' -and $token -cmatch '\A[A-Za-z0-9]{40}\z') { return [pscustomobject]@{ Outcome = 'approved'; Token = $token } }
+        if ($status -eq 'rejected') { return [pscustomobject]@{ Outcome = 'rejected'; Token = '' } }
+        if ($status -eq 'expired' -or $status -eq 'used') { return [pscustomobject]@{ Outcome = 'expired'; Token = '' } }
+        for ($tick = 0; $tick -lt 30; $tick++) {
+            if (Test-CancelKey) { return [pscustomobject]@{ Outcome = 'stopped'; Token = '' } }
+            Start-Sleep -Milliseconds 100
+        }
+        $waited += 3
+    }
+    return [pscustomobject]@{ Outcome = 'timeout'; Token = '' }
+}
+
+# Asks the site for a pairing (nothing about this PC is sent), shows its QR code, link and check
+# code, and waits for the owner to approve it on a phone. Only then is the report sent, with the
+# one-time upload token. Ctrl-C stops the wait and sends nothing.
+function Invoke-PairedUpload([string]$Markdown, [string]$BaseUrl) {
+    $encoding = Enable-Utf8Output
+    $ctrlC = $null
+    try {
+        $format = if ($null -ne $encoding) { 'half' } else { 'ascii' }
+        $start = Invoke-PairingRequest 'Post' "$BaseUrl/scripts/pair?qr=$format" ''
+        if ($start.Status -ne 201 -or -not (Test-PairingStart $start.Data)) {
+            Write-Host "Upload skipped: could not start a QR approval with $BaseUrl (HTTP $($start.Status))."
+            Show-UploadHelp
+            return
+        }
+        $data = $start.Data
+        $check = [string]$data.check_code
+        Write-Host ''
+        Write-Host "NL: Laat de eigenaar deze QR-code scannen met een telefoon (of stuur een foto) en controleer samen dat de code $check is."
+        Write-Host "EN: Have the owner scan this QR code with a phone (or send a photo of it) and check together that the code is $check."
+        Write-Host ''
+        Show-PairingQr @($data.qr) ($format -eq 'ascii')
+        if ($null -ne $encoding) {
+            [Console]::OutputEncoding = $encoding
+            $encoding = $null
+        }
+        Write-Host ''
+        Write-Host "  $([string]$data.url)"
+        Write-Host "  Code: $check"
+        Write-Host ''
+        Write-Host 'NL: Wachten op goedkeuring, hooguit 10 minuten. Ctrl-C stopt zonder iets te versturen.'
+        Write-Host 'EN: Waiting for approval, up to 10 minutes. Ctrl-C stops without sending anything.'
+        $seconds = 600
+        if ([string]$data.expires_in -match '\A[0-9]{1,5}\z' -and [int]$data.expires_in -lt $seconds) { $seconds = [int]$data.expires_in }
+        try {
+            $ctrlC = [Console]::TreatControlCAsInput
+            [Console]::TreatControlCAsInput = $true
+        } catch {
+            $ctrlC = $null
+        }
+        $result = Wait-PairingApproval $BaseUrl ([string]$data.id) ([string]$data.secret) $seconds
+        Write-Host ''
+        switch ($result.Outcome) {
+            'approved' {
+                Write-Host 'NL: Goedgekeurd, het rapport wordt verstuurd.'
+                Write-Host 'EN: Approved, sending the report.'
+                Show-UploadResult (Send-Report $Markdown $BaseUrl '' '' $result.Token) $BaseUrl $true
+                return
+            }
+            'stopped' { Write-Host 'NL: Gestopt, er is niets verstuurd.'; Write-Host 'EN: Stopped, nothing was sent.' }
+            'rejected' { Write-Host 'NL: De eigenaar heeft de upload afgewezen, er is niets verstuurd.'; Write-Host 'EN: The owner rejected the upload, nothing was sent.' }
+            'expired' { Write-Host 'NL: De goedkeuring is verlopen, er is niets verstuurd.'; Write-Host 'EN: The approval request expired, nothing was sent.' }
+            default { Write-Host 'NL: Niemand heeft binnen 10 minuten goedgekeurd, er is niets verstuurd.'; Write-Host 'EN: Nobody approved the upload within 10 minutes, nothing was sent.' }
+        }
+        Show-UploadHelp
+    } finally {
+        if ($null -ne $encoding) { try { [Console]::OutputEncoding = $encoding } catch { $encoding = $null } }
+        if ($null -ne $ctrlC) { try { [Console]::TreatControlCAsInput = $ctrlC } catch { $ctrlC = $null } }
+    }
+}
+
 # Called once the report is saved: uploads it, or says how to. Never throws.
 function Invoke-ReportUpload([string]$Markdown, $Found, $FoundCode, [string]$GivenUrl) {
     if (-not $Found -and -not $FoundCode) {
-        Write-Host 'To upload this report: choose Start a scan in the app and run again with -Code (or PC_CHECKUP_CODE set), or create a token with only the Write ability (Settings, API tokens) and set PC_CHECKUP_TOKEN or put a pc-checkup.token file next to this script.'
+        Show-UploadHelp
         return
     }
     try {
@@ -1330,6 +1511,8 @@ function Invoke-ReportUpload([string]$Markdown, $Found, $FoundCode, [string]$Giv
             } else {
                 Write-Host "Upload skipped: the token contains characters a token never has. Check the $($Found.Source) it came from."
             }
+        } elseif ($FoundCode.Source -eq 'qr') {
+            Invoke-PairedUpload $Markdown $base
         } elseif (Test-ScanCode $FoundCode.Value) {
             Show-UploadResult (Send-Report $Markdown $base '' $FoundCode.Value) $base $true
         } else {
@@ -1345,7 +1528,7 @@ function Invoke-ReportUpload([string]$Markdown, $Found, $FoundCode, [string]$Giv
 
 $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
-Write-Host 'NL: Deze scan leest alleen hardware, schijfgebruik, map- en appnamen en beveiligingsinstellingen, wijzigt niets en verstuurt het rapport alleen als u een scancode invoert.'; Write-Host "EN: This scan only reads hardware, disk use, folder and app names and security settings, changes nothing, and uploads the report only if you enter a scan code. $DefaultUrl/privacy"
+Write-Host 'NL: Deze scan leest alleen hardware, schijfgebruik, map- en appnamen en beveiligingsinstellingen, wijzigt niets en verstuurt het rapport alleen als u een scancode invoert of de upload met een QR-code laat goedkeuren.'; Write-Host "EN: This scan only reads hardware, disk use, folder and app names and security settings, changes nothing, and uploads the report only if you enter a scan code or have the upload approved with a QR code. $DefaultUrl/privacy"
 $found = $null
 $foundCode = $null
 try { $found = Get-UploadToken $Token $PSScriptRoot } catch { Write-Host "Upload skipped: could not read the token ($(One-Line $_.Exception.Message))." }

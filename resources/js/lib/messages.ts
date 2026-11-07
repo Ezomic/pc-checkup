@@ -89,7 +89,7 @@ const en = {
         'Nothing. It runs once, only when someone starts it. It installs nothing, deletes nothing and leaves nothing running afterwards.',
     'privacy.keptHeading': 'What happens to the report',
     'privacy.kept':
-        'The report is only sent when the person running the scan enters a scan code or token. It is kept only to give advice about this computer, and only the owner and the client it belongs to can see it.',
+        'The report is only sent when the person running the scan enters a scan code or token, or presses Enter to have the upload approved with a QR code. In that case the script first asks PC Checkup for a pairing: a random code and a QR code, without anything about the computer. The report is only sent after the owner has approved that pairing on a phone. A pairing expires after 10 minutes, works once and is then deleted. The report is kept only to give advice about this computer, and only the owner and the client it belongs to can see it.',
     'privacy.deleteHeading': 'Deleting it',
     'privacy.delete':
         'On request the computer and all of its reports are deleted permanently.',
@@ -194,7 +194,7 @@ const nl: Messages = {
         'Niets. Hij draait één keer, alleen als iemand hem start. Hij installeert niets, verwijdert niets en laat niets draaien.',
     'privacy.keptHeading': 'Wat er met het rapport gebeurt',
     'privacy.kept':
-        'Het rapport wordt alleen verstuurd als degene die de scan draait een scancode of token invoert. Het wordt alleen bewaard om advies over deze computer te geven, en alleen de eigenaar en de klant van wie de computer is kunnen het zien.',
+        'Het rapport wordt alleen verstuurd als degene die de scan draait een scancode of token invoert, of op Enter drukt om de upload met een QR-code te laten goedkeuren. In dat geval vraagt het script PC Checkup eerst om een koppeling: een willekeurige code en een QR-code, zonder iets over de computer. Het rapport wordt pas verstuurd als de eigenaar die koppeling op een telefoon heeft goedgekeurd. Een koppeling verloopt na 10 minuten, werkt één keer en wordt daarna verwijderd. Het rapport wordt alleen bewaard om advies over deze computer te geven, en alleen de eigenaar en de klant van wie de computer is kunnen het zien.',
     'privacy.deleteHeading': 'Laten verwijderen',
     'privacy.delete':
         'Op verzoek worden de computer en al zijn rapporten definitief verwijderd.',

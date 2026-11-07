@@ -33,4 +33,19 @@ final class RedeemScanCodeRequest extends FormRequest
 
         return is_string($code) ? $code : '';
     }
+
+    /**
+     * Null when the body carries no upload token (missing, null or empty), so the scan code path
+     * stays exactly as it was.
+     */
+    public function uploadToken(): ?string
+    {
+        $token = $this->input('upload_token');
+
+        if ($token === null || $token === '') {
+            return null;
+        }
+
+        return is_string($token) ? $token : '';
+    }
 }
