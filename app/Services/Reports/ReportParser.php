@@ -9,6 +9,8 @@ use App\Services\RustDesk\RustDeskId;
 
 final class ReportParser
 {
+    public const string FLAGS_TITLE = 'Things to look at';
+
     private const MAX_VALUE_LENGTH = 255;
 
     private const MAX_FLAGS = 100;
@@ -138,7 +140,7 @@ final class ReportParser
 
         foreach ($lines as $line) {
             if (str_starts_with($line, '## ')) {
-                $inSection = trim(substr($line, 3)) === 'Things to look at';
+                $inSection = trim(substr($line, 3)) === self::FLAGS_TITLE;
 
                 continue;
             }

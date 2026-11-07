@@ -14,6 +14,7 @@ import ForgetMachineSection from '@/components/machines/ForgetMachineSection.vue
 import NotesSection from '@/components/machines/NotesSection.vue';
 import PhotosSection from '@/components/machines/PhotosSection.vue';
 import RemoteSupportSection from '@/components/machines/RemoteSupportSection.vue';
+import ReportProblems from '@/components/machines/ReportProblems.vue';
 import ScriptVersionNote from '@/components/machines/ScriptVersionNote.vue';
 import StaleNote from '@/components/machines/StaleNote.vue';
 import StatusBadge from '@/components/machines/StatusBadge.vue';
@@ -170,6 +171,11 @@ defineOptions({
                 </Button>
             </div>
         </div>
+
+        <ReportProblems
+            v-if="report && report.problems.length > 0"
+            :problems="report.problems"
+        />
 
         <section class="flex flex-col gap-4">
             <p class="text-3xl font-semibold" data-test="verdict">

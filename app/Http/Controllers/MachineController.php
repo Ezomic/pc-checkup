@@ -23,6 +23,7 @@ use App\Services\Quote\EuroAmount;
 use App\Services\Reports\ReportDetails;
 use App\Services\Reports\ReportFacts;
 use App\Services\Reports\ReportFreshness;
+use App\Services\Reports\ReportHealth;
 use App\Services\Reports\ReportScriptVersion;
 use App\Services\Reports\ReportTrends;
 use App\Services\Warranty\WarrantyLink;
@@ -123,12 +124,13 @@ final class MachineController extends Controller
         ]);
     }
 
-    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts, BuildReportInsights $insights, ReportFreshness $freshness, CompareLatestReports $changes, ReportDetails $details, ReportTrends $trends, ReportScriptVersion $scriptVersion, WarrantyLink $warranty, EstimateContext $estimate): Response
+    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts, BuildReportInsights $insights, ReportFreshness $freshness, CompareLatestReports $changes, ReportDetails $details, ReportTrends $trends, ReportScriptVersion $scriptVersion, WarrantyLink $warranty, EstimateContext $estimate, ReportHealth $health): Response
     {
         $this->authorize('view', $machine);
 
         $report = $machine->latestReport();
-        $cards = $report === null ? [] : $details->cards($report->markdown, $report->flags, $machine->device_type);
+        $built = $report === null ? ['cards' => [], 'failed' => []] : $details->build($report->markdown, $report->flags, $machine->device_type);
+        $cards = $built['cards'];
 
         return Inertia::render('machines/Show', [
             'machine' => $machine->only(['id', 'name', 'serial', 'hardware_uuid', 'os', 'device_type', 'model', 'rustdesk_id', 'status']),
@@ -139,6 +141,7 @@ final class MachineController extends Controller
                 'advice' => array_map(fn (FlagAdvice $advice): array => $advice->toArray(), $advisor->adviseAll($report->flags)),
                 'facts' => $facts->from($report->markdown),
                 'script' => $scriptVersion->for($report->markdown),
+                'problems' => $health->problems($report->markdown, $built['failed']),
                 'markdown' => $report->markdown,
             ],
             'changes' => $changes->handle($machine),
