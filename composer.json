@@ -11,6 +11,8 @@
     ],
     "license": "MIT",
     "require": {
+        "php": "^8.4",
+        "bacon/bacon-qr-code": "^3.1",
         "inertiajs/inertia-laravel": "^3.0",
         "laravel/chisel": "^0.1.0",
         "laravel/fortify": "^1.37.2",
@@ -18,7 +20,6 @@
         "laravel/sanctum": "^4.3",
         "laravel/tinker": "^3.0",
         "laravel/wayfinder": "^0.1.14",
-        "php": "^8.4",
         "thijssensoftware/flare-client": "^0.3.4",
         "thijssensoftware/id-client": "^0.4.0",
         "thijssensoftware/snag-client": "^0.1.0"

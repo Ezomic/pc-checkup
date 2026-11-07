@@ -165,4 +165,22 @@ describe('share/Privacy', () => {
             'For parts it reads the size, type and speed of each memory module, how many memory slots there are and the kind, connection and size of each internal drive (no serial or part numbers).',
         );
     });
+
+    it('explains the QR approval request in both languages', () => {
+        const dutch = render({ contactConfigured: false, contactEmail: 'x' });
+
+        expect(dutch.text()).toContain(
+            'In dat geval vraagt het script PC Checkup eerst om een koppeling: een willekeurige code en een QR-code, zonder iets over de computer.',
+        );
+        expect(dutch.text()).toContain('Een koppeling verloopt na 10 minuten');
+
+        page.props.locale = 'en';
+        const english = render({ contactConfigured: false, contactEmail: 'x' });
+        page.props.locale = 'nl';
+
+        expect(english.text()).toContain(
+            'In that case the script first asks PC Checkup for a pairing: a random code and a QR code, without anything about the computer.',
+        );
+        expect(english.text()).toContain('A pairing expires after 10 minutes');
+    });
 });

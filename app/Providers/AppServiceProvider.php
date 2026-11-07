@@ -7,6 +7,7 @@ namespace App\Providers;
 use App\Http\Middleware\AuthenticateBenchmarkClient;
 use App\Models\Machine;
 use App\Models\User;
+use App\Services\Scans\PairingUrlSanitiser;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -18,6 +19,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 use Laravel\Sanctum\PersonalAccessToken;
+use Thijssensoftware\FlareClient\Payload\Sanitiser;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -26,7 +28,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(Sanitiser::class, PairingUrlSanitiser::class);
     }
 
     /**
@@ -75,6 +77,15 @@ class AppServiceProvider extends ServiceProvider
         });
 
         RateLimiter::for('share', fn (Request $request): Limit => Limit::perMinute(60)->by('share:'.$request->ip()));
+
+        // A script asks for one pairing per run; a shop full of PCs behind one address needs a few.
+        RateLimiter::for('pairing', fn (Request $request): array => [
+            Limit::perMinute(5)->by('pairing:minute:'.$request->ip()),
+            Limit::perHour(60)->by('pairing:hour:'.$request->ip()),
+        ]);
+
+        // One poll every 3 seconds is 20 a minute per waiting script.
+        RateLimiter::for('pairing-poll', fn (Request $request): Limit => Limit::perMinute(120)->by('pairing-poll:'.$request->ip()));
 
         RateLimiter::for('bench', function (Request $request): Limit {
             $token = $request->user()?->currentAccessToken();

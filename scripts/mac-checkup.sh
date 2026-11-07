@@ -41,8 +41,15 @@
 # The token is never written to the report or printed.
 #
 # Without a token the script takes the 6 digit code of "Start a scan" in the app: --code, the
-# PC_CHECKUP_CODE environment variable, or a prompt when run from a terminal (an empty answer
-# skips the upload). A token always wins over a code. Bash 3.2 (stock macOS) compatible.
+# PC_CHECKUP_CODE environment variable, or a prompt when run from a terminal. A token always wins
+# over a code. Bash 3.2 (stock macOS) compatible.
+#
+# Pressing Enter at that prompt approves the upload with a QR code instead. Once the report is saved
+# the script asks the site for a pairing (that request carries nothing about this Mac) and shows a
+# QR code, a link and a 4 character check code. The owner opens it on a phone, checks the code and
+# approves; only then is the report sent, with a token that works once. The script asks every 3
+# seconds for at most 10 minutes; Ctrl-C stops it and nothing is sent. Without a terminal it never
+# pairs.
 
 set -u
 
@@ -93,6 +100,7 @@ PCC_TOKEN=""
 PCC_TOKEN_SOURCE=""
 PCC_CODE=""
 PCC_CODE_SOURCE=""
+PCC_PAIR=0
 
 # ---------- Upload helpers ----------
 pcc_clean() { printf '%s' "$1" | tr -d '\r' | head -n 1 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
@@ -134,14 +142,16 @@ pcc_find_code() {
   return 0
 }
 
-# Asks for the code when there is a terminal to ask on. An empty answer leaves PCC_CODE empty.
+# Asks for the code when there is a terminal to ask on. An empty answer sets PCC_PAIR=1: the upload
+# is then approved with a QR code once the report is saved.
 pcc_prompt_code() {
   local answer=""
   if [ ! -t 0 ] || [ ! -t 1 ]; then return 0; fi
-  printf 'Scan code from the app, 6 digits (Enter to skip the upload): '
-  IFS= read -r answer || answer=""
+  echo "NL: typ de scancode uit de app (6 cijfers), of druk op Enter om de upload na de scan met een QR-code te laten goedkeuren."
+  printf 'EN: scan code from the app, 6 digits, or Enter to approve the upload with a QR code after the scan: '
+  IFS= read -r answer || return 0
   answer=$(pcc_clean_code "$answer")
-  if [ -n "$answer" ]; then PCC_CODE=$answer; PCC_CODE_SOURCE=prompt; fi
+  if [ -n "$answer" ]; then PCC_CODE=$answer; PCC_CODE_SOURCE=prompt; else PCC_PAIR=1; fi
   return 0
 }
 
@@ -150,11 +160,13 @@ pcc_valid_url() {
 }
 
 # Prints {"markdown":"<file>"} with quotes, backslashes, control characters and non-ASCII
-# text escaped, or {"code":"<$2>","markdown":"<file>"} when a 6 digit code is given as $2.
+# text escaped, or {"code":"<$2>","markdown":"<file>"} when a 6 digit code is given as $2, or
+# {"upload_token":"<$3>","markdown":"<file>"} for the token of a QR approval.
 # Perl is always on a Mac; invalid UTF-8 becomes U+FFFD.
 pcc_json_body() {
   /usr/bin/perl -MEncode -0777 -e '
     my $code = shift @ARGV;
+    my $upload = shift @ARGV;
     my $s = decode("UTF-8", scalar(<STDIN>) // "");
     $s =~ s/([\\"])/\\$1/g;
     $s =~ s/\n/\\n/g;
@@ -162,8 +174,9 @@ pcc_json_body() {
     $s =~ s/\t/\\t/g;
     $s =~ s/([\x00-\x1f])/sprintf("\\u%04x", ord($1))/ge;
     my $lead = (defined $code && $code =~ /\A[0-9]{6}\z/) ? "\"code\":\"$code\"," : "";
+    $lead = "\"upload_token\":\"$upload\"," if defined $upload && $upload =~ /\A[A-Za-z0-9]{40}\z/;
     print encode("UTF-8", "{" . $lead . "\"markdown\":\"" . $s . "\"}");
-  ' "${2:-}" < "$1"
+  ' "${2:-}" "${3:-}" < "$1"
 }
 
 # Prints machine_id=, message= and error= lines for the JSON file given.
@@ -183,10 +196,11 @@ pcc_response_fields() {
 }
 
 # Sends the report file ($1) to the site ($2) and prints one line saying what happened. With a
-# token ($3) it goes to /api/reports; with an empty token and a scan code ($4) to /api/scans.
-# The token only travels on curl's stdin config, never in its arguments.
+# token ($3) it goes to /api/reports; with an empty token and a scan code ($4), or the upload token
+# of a QR approval ($5), to /api/scans. The token only travels on curl's stdin config, never in its
+# arguments; the scan code and upload token only in the body.
 pcc_upload() {
-  local file=$1 base=$2 token=$3 code=${4:-} json resp err status rc line machine="" message="" errors="" path=/api/reports auth=""
+  local file=$1 base=$2 token=$3 code=${4:-} upload=${5:-} json resp err status rc line machine="" message="" errors="" path=/api/reports auth=""
   json=$(mktemp)
   resp=$(mktemp)
   err=$(mktemp)
@@ -195,7 +209,7 @@ pcc_upload() {
     pcc_json_body "$file" > "$json"
   else
     path=/api/scans
-    pcc_json_body "$file" "$code" > "$json"
+    pcc_json_body "$file" "$code" "$upload" > "$json"
   fi
   status=$(printf '%s\n' "$auth" | curl -sS -K - --max-time 30 -X POST \
     -H 'Content-Type: application/json; charset=utf-8' -H 'Accept: application/json' \
@@ -232,11 +246,15 @@ pcc_upload() {
   rm -f "$json" "$resp" "$err"
 }
 
+pcc_upload_help() {
+  echo "To upload this report: choose Start a scan in the app and run again with --code (or PC_CHECKUP_CODE set), or create a token with only the Write ability (Settings, API tokens) and set PC_CHECKUP_TOKEN or put a pc-checkup.token file next to this script."
+}
+
 # Called once the report is saved: works out the token and site, uploads, or explains how to.
 pcc_upload_report() {
   local file=$1 base
-  if [ -z "$PCC_TOKEN" ] && [ -z "$PCC_CODE" ]; then
-    echo "To upload this report: choose Start a scan in the app and run again with --code (or PC_CHECKUP_CODE set), or create a token with only the Write ability (Settings, API tokens) and set PC_CHECKUP_TOKEN or put a pc-checkup.token file next to this script."
+  if [ -z "$PCC_TOKEN" ] && [ -z "$PCC_CODE" ] && [ "$PCC_PAIR" != 1 ]; then
+    pcc_upload_help
     return 0
   fi
   base=$(pcc_clean "${PCC_CLI_URL:-${PC_CHECKUP_URL:-$PCC_DEFAULT_URL}}")
@@ -250,11 +268,149 @@ pcc_upload_report() {
       echo "Upload skipped: the token contains characters a token never has. Check the $PCC_TOKEN_SOURCE it came from."
     fi
     echo "Token safety: use a token with only the Write ability and a short lifetime, and delete the token from any machine that is not yours."
+  elif [ -z "$PCC_CODE" ]; then
+    pcc_pair_upload "$file" "$base"
   elif pcc_valid_code "$PCC_CODE"; then
     pcc_upload "$file" "$base" "" "$PCC_CODE"
   else
     echo "Upload skipped: a scan code is exactly 6 digits. Check the $PCC_CODE_SOURCE it came from."
   fi
+}
+
+# ---------- QR approval (Enter at the scan code prompt) ----------
+PCC_PAIR_POLL_SECONDS=3
+PCC_PAIR_MAX_SECONDS=600
+PCC_PAIR_REQUEST_SECONDS=15
+
+# One capped request to the pairing endpoints: the body goes to $1, the HTTP status is printed
+# (000 without an answer). $4 is a curl config file, so the secret never shows in the arguments.
+pcc_pair_http() {
+  local out=$1 method=$2 url=$3 cfg=${4:-/dev/null}
+  if [ "$method" = POST ]; then set -- -d ''; else set --; fi
+  pcc_capped "$((PCC_PAIR_REQUEST_SECONDS + 5))" curl -sS -K "$cfg" --max-time "$PCC_PAIR_REQUEST_SECONDS" --max-filesize 65536 \
+    -X "$method" ${1+"$@"} -H 'Accept: application/json' -o "$out" -w '%{http_code}' "$url" 2>/dev/null
+}
+
+# Prints the fields of a pairing answer ($1) as key=value lines, and qr= lines for the QR code, but
+# only those with the shape the site gives them: nothing else from the answer reaches the terminal.
+pcc_pair_fields() {
+  /usr/bin/perl -MJSON::PP -0777 -e '
+    my $d = eval { decode_json(scalar(<STDIN>) // "") };
+    exit 0 unless ref $d eq "HASH";
+    binmode(STDOUT, ":utf8");
+    my %shape = (
+      id => qr/\A[A-Za-z0-9]{24}\z/, secret => qr/\A[A-Za-z0-9]{40}\z/, check_code => qr/\A[A-Z0-9]{4}\z/,
+      url => qr/\Ahttps?:\/\/[\x21-\x7e]{1,300}\z/, expires_in => qr/\A[0-9]{1,5}\z/,
+      status => qr/\A[a-z]{1,20}\z/, upload_token => qr/\A[A-Za-z0-9]{40}\z/,
+    );
+    for my $k (sort keys %shape) {
+      print "$k=$d->{$k}\n" if defined $d->{$k} && !ref $d->{$k} && $d->{$k} =~ $shape{$k};
+    }
+    my $qr = $d->{qr};
+    if (ref $qr eq "ARRAY" && @$qr >= 10 && @$qr <= 100 && !grep { ref $_ || !/\A[ #\x{2580}\x{2584}\x{2588}]{1,200}\z/ } @$qr) {
+      print "qr=$_\n" for @$qr;
+    }
+  ' < "$1"
+}
+
+# Prints the QR code ($1) dark on light whatever the terminal colours are. The ASCII version ($2=1)
+# is painted with background colours, because # signs alone scan badly.
+pcc_pair_print_qr() {
+  if [ ! -t 1 ]; then cat "$1"; return 0; fi
+  if [ "$2" = 1 ]; then
+    /usr/bin/perl -pe 's/(#+)/"\e[48;5;16m" . (" " x length($1)) . "\e[48;5;231m"/ge; s/^/\e[48;5;231m/; s/$/\e[0m/' "$1"
+  else
+    /usr/bin/perl -pe 's/^/\e[38;5;16;48;5;231m/; s/$/\e[0m/' "$1"
+  fi
+}
+
+# Asks the site for a pairing (nothing about this Mac is sent), shows its QR code, link and check
+# code, then asks every 3 seconds, for at most 10 minutes, whether the owner approved it. Only then
+# is the report ($1) sent to the site ($2), with the one-time upload token. Ctrl-C stops the wait.
+# The 10 minutes are counted both in polls and on the clock, so a slow network cannot stretch them.
+pcc_pair_upload() {
+  local file=$1 base=$2 ascii=0 fmt=half resp cfg qr status line id="" secret="" check="" link="" expires="" result="" token="" waited=0 stop=0 started=$SECONDS
+  case $(locale charmap 2>/dev/null) in UTF-8 | utf-8 | utf8) ;; *) ascii=1; fmt=ascii ;; esac
+  resp=$(mktemp)
+  cfg=$(mktemp)
+  qr=$(mktemp)
+  trap 'stop=1' INT
+  trap 'rm -f "$resp" "$cfg" "$qr"; exit 143' TERM HUP
+  status=$(pcc_pair_http "$resp" POST "$base/scripts/pair?qr=$fmt")
+  if [ "$stop" = 0 ] && [ "$status" = 201 ]; then
+    while IFS= read -r line; do
+      case $line in
+        id=*) id=${line#id=} ;;
+        secret=*) secret=${line#secret=} ;;
+        check_code=*) check=${line#check_code=} ;;
+        url=*) link=${line#url=} ;;
+        expires_in=*) expires=${line#expires_in=} ;;
+        qr=*) printf '%s\n' "${line#qr=}" >> "$qr" ;;
+      esac
+    done <<< "$(pcc_pair_fields "$resp")"
+  fi
+  if [ "$stop" = 1 ] || [ -z "$id" ] || [ -z "$secret" ] || [ -z "$check" ] || [ -z "$link" ] || [ ! -s "$qr" ]; then
+    trap - INT TERM HUP
+    rm -f "$resp" "$cfg" "$qr"
+    if [ "$stop" = 1 ]; then
+      echo "NL: Gestopt, er is niets verstuurd."; echo "EN: Stopped, nothing was sent."
+    else
+      echo "Upload skipped: could not start a QR approval with $base (HTTP ${status:-000})."
+    fi
+    pcc_upload_help
+    return 0
+  fi
+  if [ -z "$expires" ] || [ "$expires" -gt "$PCC_PAIR_MAX_SECONDS" ]; then expires=$PCC_PAIR_MAX_SECONDS; fi
+
+  echo
+  echo "NL: Laat de eigenaar deze QR-code scannen met een telefoon (of stuur een foto) en controleer samen dat de code $check is."
+  echo "EN: Have the owner scan this QR code with a phone (or send a photo of it) and check together that the code is $check."
+  echo
+  pcc_pair_print_qr "$qr" "$ascii"
+  echo
+  echo "  $link"
+  echo "  Code: $check"
+  echo
+  echo "NL: Wachten op goedkeuring, hooguit 10 minuten. Ctrl-C stopt zonder iets te versturen."
+  echo "EN: Waiting for approval, up to 10 minutes. Ctrl-C stops without sending anything."
+
+  printf 'header = "Authorization: Bearer %s"\n' "$secret" > "$cfg"
+  while [ "$stop" = 0 ] && [ "$waited" -lt "$expires" ] && [ $((SECONDS - started)) -lt "$expires" ]; do
+    status=$(pcc_pair_http "$resp" GET "$base/scripts/pair/$id" "$cfg")
+    result=""
+    if [ "$status" = 200 ]; then
+      while IFS= read -r line; do
+        case $line in
+          status=*) result=${line#status=} ;;
+          upload_token=*) token=${line#upload_token=} ;;
+        esac
+      done <<< "$(pcc_pair_fields "$resp")"
+    elif [ "$status" = 404 ]; then
+      result=expired
+    fi
+    case $result in
+      approved) if [ -n "$token" ]; then break; fi ;;
+      rejected | expired | used) break ;;
+    esac
+    if [ "$stop" = 0 ]; then sleep "$PCC_PAIR_POLL_SECONDS"; fi
+    waited=$((waited + PCC_PAIR_POLL_SECONDS))
+  done
+  trap - INT TERM HUP
+  rm -f "$resp" "$cfg" "$qr"
+
+  echo
+  case $stop:$result in
+    1:*) echo "NL: Gestopt, er is niets verstuurd."; echo "EN: Stopped, nothing was sent." ;;
+    0:approved)
+      echo "NL: Goedgekeurd, het rapport wordt verstuurd."; echo "EN: Approved, sending the report."
+      pcc_upload "$file" "$base" "" "" "$token"
+      return 0 ;;
+    0:rejected) echo "NL: De eigenaar heeft de upload afgewezen, er is niets verstuurd."; echo "EN: The owner rejected the upload, nothing was sent." ;;
+    0:expired | 0:used) echo "NL: De goedkeuring is verlopen, er is niets verstuurd."; echo "EN: The approval request expired, nothing was sent." ;;
+    *) echo "NL: Niemand heeft binnen 10 minuten goedgekeurd, er is niets verstuurd."; echo "EN: Nobody approved the upload within 10 minutes, nothing was sent." ;;
+  esac
+  pcc_upload_help
+  return 0
 }
 
 # ---------- Fix mode helpers (--fix) ----------
@@ -2092,7 +2248,7 @@ while [ $# -gt 0 ]; do
     *) echo "Unknown option: $1. Usage: bash $PCC_SCRIPT_NAME [--token TOKEN] [--code CODE] [--url URL] [--fix] [--benchmark]"; exit 2 ;;
   esac
 done
-echo "NL: Deze scan leest alleen hardware, schijfgebruik, map- en appnamen en beveiligingsinstellingen, wijzigt niets en verstuurt het rapport alleen als u een scancode invoert."; echo "EN: This scan only reads hardware, disk use, folder and app names and security settings, changes nothing, and uploads the report only if you enter a scan code. $PCC_DEFAULT_URL/privacy"
+echo "NL: Deze scan leest alleen hardware, schijfgebruik, map- en appnamen en beveiligingsinstellingen, wijzigt niets en verstuurt het rapport alleen als u een scancode invoert of de upload met een QR-code laat goedkeuren."; echo "EN: This scan only reads hardware, disk use, folder and app names and security settings, changes nothing, and uploads the report only if you enter a scan code or have the upload approved with a QR code. $PCC_DEFAULT_URL/privacy"
 pcc_find_token "$PCC_CLI_TOKEN"
 PCC_CLI_TOKEN=""
 if [ -z "$PCC_TOKEN" ]; then
