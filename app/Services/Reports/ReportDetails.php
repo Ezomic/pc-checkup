@@ -82,6 +82,7 @@ final readonly class ReportDetails
             'Remote-access tools' => fn (): ?array => (new ReportRemoteAccess)->card($sections),
             'Network settings' => fn (): ?array => (new ReportNetworkSettings)->card($sections),
             'Antivirus programs' => fn (): ?array => (new ReportAntivirusProducts)->card($sections),
+            'Activation and BitLocker' => fn (): ?array => (new ReportActivationBitLocker)->card($sections),
             'Worth keeping?' => fn (): ?array => $this->card('verdict', 'Worth keeping?', (new ReportVerdict)->rows($sections, $flags, $freeDisk)),
         ]);
     }

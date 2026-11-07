@@ -11,6 +11,7 @@ use App\Models\Machine;
 use App\Models\Report;
 use App\Models\User;
 use App\Services\Flags\FlagAdvisor;
+use App\Services\Reports\ReportActivationBitLocker;
 use App\Services\Reports\ReportAntivirusProducts;
 use App\Services\Reports\ReportBackups;
 use App\Services\Reports\ReportDetails;
@@ -179,6 +180,7 @@ final readonly class NeedsAttention
             ...$this->tagged((new ReportNetworkSettings)->reasons($sections), null),
             ...$this->tagged((new ReportAntivirusProducts)->reasons($sections), null),
             ...$this->tagged((new ReportRemoteAccess)->reasons($sections), null),
+            ...$this->tagged((new ReportActivationBitLocker)->reasons($sections), null),
             ...$this->flags($report->flags, [...$drives->coveredFlags($sections), ...$security->coveredFlags($sections)]),
             $this->freshness->isOlderThan($report, self::RESCAN_AFTER_DAYS) ? $this->reason(AttentionLevel::Soon, 'Last scanned more than 6 months ago', AttentionFilter::Stale) : null,
         ]));

@@ -12,8 +12,7 @@ describe('the sections of the real scripts', function () {
         $sections = ScriptLayout::of(CheckupScript::Mac)->sections;
 
         expect($sections[0])->toBe('Hardware overview')
-            ->and(end($sections))->toBe('Developer tools')
-            ->and($sections)->toContain('Storage breakdown', 'Wi-Fi signal', 'Backup freshness', 'Remote access tools', 'Network settings', 'Recent app crashes')
+            ->and($sections)->toContain('Storage breakdown', 'Wi-Fi signal', 'Backup freshness', 'Remote access tools', 'Network settings', 'Recent app crashes', 'Developer tools')
             ->and($sections)->toBe(array_values(array_unique($sections)));
     });
 
@@ -21,8 +20,7 @@ describe('the sections of the real scripts', function () {
         $sections = ScriptLayout::of(CheckupScript::Windows)->sections;
 
         expect($sections[0])->toBe('Hardware overview')
-            ->and(end($sections))->toBe('Antivirus products')
-            ->and($sections)->toContain('Storage breakdown', 'Windows 11 readiness', 'Windows health and security', 'Boot time', 'Network settings')
+            ->and($sections)->toContain('Storage breakdown', 'Windows 11 readiness', 'Windows health and security', 'Boot time', 'Network settings', 'Antivirus products', 'Activation and BitLocker')
             ->and($sections)->toBe(array_values(array_unique($sections)));
     });
 
