@@ -380,3 +380,14 @@ it('never gives the startup items card to a share page', function () {
             });
     }
 });
+
+it('shows the owner a measured user folder as a drive bar and never shows it on a share page', function () {
+    $markdown = macReportFixture()."\n## Storage breakdown\n\n```\nscan: partial (time limit of 150 seconds reached)\nformat: 2\nroot|Library|3145728\nroots_total|3145728\nmissing|root/Users\nhome|52496856\n```\n";
+    $card = collect(ownerDetails($markdown))->firstWhere('id', 'storage-breakdown');
+    $client = Client::factory()->withShareLink()->create();
+    $machine = Machine::factory()->for($client->user)->create(['client_id' => $client->id]);
+    Report::factory()->for($machine)->create(['markdown' => $markdown]);
+
+    expect(array_column($card['bars'][0]['items'], 'label'))->toContain('Users (your folder)');
+    $this->get("/c/{$client->share_token}/machines/{$machine->id}")->assertOk()->assertDontSee('Users (your folder)')->assertDontSee('52496856');
+});

@@ -25,6 +25,7 @@ function spwRun(string $case): ProcessResult
     $functions = implode("\n", array_map(fn (string $name): string => spwFunction($script, $name), [
         'Test-StorageFixedPath', 'Measure-StorageTree', 'Get-StorageFolderLabel', 'Get-StorageSlice',
         'Get-SpaceEntryCount', 'Test-SpaceReadable', 'Get-SpaceInstallers', 'Get-SpaceBiggestFiles', 'Get-SpaceReport',
+        'Test-StorageEngine', 'Get-StorageWalk', 'Measure-StorageWalk',
     ]));
 
     $dir = sys_get_temp_dir().'/pcc-spw-'.bin2hex(random_bytes(4));

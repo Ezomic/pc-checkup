@@ -7,10 +7,11 @@
 # file without a byte order mark as ANSI.
 #
 # The storage step measures folder sizes and groups the user folder by kind of file, for at most
-# 150 seconds. It stores sizes and counts, plus the names and sizes of the biggest folders in your
-# user profile (8 folders, and 5 inside each of the 2 biggest), never a file name or a full path.
-# It follows no junctions or links and leaves other disks alone. If the time runs out the report
-# says the numbers are partial.
+# 150 seconds, your user folder first and then the rest of the drive. To be quick it reads several
+# folders at a time with a small helper that PowerShell compiles in memory. It stores sizes and
+# counts, plus the names and sizes of the biggest folders in your user profile (8 folders, and 5
+# inside each of the 2 biggest), never a file name or a full path. It follows no junctions or links
+# and leaves other disks alone. If the time runs out the report says the numbers are partial.
 #
 # The space step looks, for at most 60 seconds, at a few fixed places where space can be got back:
 # the Recycle Bin, the Temp folders, downloaded Windows updates, installers in Downloads and
@@ -155,24 +156,280 @@ function Test-StorageFixedPath([string]$Path) {
     }
 }
 
-# Adds up the file sizes under a folder until $StopAtMs on $Clock. It never enters a junction or
-# symbolic link, skips files that only exist in the cloud, and with $Stats also counts the files by
-# kind and extension. File names are looked at in memory only and never kept. With $Tally, a folder
+# Compiles the folder walker once, in memory. It reads several folders at a time, which is what makes
+# the step fast on a full drive. When compiling is not possible (or PCC_STORAGE_ENGINE is "script"),
+# the walker written in PowerShell does the same work more slowly.
+function Test-StorageEngine {
+    if ($env:PCC_STORAGE_ENGINE -eq 'script') { return $false }
+    if ($null -ne $script:PccStorageEngine) { return $script:PccStorageEngine }
+    $script:PccStorageEngine = $false
+    try {
+        if (-not ('Pcc.StorageWalk' -as [type])) {
+            Add-Type -ErrorAction Stop -TypeDefinition @'
+    using System;
+    using System.Collections;
+    using System.Collections.Generic;
+    using System.Diagnostics;
+    using System.IO;
+    using System.Threading;
+
+    namespace Pcc
+    {
+        public sealed class StorageWalk
+        {
+            private sealed class Frame
+            {
+                public DirectoryInfo Folder;
+                public string One;
+                public string Two;
+            }
+
+            private sealed class Counts
+            {
+                public long Bytes;
+                public readonly long[] Bare = new long[2];
+                public readonly Dictionary<string, long[]> Kinds = new Dictionary<string, long[]>(StringComparer.Ordinal);
+                public readonly Dictionary<string, long[]> Extensions = new Dictionary<string, long[]>(StringComparer.Ordinal);
+                public readonly Dictionary<string, long> One = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+                public readonly Dictionary<string, long> Two = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            private const FileAttributes CloudOnly = (FileAttributes)(0x400000 | 0x40000 | 0x1000);
+            private readonly object gate = new object();
+            private readonly Stack<Frame> stack = new Stack<Frame>();
+            private readonly HashSet<string> skip;
+            private readonly bool tally;
+            private Dictionary<string, string> groups;
+            private long deadline;
+            private int busy;
+
+            public long Bytes;
+            public long[] Bare = new long[2];
+            public Dictionary<string, long[]> Kinds = new Dictionary<string, long[]>();
+            public Dictionary<string, long[]> Extensions = new Dictionary<string, long[]>();
+            public Dictionary<string, long> One = new Dictionary<string, long>();
+            public Dictionary<string, long> Two = new Dictionary<string, long>();
+
+            public StorageWalk(string path, string[] skip, bool tally, string one, string two)
+            {
+                this.skip = new HashSet<string>(skip, StringComparer.OrdinalIgnoreCase);
+                this.tally = tally;
+                DirectoryInfo start = new DirectoryInfo(path);
+                if ((start.Attributes & FileAttributes.ReparsePoint) == 0)
+                {
+                    Frame frame = new Frame();
+                    frame.Folder = start;
+                    // PowerShell hands a $null string over as an empty one.
+                    if (!string.IsNullOrEmpty(one)) frame.One = one;
+                    if (!string.IsNullOrEmpty(two)) frame.Two = two;
+                    stack.Push(frame);
+                }
+            }
+
+            public bool Done
+            {
+                get { lock (gate) { return stack.Count == 0; } }
+            }
+
+            // Walks until the stop time or the end. Bytes keeps growing over runs; the counts and the
+            // tally hold what this run added, for the caller to add to its own totals.
+            public bool Run(Stopwatch clock, long stopAtMs, Hashtable kinds, int threads)
+            {
+                Counts total = new Counts();
+                groups = null;
+                if (kinds != null)
+                {
+                    groups = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (DictionaryEntry entry in kinds) groups[Convert.ToString(entry.Key)] = Convert.ToString(entry.Value);
+                }
+                long room = stopAtMs - clock.ElapsedMilliseconds;
+                if (room > 0)
+                {
+                    deadline = Stopwatch.GetTimestamp() + room * (Stopwatch.Frequency / 1000);
+                    Frame first = null;
+                    lock (gate) { if (stack.Count > 0) first = stack.Pop(); }
+                    if (first != null)
+                    {
+                        List<Frame> found = new List<Frame>();
+                        Visit(first, found, total);
+                        lock (gate) { foreach (Frame child in found) stack.Push(child); }
+                    }
+                    Counts[] parts = new Counts[Math.Max(1, threads)];
+                    Thread[] workers = new Thread[parts.Length];
+                    for (int i = 0; i < parts.Length; i++)
+                    {
+                        parts[i] = new Counts();
+                        workers[i] = new Thread(Work);
+                        workers[i].IsBackground = true;
+                        workers[i].Start(parts[i]);
+                    }
+                    for (int i = 0; i < parts.Length; i++)
+                    {
+                        workers[i].Join();
+                        Merge(parts[i], total);
+                    }
+                }
+                Bytes += total.Bytes;
+                Bare = total.Bare;
+                Kinds = total.Kinds;
+                Extensions = total.Extensions;
+                One = total.One;
+                Two = total.Two;
+                return Done;
+            }
+
+            private void Work(object state)
+            {
+                Counts counts = (Counts)state;
+                List<Frame> found = new List<Frame>();
+                while (true)
+                {
+                    Frame frame;
+                    lock (gate)
+                    {
+                        while (true)
+                        {
+                            if (Stopwatch.GetTimestamp() >= deadline) { Monitor.PulseAll(gate); return; }
+                            if (stack.Count > 0) break;
+                            if (busy == 0) { Monitor.PulseAll(gate); return; }
+                            Monitor.Wait(gate, 50);
+                        }
+                        frame = stack.Pop();
+                        busy++;
+                    }
+                    found.Clear();
+                    try { Visit(frame, found, counts); } catch { }
+                    lock (gate)
+                    {
+                        foreach (Frame child in found) stack.Push(child);
+                        busy--;
+                        Monitor.PulseAll(gate);
+                    }
+                }
+            }
+
+            private void Visit(Frame frame, List<Frame> found, Counts counts)
+            {
+                FileSystemInfo[] entries;
+                try { entries = frame.Folder.GetFileSystemInfos(); } catch { return; }
+                long here = 0;
+                foreach (FileSystemInfo entry in entries)
+                {
+                    try
+                    {
+                        FileAttributes attributes = entry.Attributes;
+                        DirectoryInfo folder = entry as DirectoryInfo;
+                        if ((attributes & FileAttributes.Directory) != 0)
+                        {
+                            if (folder == null) continue;
+                            if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
+                            if (skip.Count > 0) { if (skip.Contains(folder.FullName)) continue; }
+                            Frame child = new Frame();
+                            child.Folder = folder;
+                            child.One = frame.One;
+                            child.Two = frame.Two;
+                            if (tally) { if (frame.One == null) child.One = folder.Name; else if (frame.Two == null) child.Two = folder.Name; }
+                            found.Add(child);
+                            continue;
+                        }
+                        FileInfo file = entry as FileInfo;
+                        if (file == null) continue;
+                        if ((attributes & CloudOnly) != 0) continue;
+                        long length = file.Length;
+                        counts.Bytes += length;
+                        here += length;
+                        if (groups != null) Count(file.Name, length, counts);
+                    }
+                    catch
+                    {
+                    }
+                }
+                if (tally & here > 0 & frame.One != null)
+                {
+                    Add(counts.One, frame.One, here);
+                    if (frame.Two != null) Add(counts.Two, frame.One + "\\" + frame.Two, here);
+                }
+            }
+
+            private void Count(string name, long length, Counts counts)
+            {
+                int dot = name.LastIndexOf('.');
+                string extension = "";
+                if (dot > 0 & dot < name.Length - 1) extension = name.Substring(dot + 1).ToLowerInvariant();
+                string kind;
+                if (extension.Length == 0) kind = "Other";
+                else if (!groups.TryGetValue(extension, out kind)) kind = "Other";
+                Add(counts.Kinds, kind, length, 1);
+                if (extension.Length == 0)
+                {
+                    counts.Bare[0] += length;
+                    counts.Bare[1] += 1;
+                }
+                else if (Plain(extension))
+                {
+                    Add(counts.Extensions, extension, length, 1);
+                }
+            }
+
+            private static bool Plain(string text)
+            {
+                if (text.Length > 10) return false;
+                foreach (char c in text)
+                {
+                    if ((c < 'a' | c > 'z') & (c < '0' | c > '9')) return false;
+                }
+                return true;
+            }
+
+            private static void Merge(Counts from, Counts into)
+            {
+                into.Bytes += from.Bytes;
+                into.Bare[0] += from.Bare[0];
+                into.Bare[1] += from.Bare[1];
+                foreach (KeyValuePair<string, long[]> item in from.Kinds) Add(into.Kinds, item.Key, item.Value[0], item.Value[1]);
+                foreach (KeyValuePair<string, long[]> item in from.Extensions) Add(into.Extensions, item.Key, item.Value[0], item.Value[1]);
+                foreach (KeyValuePair<string, long> item in from.One) Add(into.One, item.Key, item.Value);
+                foreach (KeyValuePair<string, long> item in from.Two) Add(into.Two, item.Key, item.Value);
+            }
+
+            private static void Add(Dictionary<string, long[]> table, string key, long bytes, long count)
+            {
+                long[] slot;
+                if (!table.TryGetValue(key, out slot))
+                {
+                    slot = new long[2];
+                    table[key] = slot;
+                }
+                slot[0] += bytes;
+                slot[1] += count;
+            }
+
+            private static void Add(Dictionary<string, long> table, string key, long bytes)
+            {
+                long have;
+                table.TryGetValue(key, out have);
+                table[key] = have + bytes;
+            }
+        }
+    }
+'@
+        }
+        $script:PccStorageEngine = $true
+    } catch {
+        $script:PccStorageEngine = $false
+    }
+    return $script:PccStorageEngine
+}
+
+# Starts a walk over a folder, for Measure-StorageWalk to run in one go or in parts. A walk never
+# enters a junction or symbolic link, nor a folder whose full path is in $Skip. With $Tally, a folder
 # inside the user profile also adds its bytes to the folder directly inside the profile (Tally.One)
 # and to the folder inside that one (Tally.Two, keyed "parent\child"); only those two names are kept.
-function Measure-StorageTree([string]$Path, $Clock, [long]$StopAtMs, $Stats, $Skip, $Tally = $null) {
-    $bytes = [long]0
-    $capped = $false
-    $directory = [int][System.IO.FileAttributes]::Directory
-    $reparse = [int][System.IO.FileAttributes]::ReparsePoint
-    $cloudOnly = 0x400000 -bor 0x40000 -bor 0x1000
-    $stack = New-Object 'System.Collections.Generic.Stack[object[]]'
-    $start = New-Object System.IO.DirectoryInfo($Path)
-    if ([int]$start.Attributes -band $reparse) { return [pscustomobject]@{ Bytes = $bytes; Capped = $false } }
+function Get-StorageWalk([string]$Path, $Skip, $Tally) {
+    $separators = [char[]]@('\', '/')
     $one = $null
     $two = $null
     if ($Tally) {
-        $separators = [char[]]@('\', '/')
         $full = [System.IO.Path]::GetFullPath($Path).TrimEnd($separators)
         $inside = $Tally.Profile + [System.IO.Path]::DirectorySeparatorChar
         if ($full.StartsWith($inside, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -183,9 +440,69 @@ function Measure-StorageTree([string]$Path, $Clock, [long]$StopAtMs, $Stats, $Sk
             $Tally = $null
         }
     }
-    $stack.Push([object[]]@($start, $one, $two))
+    $walk = @{ Path = $Path; Bytes = [long]0; Done = $false; Skip = $Skip; Tally = $Tally; Engine = $null; Stack = $null; Threads = [math]::Max(1, [math]::Min(8, [Environment]::ProcessorCount)) }
+    if (Test-StorageEngine) {
+        $list = [string[]]@()
+        if ($null -ne $Skip) { $list = [string[]]@($Skip) }
+        $walk.Engine = New-Object Pcc.StorageWalk -ArgumentList $Path, $list, ([bool]$Tally), $one, $two
+        $walk.Done = $walk.Engine.Done
+        return $walk
+    }
+    $walk.Stack = New-Object 'System.Collections.Generic.Stack[object[]]'
+    $start = New-Object System.IO.DirectoryInfo($Path)
+    if (-not ([int]$start.Attributes -band [int][System.IO.FileAttributes]::ReparsePoint)) { $walk.Stack.Push([object[]]@($start, $one, $two)) }
+    $walk.Done = $walk.Stack.Count -eq 0
+    return $walk
+}
+
+# Runs a walk until $StopAtMs on $Clock and says whether it is finished; a later call carries on
+# where this one stopped. With time left it always reads at least one folder. It adds up the file
+# sizes, skips files that only exist in the cloud, and with $Stats also counts the files by kind and
+# extension. File names are looked at in memory only and never kept.
+function Measure-StorageWalk($Walk, $Clock, [long]$StopAtMs, $Stats) {
+    if ($Walk.Done -or $Clock.ElapsedMilliseconds -ge $StopAtMs) { return $Walk.Done }
+    $Tally = $Walk.Tally
+    if ($Walk.Engine) {
+        $groups = $null
+        if ($Stats) { $groups = $Stats.Group }
+        $Walk.Done = $Walk.Engine.Run($Clock, $StopAtMs, $groups, $Walk.Threads)
+        $Walk.Bytes = $Walk.Engine.Bytes
+        if ($Stats) {
+            foreach ($item in $Walk.Engine.Kinds.GetEnumerator()) {
+                $slot = $Stats.Kind[$item.Key]
+                $slot[0] += $item.Value[0]
+                $slot[1] += $item.Value[1]
+            }
+            foreach ($item in $Walk.Engine.Extensions.GetEnumerator()) {
+                $slot = $Stats.Ext[$item.Key]
+                if ($null -eq $slot) {
+                    $slot = @([long]0, [long]0)
+                    $Stats.Ext[$item.Key] = $slot
+                }
+                if ($slot -is [array]) {
+                    $slot[0] += $item.Value[0]
+                    $slot[1] += $item.Value[1]
+                }
+            }
+            $Stats.Bare[0] += $Walk.Engine.Bare[0]
+            $Stats.Bare[1] += $Walk.Engine.Bare[1]
+        }
+        if ($Tally) {
+            foreach ($item in $Walk.Engine.One.GetEnumerator()) { $Tally.One[$item.Key] = [long]$Tally.One[$item.Key] + $item.Value }
+            foreach ($item in $Walk.Engine.Two.GetEnumerator()) { $Tally.Two[$item.Key] = [long]$Tally.Two[$item.Key] + $item.Value }
+        }
+        return $Walk.Done
+    }
+    $Skip = $Walk.Skip
+    $stack = $Walk.Stack
+    $bytes = [long]0
+    $first = $true
+    $directory = [int][System.IO.FileAttributes]::Directory
+    $reparse = [int][System.IO.FileAttributes]::ReparsePoint
+    $cloudOnly = 0x400000 -bor 0x40000 -bor 0x1000
     while ($stack.Count -gt 0) {
-        if ($Clock.ElapsedMilliseconds -ge $StopAtMs) { $capped = $true; break }
+        if (-not $first -and $Clock.ElapsedMilliseconds -ge $StopAtMs) { break }
+        $first = $false
         $frame = $stack.Pop()
         $current = $frame[0]
         $one = $frame[1]
@@ -226,7 +543,7 @@ function Measure-StorageTree([string]$Path, $Clock, [long]$StopAtMs, $Stats, $Sk
                     } else {
                         $slot = $Stats.Ext[$extension]
                         if ($null -eq $slot) {
-                            if ($extension.Length -le 10 -and $extension -cmatch '^[a-z0-9]+$') { $slot = @([long]0, [long]0) } else { $slot = $false }
+                            if ($extension.Length -le 10 -and $extension -cmatch '\A[a-z0-9]+\z') { $slot = @([long]0, [long]0) } else { $slot = $false }
                             $Stats.Ext[$extension] = $slot
                         }
                         if ($slot -is [array]) {
@@ -247,7 +564,16 @@ function Measure-StorageTree([string]$Path, $Clock, [long]$StopAtMs, $Stats, $Sk
             }
         }
     }
-    return [pscustomobject]@{ Bytes = $bytes; Capped = $capped }
+    $Walk.Bytes += $bytes
+    $Walk.Done = $stack.Count -eq 0
+    return $Walk.Done
+}
+
+# Adds up the file sizes under a folder in one go until $StopAtMs on $Clock, for the space step.
+function Measure-StorageTree([string]$Path, $Clock, [long]$StopAtMs) {
+    $walk = Get-StorageWalk $Path $null $null
+    $done = Measure-StorageWalk $walk $Clock $StopAtMs $null
+    return [pscustomobject]@{ Bytes = $walk.Bytes; Capped = -not $done }
 }
 
 # A folder name as the report shows it: no control characters, pipes or slashes, spaces collapsed,
@@ -313,10 +639,12 @@ function Get-StorageKnownIndex($Known, [string]$Name) {
 }
 
 # Measures disk usage once, read only, and never longer than the cap (150 seconds by default).
-# The top level of the drive comes first, then the user folder, and each bucket gets its share of
-# the clock and hands back what it did not use. A bucket that runs out of time is listed as missing
-# instead of with a number that would be too small. Returns the lines of the "Storage breakdown"
-# section; progress goes to the screen.
+# The user folder comes first, then Users, Windows, the Program Files folders, ProgramData and the
+# other folders at the top of the drive. Each folder gets its share of the clock and hands back what
+# it did not use; one that needs more waits, and once every folder had its turn the waiting ones
+# carry on where they stopped, in the same order, until the cap. A folder that is still not done is
+# listed as missing instead of with a number that would be too small. Returns the lines of the
+# "Storage breakdown" section; progress goes to the screen.
 function Get-StorageBreakdown {
     $StorageCapSeconds = 150
     if ($env:PCC_STORAGE_CAP -match '^[1-9][0-9]{0,4}$') { $StorageCapSeconds = [int]$env:PCC_STORAGE_CAP }
@@ -345,53 +673,12 @@ function Get-StorageBreakdown {
         foreach ($extension in $groups[$kind].Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)) { $stats.Group[$extension] = $kind }
     }
 
-    Write-Host "Measuring storage (the drive, then your user folder, then file types), stopping after $StorageCapSeconds seconds at the latest..."
+    Write-Host "Measuring storage (your user folder first, then the rest of the drive), stopping after $StorageCapSeconds seconds at the latest..."
     $profileFull = ''
     if (Test-Path -LiteralPath $profilePath -PathType Container) { $profileFull = [System.IO.Path]::GetFullPath($profilePath).TrimEnd($separators) }
     $tally = $null
     if ($profileFull -ne '') { $tally = @{ Profile = $profileFull; One = @{}; Two = @{} } }
 
-    Write-Host '  Measuring the biggest folders on the drive...'
-    $known = @('Users', 'Windows', 'Program Files', 'Program Files (x86)', 'ProgramData')
-    $knownWeights = @(10, 6, 5, 4, 3)
-    $tops = @()
-    if ((Test-Path -LiteralPath $rootPath -PathType Container) -and (Test-StorageFixedPath $rootPath)) {
-        $tops = @((New-Object System.IO.DirectoryInfo($rootPath)).GetDirectories() | Where-Object {
-            -not ([int]$_.Attributes -band [int][System.IO.FileAttributes]::ReparsePoint) -and $_.Name -ne 'System Volume Information' -and $_.Name -ne '$Recycle.Bin'
-        } | Sort-Object @{ Expression = { Get-StorageKnownIndex $known $_.Name } }, Name)
-    }
-    $phaseEnd = [long][math]::Max(1000, $capMs * 35 / 100)
-    $weightLeft = [double]0
-    foreach ($top in $tops) {
-        $at = Get-StorageKnownIndex $known $top.Name
-        if ($at -ge 0) { $weightLeft += $knownWeights[$at] } else { $weightLeft += 1 }
-    }
-    $drive = New-Object System.Collections.Generic.List[object]
-    foreach ($top in $tops) {
-        $at = Get-StorageKnownIndex $known $top.Name
-        $weight = [double]1
-        if ($at -ge 0) { $weight = [double]$knownWeights[$at] }
-        $slice = Get-StorageSlice $clock $phaseEnd $weight $weightLeft
-        $weightLeft -= $weight
-        $holds = $false
-        $skip = $null
-        if ($profileFull -ne '' -and $profileFull.StartsWith($top.FullName.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
-            $holds = $true
-            $skip = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-            [void]$skip.Add($profileFull)
-        }
-        $clean = $top.Name -replace '[^A-Za-z0-9 ._()+-]', '_'
-        $entry = @{ Name = $clean.Substring(0, [math]::Min(40, $clean.Length)); Raw = $top.Name; Bytes = [long]0; Done = $false; Holds = $holds }
-        if ($slice -gt 0) {
-            $result = Measure-StorageTree $top.FullName $clock ($clock.ElapsedMilliseconds + $slice) $null $skip
-            $entry.Bytes = $result.Bytes
-            $entry.Done = -not $result.Capped
-        }
-        if (-not $entry.Done) { $capped = $true }
-        $drive.Add($entry)
-    }
-
-    Write-Host '  Measuring your user folder and the kinds of files in it...'
     $appData = Join-Path $profilePath 'AppData'
     $local = Join-Path $appData 'Local'
     $roaming = Join-Path $appData 'Roaming'
@@ -422,21 +709,69 @@ function Get-StorageBreakdown {
     $plan.Add(@{ Key = 'Rest'; Path = $profilePath; Skip = @(); Order = 9; Weight = 2 })
 
     $present = @($plan | Where-Object { (Test-Path -LiteralPath $_.Path -PathType Container) -and (Test-StorageFixedPath $_.Path) } | Sort-Object { $_.Order })
-    $got = @{}
-    $weightLeft = [double]0
-    foreach ($item in $present) { $weightLeft += $item.Weight }
+    $buckets = New-Object System.Collections.Generic.List[object]
     foreach ($item in $present) {
-        $slice = Get-StorageSlice $clock $capMs $item.Weight $weightLeft
-        $weightLeft -= $item.Weight
         $skip = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
         foreach ($path in $item.Skip) { [void]$skip.Add([System.IO.Path]::GetFullPath($path).TrimEnd($separators)) }
         if ($item.Key -eq 'Rest') { foreach ($path in $apart) { [void]$skip.Add($path) } }
-        $got[$item.Key] = $null
-        if ($slice -gt 0) {
-            $result = Measure-StorageTree $item.Path $clock ($clock.ElapsedMilliseconds + $slice) $stats $skip $tally
-            if (-not $result.Capped) { $got[$item.Key] = $result.Bytes }
+        $buckets.Add(@{ Key = $item.Key; Path = $item.Path; Skip = $skip; Weight = [double]$item.Weight; Stats = $stats; Tally = $tally; Drive = $null })
+    }
+
+    $known = @('Users', 'Windows', 'Program Files', 'Program Files (x86)', 'ProgramData')
+    $knownWeights = @(10, 6, 5, 4, 3)
+    $tops = @()
+    if ((Test-Path -LiteralPath $rootPath -PathType Container) -and (Test-StorageFixedPath $rootPath)) {
+        $tops = @((New-Object System.IO.DirectoryInfo($rootPath)).GetDirectories() | Where-Object {
+            -not ([int]$_.Attributes -band [int][System.IO.FileAttributes]::ReparsePoint) -and $_.Name -ne 'System Volume Information' -and $_.Name -ne '$Recycle.Bin'
+        } | Sort-Object @{ Expression = { $at = Get-StorageKnownIndex $known $_.Name; if ($at -lt 0) { $known.Count } else { $at } } }, Name)
+    }
+    $drive = New-Object System.Collections.Generic.List[object]
+    foreach ($top in $tops) {
+        $at = Get-StorageKnownIndex $known $top.Name
+        $weight = [double]1
+        if ($at -ge 0) { $weight = [double]$knownWeights[$at] }
+        $holds = $false
+        $skip = $null
+        if ($profileFull -ne '' -and $profileFull.StartsWith($top.FullName.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $holds = $true
+            $skip = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+            [void]$skip.Add($profileFull)
         }
-        if ($null -eq $got[$item.Key]) { $capped = $true }
+        $clean = $top.Name -replace '[^A-Za-z0-9 ._()+-]', '_'
+        $entry = @{ Name = $clean.Substring(0, [math]::Min(40, $clean.Length)); Raw = $top.Name; Bytes = [long]0; Done = $false; Holds = $holds }
+        $drive.Add($entry)
+        $buckets.Add(@{ Key = $null; Path = $top.FullName; Skip = $skip; Weight = $weight; Stats = $null; Tally = $null; Drive = $entry })
+    }
+
+    Write-Host '  Measuring your user folder and the kinds of files in it...'
+    $weightLeft = [double]0
+    foreach ($bucket in $buckets) { $weightLeft += $bucket.Weight }
+    $told = $false
+    foreach ($bucket in $buckets) {
+        if ($bucket.Drive -and -not $told) {
+            Write-Host '  Measuring the biggest folders on the drive...'
+            $told = $true
+        }
+        $slice = Get-StorageSlice $clock $capMs $bucket.Weight $weightLeft
+        $weightLeft -= $bucket.Weight
+        $bucket.Walk = Get-StorageWalk $bucket.Path $bucket.Skip $bucket.Tally
+        if ($slice -gt 0) { [void](Measure-StorageWalk $bucket.Walk $clock ($clock.ElapsedMilliseconds + $slice) $bucket.Stats) }
+    }
+    $waiting = @($buckets | Where-Object { -not $_.Walk.Done })
+    if ($waiting.Count -gt 0 -and $clock.ElapsedMilliseconds -lt $capMs) {
+        Write-Host '  Going back to the folders that needed more time...'
+        foreach ($bucket in $waiting) { [void](Measure-StorageWalk $bucket.Walk $clock $capMs $bucket.Stats) }
+    }
+    $got = @{}
+    foreach ($bucket in $buckets) {
+        if (-not $bucket.Walk.Done) { $capped = $true }
+        if ($bucket.Drive) {
+            $bucket.Drive.Bytes = $bucket.Walk.Bytes
+            $bucket.Drive.Done = $bucket.Walk.Done
+        } else {
+            $got[$bucket.Key] = $null
+            if ($bucket.Walk.Done) { $got[$bucket.Key] = $bucket.Walk.Bytes }
+        }
     }
 
     $absent = New-Object System.Collections.Generic.List[string]
@@ -665,7 +1000,7 @@ function Get-SpaceReport {
             if ($found -and $found.Count -gt 0) { $lines.Add("reclaim|installers|$([long][math]::Round($found.Bytes / 1024.0))|$($found.Count)") }
             continue
         }
-        $result = Measure-StorageTree $place.Path $clock ($clock.ElapsedMilliseconds + $slice) $null $null
+        $result = Measure-StorageTree $place.Path $clock ($clock.ElapsedMilliseconds + $slice)
         if ($result.Capped) { $capped = $true; continue }
         $lines.Add("reclaim|$($place.Key)|$([long][math]::Round($result.Bytes / 1024.0))|$(Get-SpaceEntryCount $place.Path $place.Prefix)")
     }
