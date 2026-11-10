@@ -1087,7 +1087,7 @@ pcc_findmy_report() {
 
 PCC_STORAGE_HOME_NAMES="Downloads|Documents|Desktop|Pictures|Movies|Music|Library|Applications"
 PCC_STORAGE_LIBRARY_NAMES="Application Support|Caches|Containers|Group Containers|Mail|Messages|Mobile Documents|Developer|Logs|Safari"
-PCC_STORAGE_ROOT_NAMES="Users|Applications|Library|System|private|usr|opt|var|bin|sbin"
+PCC_STORAGE_ROOT_NAMES="Users|Applications|System|private|Library|usr|opt|var|bin|sbin"
 
 pcc_storage_stop() {
   local slice=$(($2 * $3 / 100)) stop
@@ -1148,11 +1148,50 @@ pcc_storage_rootrows() {
     }'
 }
 
-# The top of the system volume in one pass, then one folder at a time for the well-known ones the
-# pass did not report. Prints root|Name|KB for every folder measured.
+# Users without walking the user folder again: its size ($3 KB, folder $2 in $1) plus what du says
+# about everything else in folder $1, within $4 seconds. Prints "KB<TAB>folder" when it finished.
+pcc_storage_users() {
+  local dir=$1 mine=$2 kb=$3 secs=$4 rc_file=$5 entry out="" rc
+  set --
+  for entry in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
+    if [ "${entry##*/}" = "$mine" ]; then continue; fi
+    if [ -e "$entry" ] || [ -L "$entry" ]; then set -- "$@" "$entry"; fi
+  done
+  if [ "$#" -gt 0 ]; then
+    if [ "$secs" -lt 1 ]; then echo 142 >> "$rc_file"; return 0; fi
+    out=$(pcc_capped "$secs" du -x -k -d 0 "$@" 2>/dev/null)
+    rc=$?
+    echo "$rc" >> "$rc_file"
+    if [ "$rc" = 142 ]; then return 0; fi
+  fi
+  printf '%s\n' "$out" | awk -F '\t' -v kb="$kb" -v dir="$dir" '$1 ~ /^[0-9]+$/ { kb += $1 } END { print kb "\t" dir }'
+}
+
+# The well-known folders one at a time, each with an equal share of the time left, Users through
+# pcc_storage_users when the user folder $3 (of $4 KB) sits right inside it. Prints "KB<TAB>path" lines.
+pcc_storage_roots_each() {
+  local stop=$1 rc_file=$2 mine=$3 kb=$4 dir left secs
+  shift 4
+  left=$#
+  for dir in "$@"; do
+    secs=$(((stop - SECONDS + left - 1) / left))
+    if [ -n "$mine" ] && [ -n "$kb" ] && [ "${dir##*/}" = Users ]; then
+      pcc_storage_users "$dir" "$mine" "$kb" "$secs" "$rc_file"
+    else
+      pcc_storage_du 0 "$secs" "$dir" "$rc_file"
+    fi
+    left=$((left - 1))
+  done
+}
+
+# The top of the system volume in one pass. When the pass is stopped, the well-known folders it did
+# not report are measured one at a time in the order of PCC_STORAGE_ROOT_NAMES, and the ones that
+# did not finish in their share get a second go with the time that is left. $5 is the name of the
+# user folder when it sits right inside Users and $6 its size in KB, so Users does not walk it again.
+# Prints root|Name|KB for every folder measured.
 pcc_storage_roots() {
-  local root=$1 data=$2 stop=$3 rc_file=$4 firm=${PCC_STORAGE_FIRMLINKS:-/usr/share/firmlinks}
-  local whole="" hasdata=0 pass_rc pass_end rows more="" name dir old_ifs=$IFS
+  local root=$1 data=$2 stop=$3 rc_file=$4 mine=$5 kb=$6 firm=${PCC_STORAGE_FIRMLINKS:-/usr/share/firmlinks}
+  local whole="" hasdata=0 pass_rc pass_end rows more="" name dir round old_ifs=$IFS
   if [ -d "$data" ]; then
     hasdata=1
     whole=$(awk -F '\t' '$1 ~ /^\/[^\/]+$/ { print substr($1, 2) }' "$firm" 2>/dev/null | tr '\n' '|')
@@ -1164,20 +1203,23 @@ pcc_storage_roots() {
     pcc_storage_du 1 $((pass_end - SECONDS)) "$root" "$pass_rc"
   } | pcc_storage_rootrows "$root" "$data" "$hasdata" "$whole")
   if grep -q '^142$' "$pass_rc"; then
-    set --
-    IFS='|'
-    for name in $PCC_STORAGE_ROOT_NAMES; do
-      dir=""
-      if printf '%s\n' "$rows" | grep -q "^root|$name|"; then continue; fi
-      if [ "$hasdata" = 1 ] && [ -d "$data/$name" ] && [ ! -L "$data/$name" ] && case "|$whole" in *"|$name|"*) true ;; *) false ;; esac; then
-        dir=${data%/}/$name
-      elif [ -d "${root%/}/$name" ] && [ ! -L "${root%/}/$name" ]; then
-        dir=${root%/}/$name
-      fi
-      if [ -n "$dir" ]; then set -- "$@" "$dir"; fi
+    for round in 1 2; do
+      set --
+      IFS='|'
+      for name in $PCC_STORAGE_ROOT_NAMES; do
+        dir=""
+        if printf '%s\n%s\n' "$rows" "$more" | grep -q "^root|$name|"; then continue; fi
+        if [ "$hasdata" = 1 ] && [ -d "$data/$name" ] && [ ! -L "$data/$name" ] && case "|$whole" in *"|$name|"*) true ;; *) false ;; esac; then
+          dir=${data%/}/$name
+        elif [ -d "${root%/}/$name" ] && [ ! -L "${root%/}/$name" ]; then
+          dir=${root%/}/$name
+        fi
+        if [ -n "$dir" ]; then set -- "$@" "$dir"; fi
+      done
+      IFS=$old_ifs
+      if [ "$#" -eq 0 ] || [ "$SECONDS" -ge "$stop" ]; then break; fi
+      more=$(printf '%s\n' "$more"; pcc_storage_roots_each "$stop" "$pass_rc" "$mine" "$kb" "$@" | pcc_storage_rootrows "$root" "$data" "$hasdata" "$whole")
     done
-    IFS=$old_ifs
-    more=$(pcc_storage_each "$stop" "$pass_rc" "$@" | pcc_storage_rootrows "$root" "$data" "$hasdata" "$whole")
   fi
   cat "$pass_rc" >> "$rc_file"
   rm -f "$pass_rc"
@@ -1450,18 +1492,21 @@ pcc_storage_types() {
 }
 
 # Measures disk usage once, read only, and never longer than the cap (150 seconds by default).
-# The biggest buckets come first, each phase gets its share of the clock and hands back what it
-# did not use. Progress goes to the screen and the report text goes to stdout.
+# The user folder comes first, then the drive until three quarters of the cap, then the kinds of
+# files; each phase hands on the time it did not use. Progress goes to the screen and the report
+# text goes to stdout.
 pcc_storage_report() {
   local home=${PCC_STORAGE_HOME:-$HOME} root=${PCC_STORAGE_ROOT:-/} data=${PCC_STORAGE_DATA:-/System/Volumes/Data}
-  local cap=${PCC_STORAGE_CAP:-150} start=$SECONDS roots homes types rc_file scan="complete"
+  local cap=${PCC_STORAGE_CAP:-150} start=$SECONDS roots homes types rc_file scan="complete" mine="" kb
   case $cap in '' | *[!0-9]* | 0*) cap=150 ;; esac
   rc_file=$(mktemp)
-  echo "Measuring storage (the drive, then your user folder, then file types), stopping after $cap seconds at the latest..." >&2
-  echo "  Measuring the biggest folders on the drive..." >&2
-  roots=$(pcc_storage_roots "$root" "$data" "$(pcc_storage_stop "$start" "$cap" 35)" "$rc_file" 2>/dev/null)
+  echo "Measuring storage (your user folder first, then the drive, then file types), stopping after $cap seconds at the latest..." >&2
   echo "  Measuring your user folder..." >&2
   homes=$(pcc_storage_home "$home" "$(pcc_storage_stop "$start" "$cap" 40)" "$rc_file" 2>/dev/null)
+  kb=$(printf '%s\n' "$homes" | awk -F '|' '$1 == "home" && NF == 2 { print $2; exit }')
+  case "$(dirname "$home")" in "${root%/}/Users" | "${data%/}/Users") mine=$(basename "$home") ;; esac
+  echo "  Measuring the biggest folders on the drive..." >&2
+  roots=$(pcc_storage_roots "$root" "$data" $((start + cap * 75 / 100)) "$rc_file" "$mine" "$kb" 2>/dev/null)
   echo "  Measuring kinds of files in your user folder..." >&2
   types=$(pcc_storage_types "$home" $((start + cap)) 2>/dev/null)
   if grep -q '^142$' "$rc_file" || printf '%s\n' "$types" | grep -q '^capped|'; then

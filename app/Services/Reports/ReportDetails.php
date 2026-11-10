@@ -29,6 +29,8 @@ final readonly class ReportDetails
 
     private const HOME_TITLE = 'Biggest folders in your user folder';
 
+    private const HOME_ON_DRIVE = 'Users (your folder)';
+
     private const UNITS = ['B' => 1, 'K' => 1024, 'M' => 1024 ** 2, 'G' => 1024 ** 3, 'T' => 1024 ** 4, 'P' => 1024 ** 5];
 
     private const BATTERY_CONDITIONS = [
@@ -202,8 +204,10 @@ final readonly class ReportDetails
         $capacity = $this->capacity($sections);
         $used = $capacity === null ? 0.0 : max($capacity['size'] - $capacity['free'], 0.0);
         $counted = array_sum(array_column($read['categories'], 'bytes'));
-        $notMeasured = $this->notMeasured($read, $used);
-        $drive = $notMeasured === null ? $read['roots'] : [...$read['roots'], ['name' => 'Not measured', 'bytes' => $notMeasured, 'count' => null]];
+        $home = $this->homeOutsideRoots($read);
+        $notMeasured = $this->notMeasured($read, $used, $home ?? 0.0);
+        $roots = $home === null ? $read['roots'] : $this->byBytes([...$read['roots'], ['name' => self::HOME_ON_DRIVE, 'bytes' => $home, 'count' => null]]);
+        $drive = $notMeasured === null ? $roots : [...$roots, ['name' => 'Not measured', 'bytes' => $notMeasured, 'count' => null]];
         $mine = $read['home'] === null ? $read['folders'] : [['name' => 'Everything in your user folder', 'bytes' => $read['home'], 'count' => null], ...$read['folders']];
         $groups = [
             ['Biggest folders on the drive', $drive, $used, 'used space', false],
@@ -225,7 +229,7 @@ final readonly class ReportDetails
         return [
             'id' => 'storage-breakdown',
             'title' => 'Storage breakdown',
-            'summary' => $this->summary($read, $used, $notMeasured),
+            'summary' => $this->summary($read, $roots, $used, $notMeasured),
             'rows' => [],
             'list' => null,
             'bars' => $bars,
@@ -236,28 +240,58 @@ final readonly class ReportDetails
     /**
      * @param  Breakdown  $read
      */
-    private function notMeasured(array $read, float $used): ?float
+    private function notMeasured(array $read, float $used, float $home): ?float
     {
         if ($read['version'] < 2 || $read['rootsTotal'] === null || $used <= 0) {
             return null;
         }
 
-        $rest = $used - $read['rootsTotal'];
+        $rest = $used - $read['rootsTotal'] - $home;
 
         return $rest > 0 ? $rest : null;
     }
 
     /**
+     * What was measured of the user folder when the Users folder on the drive ran out of time, so it
+     * is in no drive total yet: the user folder's own total, or else the sum of the folders in it.
+     *
      * @param  Breakdown  $read
      */
-    private function summary(array $read, float $used, ?float $notMeasured): ?string
+    private function homeOutsideRoots(array $read): ?float
     {
-        $top = array_slice($read['roots'], 0, 3);
-        $named = $this->biggestHomeFolder($read, $used);
+        if ($read['version'] < 2 || ! in_array('Users', $read['missing'], true)) {
+            return null;
+        }
+
+        $bytes = $read['home'] ?? (float) array_sum(array_column($read['folders'], 'bytes'));
+
+        return $bytes > 0 ? $bytes : null;
+    }
+
+    /**
+     * @param  list<array{name: string, bytes: float, count: int|null}>  $items
+     * @return list<array{name: string, bytes: float, count: int|null}>
+     */
+    private function byBytes(array $items): array
+    {
+        usort($items, fn (array $a, array $b): int => $b['bytes'] <=> $a['bytes']);
+
+        return $items;
+    }
+
+    /**
+     * @param  Breakdown  $read
+     * @param  list<array{name: string, bytes: float, count: int|null}>  $roots
+     */
+    private function summary(array $read, array $roots, float $used, ?float $notMeasured): ?string
+    {
+        $top = array_slice($roots, 0, 3);
+        $homeNamed = in_array(self::HOME_ON_DRIVE, array_column($top, 'name'), true);
+        $named = $this->biggestHomeFolder($read, $used, $homeNamed);
         $sentence = null;
 
         if ($top !== []) {
-            $names = array_map(fn (array $item): string => $item['name'].' ('.ByteSize::format($item['bytes']).')', $top);
+            $names = array_map(fn (array $item): string => ($item['name'] === self::HOME_ON_DRIVE ? 'your user folder' : $item['name']).' ('.ByteSize::format($item['bytes']).')', $top);
             $lead = array_sum(array_column($top, 'bytes')) * 2 >= $used && $used > 0 ? 'Most of the space is used by' : 'The biggest folders found are';
             $sentence = "{$lead} ".(count($names) > 1 ? implode(', ', array_slice($names, 0, -1)).' and '.end($names) : $names[0]).'.';
         } elseif ($read['home'] !== null && $named === null) {
@@ -278,7 +312,7 @@ final readonly class ReportDetails
     /**
      * @param  Breakdown  $read
      */
-    private function biggestHomeFolder(array $read, float $used): ?string
+    private function biggestHomeFolder(array $read, float $used, bool $homeNamed): ?string
     {
         $folder = $read['homeFolders'][0] ?? null;
         $whole = $used > 0 ? $used : (float) $read['home'];
@@ -289,7 +323,7 @@ final readonly class ReportDetails
 
         $biggest = "{$folder['name']} (".ByteSize::format($folder['bytes']).')';
 
-        return $read['home'] === null
+        return $read['home'] === null || $homeNamed
             ? "The biggest folder in your user folder is {$biggest}."
             : 'Your user folder uses '.ByteSize::format($read['home'])."; the biggest part is {$biggest}.";
     }

@@ -794,3 +794,83 @@ describe('the Windows step under PowerShell', function () {
         expect(array_keys(namedHome($rows)))->not->toContain('linked');
     })->skip($pwsh === '', 'PowerShell is not installed here');
 });
+
+function rootsTree(): string
+{
+    $base = ScriptTemp::dir('pcc-script-storage');
+
+    foreach (['Users/me/Downloads/d.bin' => 600, 'Users/me/Documents/x.pdf' => 200, 'Users/other/o.dat' => 300, 'Applications/A.app/bin' => 700,
+        'System/s.dat' => 900, 'private/p.dat' => 400, 'Library/l.dat' => 100, 'usr/u.dat' => 50, 'bin/b' => 20, 'sbin/s' => 20] as $file => $kib) {
+        storageFile("{$base}/root/{$file}", $kib);
+    }
+
+    return $base;
+}
+
+/**
+ * A du whose pass over the top of the drive is lost, that logs the folder each one-folder measurement
+ * is for, and that runs $slow first for the folders matching $pattern.
+ */
+function rootsDu(string $pattern = '*/nothing', string $slow = ':'): string
+{
+    return fakeMacBin(['du' => 'for last; do :; done; case " $* " in *" -d 0 "*) echo "$last" >> "$(dirname "$0")/order"; case "$last" in '.$pattern.') '.$slow.' ;; esac; exec /usr/bin/du "$@" ;; esac; case "$last" in */root) kill -ALRM $$ ;; esac; exec /usr/bin/du "$@"']);
+}
+
+/**
+ * @return list<string>
+ */
+function rootsOrder(string $bin, string $base): array
+{
+    return array_map(fn (string $line): string => str_replace($base.'/root/', '', $line), file($bin.'/order', FILE_IGNORE_NEW_LINES) ?: []);
+}
+
+describe('the order of the Mac step', function () {
+    it('measures the user folder before the rest of the drive', function () {
+        $base = storageTree();
+        $bin = fakeMacBin(['du' => 'for last; do :; done; echo "$last" >> "$(dirname "$0")/order"; exec /usr/bin/du "$@"']);
+        runStorage($base, [], $bin.':/usr/bin:/bin');
+        $order = file($bin.'/order', FILE_IGNORE_NEW_LINES) ?: [];
+
+        expect($order[0])->toBe($base.'/home')->and($order)->toContain($base.'/root');
+    });
+
+    it('measures the big well-known folders first when the pass over the drive is lost', function () {
+        $base = rootsTree();
+        $bin = rootsDu();
+        runStorage($base, ['PCC_STORAGE_HOME' => $base.'/root/Users/me'], $bin.':/usr/bin:/bin');
+
+        expect(array_values(array_filter(rootsOrder($bin, $base), fn (string $name): bool => ! str_contains($name, '/'))))
+            ->toBe(['Applications', 'System', 'private', 'Library', 'usr', 'bin', 'sbin']);
+    });
+
+    it('adds the user folder it already measured to the rest of Users instead of measuring it again', function () {
+        $base = rootsTree();
+        $bin = rootsDu();
+        $rows = storageRows(runStorage($base, ['PCC_STORAGE_HOME' => $base.'/root/Users/me'], $bin.':/usr/bin:/bin')->output());
+
+        expect(storageNear(storageSizes($rows['root'])['Users'], 600 + 200 + 300, 48))->toBeTrue()
+            ->and(rootsOrder($bin, $base))->not->toContain('Users')->toContain('Users/other');
+    });
+
+    it('measures the slow well-known folders in the time the user folder did not need', function () {
+        $base = rootsTree();
+        $bin = rootsDu('*/root/Applications|*/root/System|*/root/private|*/root/Users/other', 'sleep 2');
+        $result = runStorage($base, ['PCC_STORAGE_HOME' => $base.'/root/Users/me', 'PCC_STORAGE_CAP' => '30'], $bin.':/usr/bin:/bin');
+        $rows = storageRows($result->output());
+
+        expect(array_keys(storageSizes($rows['root'])))->toBe(['Applications', 'Library', 'System', 'Users', 'private', 'usr'])
+            ->and(storageNear((int) $rows['roots_total'][0][0], 3290, 96))->toBeTrue()
+            ->and($rows)->not->toHaveKey('missing');
+    });
+
+    it('goes back to a well-known folder that did not finish in its share while time is left', function () {
+        $base = rootsTree();
+        $bin = rootsDu('*/root/Applications', 'if [ ! -e "$(dirname "$0")/tried" ]; then : > "$(dirname "$0")/tried"; exec sleep 120; fi');
+        $result = runStorage($base, ['PCC_STORAGE_HOME' => $base.'/root/Users/me', 'PCC_STORAGE_CAP' => '40'], $bin.':/usr/bin:/bin');
+        $roots = storageSizes(storageRows($result->output())['root']);
+
+        expect($roots)->toHaveKey('Applications')
+            ->and(storageNear($roots['Applications'], 700, 16))->toBeTrue()
+            ->and(array_count_values(rootsOrder($bin, $base))['Applications'])->toBe(2);
+    });
+});

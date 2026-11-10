@@ -307,3 +307,75 @@ describe('the storage card next to the breakdown', function () {
         expect($card['list']['items'])->toHaveCount(2);
     });
 });
+
+const BD_MAC_SHORT = "scan: partial (time limit of 150 seconds reached)\nseconds: 75\nlimit: 150\nformat: 2\n"
+    ."root|Library|3145728\nroot|usr|1572864\nroot|sbin|209715\nroot|bin|104858\nroots_total|5033165\n"
+    ."missing|root/Applications\nmissing|root/System\nmissing|root/Users\nmissing|root/private\n"
+    ."home|52496856\nhome|Library|31457280\nfolder|Library|31457280\nfolder|Documents|10485760\n";
+
+const BD_WINDOWS_SHORT = "scan: partial (time limit of 150 seconds reached)\nseconds: 150\nlimit: 150\nformat: 2\n"
+    ."root|Program Files (x86)|144649377\nroot|XboxGames|132703014\nroot|World of Warcraft|50761723\nroot|Program Files|20008352\n"
+    ."root|ProgramData|13550024\nroot|build-queue|10485760\nroots_total|372158250\nmissing|root/Users\nmissing|root/Windows\n"
+    ."home|AppData|238349894\nhome|Repositories|60411534\n"
+    ."folder|Downloads|6845726\nfolder|Documents|34761120\nfolder|Desktop|8061383\nfolder|Pictures|3029739\nfolder|Videos|3917179\nfolder|AppData|238349894\n";
+
+function bdWindows(string $lines): string
+{
+    return bdDoc($lines, null)."\n## Storage (volumes and free space)\n\n```\nDeviceID VolumeName FileSystem SizeGB FreeGB Free%\nC:       OS         NTFS       931    131    14\n```\n";
+}
+
+/**
+ * @return array<string, string>
+ */
+function bdValues(?array $card): array
+{
+    return array_column(bdItems($card, 0), 'value', 'label');
+}
+
+describe('a user folder that was measured while the Users folder on the drive was not', function () {
+    it('counts the user folder as measured on a Mac and shows it as a folder on the drive', function () {
+        $card = bdCard(bdDoc(BD_MAC_SHORT, '/dev/disk1s1  112Gi  100Gi  12Gi  90%  1  2  3%  /'));
+
+        expect(array_column(bdItems($card, 0), 'label'))->toBe(['Users (your folder)', 'Library', 'usr', 'sbin', 'bin', 'Not measured'])
+            ->and(bdValues($card)['Users (your folder)'])->toBe('50 GB')
+            ->and(bdValues($card)['Not measured'])->toBe('45 GB')
+            ->and($card['summary'])->toBe('Most of the space is used by your user folder (50 GB), Library (3 GB) and usr (1.5 GB). The biggest folder in your user folder is Library (30 GB). 45 GB was not measured.')
+            ->and($card['notes'])->toContain('Not measured before the time ran out: Applications, System, Users, private.');
+    });
+
+    it('counts the folders measured in the user folder on Windows when its total is not known', function () {
+        $card = bdCard(bdWindows(BD_WINDOWS_SHORT));
+
+        expect(array_column(bdItems($card, 0), 'label'))->toBe(['Users (your folder)', 'Program Files (x86)', 'XboxGames', 'World of Warcraft', 'Program Files', 'ProgramData', 'build-queue', 'Not measured'])
+            ->and(bdValues($card)['Users (your folder)'])->toBe('281 GB')
+            ->and(bdValues($card)['Not measured'])->toBe('164 GB')
+            ->and($card['summary'])->toBe('Most of the space is used by your user folder (281 GB), Program Files (x86) (138 GB) and XboxGames (127 GB). The biggest folder in your user folder is AppData (227 GB). 164 GB was not measured.');
+    });
+
+    it('does not add the user folder again when the Users folder on the drive was measured', function () {
+        $card = bdCard(bdDoc("scan: partial\nformat: 2\nroot|Users|52496856\nroot|Library|3145728\nroots_total|55642584\nmissing|root/System\nhome|52496856\nfolder|Library|31457280", '/dev/disk1s1  112Gi  100Gi  12Gi  90%  1  2  3%  /'));
+
+        expect(array_column(bdItems($card, 0), 'label'))->toBe(['Users', 'Library', 'Not measured'])
+            ->and(bdValues($card)['Not measured'])->toBe('47 GB');
+    });
+
+    it('adds nothing when neither the user folder nor any folder in it was measured', function () {
+        $card = bdCard(bdDoc("scan: partial\nformat: 2\nroot|Library|3145728\nroots_total|3145728\nmissing|root/Users\nfolder|Downloads|0", '/dev/disk1s1  112Gi  100Gi  12Gi  90%  1  2  3%  /'));
+
+        expect(array_column(bdItems($card, 0), 'label'))->toBe(['Library', 'Not measured'])
+            ->and(bdValues($card)['Not measured'])->toBe('97 GB');
+    });
+
+    it('shows no not measured number when the user folder and the drive folders cover the used space', function () {
+        $card = bdCard(bdDoc("scan: partial\nformat: 2\nroot|Library|3145728\nroots_total|3145728\nmissing|root/Users\nhome|104857600", '/dev/disk1s1  112Gi  100Gi  12Gi  90%  1  2  3%  /'));
+
+        expect(array_column(bdItems($card, 0), 'label'))->toBe(['Users (your folder)', 'Library'])
+            ->and($card['notes'])->not->toContain(BD_NOT_MEASURED_NOTE);
+    });
+
+    it('leaves the first format alone, which has no total for the drive', function () {
+        $card = bdCard(bdDoc("scan: partial\nroot|Library|10\nmissing|root/Users\nhome|2097152", BD_REAL_DISK));
+
+        expect(array_column(bdItems($card, 0), 'label'))->toBe(['Library']);
+    });
+});
