@@ -78,6 +78,8 @@ try {
         [void](New-Item -ItemType SymbolicLink -Path "$p/Downloads/jlink" -Target "$base/outside")
     }
     Set-Env $p
+    # The real script compiles the folder walker in the storage step first; cold, the compile eats the first place's time slice.
+    [void](Test-StorageEngine)
     switch ($Case) {
         'full' { Get-SpaceReport }
         'capped' {
