@@ -30,39 +30,48 @@ function ownerDetails(string $markdown, array $flags = [], string $deviceType = 
     return $details;
 }
 
-it('gives the owner the three cards from a real Mac report', function () {
-    $details = ownerDetails(macReportFixture(), ['macOS 10.14.6 is old and likely out of security support.']);
+/**
+ * @param  list<string>  $flags
+ * @return array<string, array{id: string, title: string, rows: list<array{label: string, value: string, tone: string}>, list: array<string, mixed>|null}>
+ */
+function ownerCards(string $markdown, array $flags = [], string $deviceType = 'laptop'): array
+{
+    return array_column(ownerDetails($markdown, $flags, $deviceType), null, 'id');
+}
 
-    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'startup', 'reclaimable', 'unused-apps', 'backups', 'boot-time', 'updates', 'verdict'])
-        ->and($details[0]['rows'][3])->toBe(['label' => 'Security support', 'value' => 'Out of security support', 'tone' => 'bad'])
-        ->and($details[1]['rows'][0])->toBe(['label' => 'Free', 'value' => '14 GB (12%)', 'tone' => 'neutral'])
-        ->and($details[1]['list']['items'][0])->toBe(['label' => 'Library', 'value' => '38 GB', 'tone' => 'neutral'])
-        ->and($details[2]['rows'][1])->toBe(['label' => 'Condition', 'value' => 'Normal', 'tone' => 'good']);
+it('gives the owner the three cards from a real Mac report', function () {
+    $cards = ownerCards(macReportFixture(), ['macOS 10.14.6 is old and likely out of security support.']);
+
+    expect(array_keys($cards))->toBe(['security', 'backups', 'updates', 'slowness', 'startup', 'boot-time', 'stability', 'storage', 'reclaimable', 'unused-apps', 'age', 'battery'])
+        ->and($cards['age']['rows'][3])->toBe(['label' => 'Security support', 'value' => 'Out of security support', 'tone' => 'bad'])
+        ->and($cards['storage']['rows'][0])->toBe(['label' => 'Free', 'value' => '14 GB (12%)', 'tone' => 'neutral'])
+        ->and($cards['storage']['list']['items'][0])->toBe(['label' => 'Library', 'value' => '38 GB', 'tone' => 'neutral'])
+        ->and($cards['battery']['rows'][1])->toBe(['label' => 'Condition', 'value' => 'Normal', 'tone' => 'good']);
 });
 
 it('gives the owner the security and stability cards from a real Mac report', function () {
-    $details = ownerDetails(macReportFixture());
+    $cards = ownerCards(macReportFixture());
 
-    expect($details[3]['title'])->toBe('Security summary')
-        ->and($details[3]['rows'][0])->toBe(['label' => 'FileVault', 'value' => 'Off', 'tone' => 'bad'])
-        ->and($details[3]['rows'][2])->toBe(['label' => 'System Integrity Protection', 'value' => 'On', 'tone' => 'good'])
-        ->and($details[3]['rows'])->toHaveCount(9)
-        ->and($details[4]['title'])->toBe('Stability')
-        ->and($details[4]['rows'][0])->toBe(['label' => 'Kernel panics', 'value' => '2', 'tone' => 'bad'])
-        ->and($details[3]['list'])->toBeNull()
-        ->and($details[4]['list'])->toBeNull();
+    expect($cards['security']['title'])->toBe('Security summary')
+        ->and($cards['security']['rows'][0])->toBe(['label' => 'FileVault', 'value' => 'Off', 'tone' => 'bad'])
+        ->and($cards['security']['rows'][2])->toBe(['label' => 'System Integrity Protection', 'value' => 'On', 'tone' => 'good'])
+        ->and($cards['security']['rows'])->toHaveCount(9)
+        ->and($cards['stability']['title'])->toBe('Stability')
+        ->and($cards['stability']['rows'][0])->toBe(['label' => 'Kernel panics', 'value' => '2', 'tone' => 'bad'])
+        ->and($cards['security']['list'])->toBeNull()
+        ->and($cards['stability']['list'])->toBeNull();
 });
 
 it('gives the owner the security and stability cards from a Windows report', function () {
-    $details = ownerDetails(windowsLaptopFixture());
+    $cards = ownerCards(windowsLaptopFixture());
 
-    expect(array_column($details[3]['rows'], 'label'))->toBe(['Disk encryption', 'Windows Firewall', 'Defender real-time protection', 'Automatic sign-in', 'Remote Desktop', 'SMBv1', 'Backup'])
-        ->and(array_column($details[4]['rows'], 'label'))->toBe(['Blue screen crashes', 'Unexpected shutdowns', 'Startup programs']);
+    expect(array_column($cards['security']['rows'], 'label'))->toBe(['Disk encryption', 'Windows Firewall', 'Defender real-time protection', 'Automatic sign-in', 'Remote Desktop', 'SMBv1', 'Backup'])
+        ->and(array_column($cards['stability']['rows'], 'label'))->toBe(['Blue screen crashes', 'Unexpected shutdowns', 'Startup programs']);
 });
 
 it('words the firewall for every state through the owner page', function (string $line, string $value) {
     $markdown = str_replace('Firewall is disabled. (State = 0)', $line, macReportFixture());
-    $rows = array_column(ownerDetails($markdown)[3]['rows'], 'value', 'label');
+    $rows = array_column(ownerCards($markdown)['security']['rows'], 'value', 'label');
 
     expect($rows['Application firewall'])->toBe($value);
 })->with([
@@ -78,7 +87,7 @@ it('never shows a green tick for a fact that was not checked', function () {
         ['FileVault: could not check', 'Time Machine: could not check (tmutil did not answer)', 'Find My Mac: could not check', 'Remote Login (SSH): could not check (netstat did not answer)', 'Screen Sharing: could not check (netstat did not answer)', 'Automatic login: off'],
         macReportFixture(),
     );
-    $rows = array_column(ownerDetails($markdown)[3]['rows'], null, 'label');
+    $rows = array_column(ownerCards($markdown)['security']['rows'], null, 'label');
 
     foreach (['FileVault', 'Backup', 'Find My Mac', 'Remote Login', 'Screen Sharing'] as $label) {
         expect($rows[$label])->toBe(['label' => $label, 'value' => 'Not checked', 'tone' => 'neutral']);
@@ -91,8 +100,8 @@ it('survives huge counts and markup in the new sections', function () {
         ["LaunchAgents/Daemons:\n99999999999999999999999", '<img src=x onerror=alert(1)>, {{ 7*7 }}'],
         macReportFixture(),
     );
-    $details = ownerDetails($markdown);
-    $rows = array_column($details[4]['rows'], 'value', 'label');
+    $details = ownerCards($markdown);
+    $rows = array_column($details['stability']['rows'], 'value', 'label');
     $encoded = (string) json_encode($details);
 
     expect($rows['Login items'])->toBe('2')
@@ -108,15 +117,16 @@ it('agrees with the free disk fact tile', function () {
     actingAs($user)->get("/machines/{$machine->id}")
         ->assertInertia(fn ($page) => $page
             ->where('report.facts.free_disk', '12%')
-            ->where('detailCards.1.rows.0.value', '14 GB (12%)'));
+            ->where('detailCards.7.id', 'storage')
+            ->where('detailCards.7.rows.0.value', '14 GB (12%)'));
 });
 
 it('gives the owner the cards from a Windows report', function () {
-    $details = ownerDetails(windowsLaptopFixture(), ['Windows 10 Pro reached end of support on 14 October 2025, so it only gets updates with a paid extension.']);
+    $cards = ownerCards(windowsLaptopFixture(), ['Windows 10 Pro reached end of support on 14 October 2025, so it only gets updates with a paid extension.']);
 
-    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'startup', 'reclaimable', 'unused-apps', 'backups', 'updates', 'verdict'])
-        ->and($details[0]['rows'][2]['value'])->toBe('Out of security support')
-        ->and($details[1]['rows'][0]['value'])->toBe('52 GB (22%)');
+    expect(array_keys($cards))->toBe(['security', 'backups', 'updates', 'slowness', 'startup', 'stability', 'storage', 'reclaimable', 'unused-apps', 'age', 'battery'])
+        ->and($cards['age']['rows'][2]['value'])->toBe('Out of security support')
+        ->and($cards['storage']['rows'][0]['value'])->toBe('52 GB (22%)');
 });
 
 it('sends no cards for a machine without a report', function () {
@@ -129,7 +139,7 @@ it('sends no cards for a machine without a report', function () {
 it('sends only the cards whose data exists', function (string $markdown, array $ids) {
     expect(array_column(ownerDetails($markdown, [], 'desktop'), 'id'))->toBe($ids);
 })->with([
-    'a report from an old script version' => ["# Mac checkup: Old\n\n- Format: 1\n- OS: macOS\n- Free disk: 30%\n\n## Things to look at\n\n- Nothing flagged automatically.\n", ['storage', 'slowness', 'verdict']],
+    'a report from an old script version' => ["# Mac checkup: Old\n\n- Format: 1\n- OS: macOS\n- Free disk: 30%\n\n## Things to look at\n\n- Nothing flagged automatically.\n", ['slowness', 'storage']],
     'a title and nothing else' => ["# Report\n", []],
     'an empty report' => ['', []],
     'sections that exist but are empty' => ["# Report\n\n## Disk usage\n\n```\n```\n\n## Software update age\n\n```\n```\n", []],
@@ -144,38 +154,37 @@ it('reads a report with Windows line endings', function () {
 
 it('is not fooled by a section heading inside a code fence', function () {
     $markdown = str_replace("Volume Name:               Macintosh HD\n", "Volume Name:               Macintosh HD\n## Disk usage\n", macReportFixture());
-    $details = ownerDetails($markdown);
 
-    expect($details[1]['rows'][0]['value'])->toBe('14 GB (12%)');
+    expect(ownerCards($markdown)['storage']['rows'][0]['value'])->toBe('14 GB (12%)');
 });
 
 it('uses the first of two sections with the same heading', function () {
-    $details = ownerDetails(macReportFixture()."\n## Disk usage\n\n```\n/dev/other 1Gi 1Gi 0B 100% /\n```\n");
+    $cards = ownerCards(macReportFixture()."\n## Disk usage\n\n```\n/dev/other 1Gi 1Gi 0B 100% /\n```\n");
 
-    expect($details[1]['rows'][1]['value'])->toBe('99 GB of 113 GB');
+    expect($cards['storage']['rows'][1]['value'])->toBe('99 GB of 113 GB');
 });
 
 it('reads df output with terabytes and decimals', function () {
     $markdown = str_replace('/dev/disk1s1   113Gi   97Gi   14Gi    88%', '/dev/disk1s1   1.8Ti   1.2Ti   600Gi    67%', macReportFixture());
-    $details = ownerDetails($markdown);
+    $cards = ownerCards($markdown);
 
-    expect($details[1]['rows'][0]['value'])->toBe('600 GB (12%)')
-        ->and($details[1]['rows'][1]['value'])->toBe('1.2 TB of 1.8 TB');
+    expect($cards['storage']['rows'][0]['value'])->toBe('600 GB (12%)')
+        ->and($cards['storage']['rows'][1]['value'])->toBe('1.2 TB of 1.8 TB');
 });
 
 it('handles a very long report', function () {
     $filler = implode("\n", array_fill(0, 20000, 'filler line'));
     $details = ownerDetails(macReportFixture()."\n## Installed apps\n\n```\n{$filler}\n```\n");
 
-    expect(array_column($details, 'id'))->toBe(['age', 'storage', 'battery', 'security', 'stability', 'slowness', 'startup', 'reclaimable', 'unused-apps', 'backups', 'boot-time', 'updates', 'verdict']);
+    expect(array_column($details, 'id'))->toBe(['security', 'backups', 'updates', 'slowness', 'startup', 'boot-time', 'stability', 'storage', 'reclaimable', 'unused-apps', 'age', 'battery']);
 });
 
 it('never lets report text become markup or a placeholder value', function () {
     $markdown = str_replace('MacBook Air (MacBookAir7,2)', '<img src=x onerror=alert(1)> (MacBookAir99,9)', macReportFixture());
-    $details = ownerDetails($markdown);
-    $encoded = (string) json_encode($details);
+    $details = ownerCards($markdown);
+    $encoded = (string) json_encode(array_column($details, 'rows'));
 
-    expect($details[0]['rows'][0]['value'])->toBe('<img src=x onerror=alert(1)>')
+    expect($details['age']['rows'][0]['value'])->toBe('<img src=x onerror=alert(1)>')
         ->and($encoded)->not->toContain('undefined')->not->toContain('NaN')->not->toContain('null,');
 });
 
@@ -275,9 +284,16 @@ it('never gives the storage breakdown to a share page', function () {
     }
 });
 
-it('gives the owner the worth keeping card last, with a verdict and the rule of thumb note', function () {
-    $details = ownerDetails(macReportFixture(), ['macOS 10.14.6 is old and likely out of security support.']);
-    $card = end($details);
+it('gives the owner the worth keeping card on its own, with a verdict and the rule of thumb note', function () {
+    $user = User::factory()->create();
+    $machine = Machine::factory()->for($user)->create(['device_type' => 'laptop']);
+    Report::factory()->for($machine)->create(['markdown' => macReportFixture(), 'flags' => ['macOS 10.14.6 is old and likely out of security support.']]);
+    $card = [];
+
+    actingAs($user)->get("/machines/{$machine->id}")
+        ->assertInertia(function ($page) use (&$card): void {
+            $card = $page->toArray()['props']['verdictCard'];
+        });
 
     expect($card['id'])->toBe('verdict')
         ->and($card['title'])->toBe('Worth keeping?')

@@ -459,7 +459,7 @@ describe('who sees the cards', function () {
         });
 
         expect($ids)->toContain('remote-access')->toContain('network-settings')->toContain('antivirus-products')
-            ->and(array_search('antivirus-products', $ids, true))->toBeLessThan(array_search('verdict', $ids, true));
+            ->and(array_search('antivirus-products', $ids, true))->toBeLessThan(array_search('slowness', $ids, true));
     });
 
     it('never gives the cards, the names or the raw sections to a share page', function () {

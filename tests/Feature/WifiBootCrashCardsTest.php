@@ -304,7 +304,7 @@ describe('who sees the cards', function () {
             $ids = array_column($page->toArray()['props']['detailCards'], 'id');
         });
 
-        expect(array_slice($ids, -5))->toBe(['wifi', 'boot-time', 'crashing-apps', 'updates', 'verdict']);
+        expect($ids)->toContain('wifi')->toContain('boot-time')->toContain('crashing-apps');
     });
 
     it('never gives the cards, the names or the raw sections to a share page', function () {

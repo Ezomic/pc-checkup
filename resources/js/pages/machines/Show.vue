@@ -22,6 +22,7 @@ import StatusSection from '@/components/machines/StatusSection.vue';
 import TrendsCard from '@/components/machines/TrendsCard.vue';
 import UpgradeAdviceLine from '@/components/machines/UpgradeAdviceLine.vue';
 import WarrantySection from '@/components/machines/WarrantySection.vue';
+import WorthKeeping from '@/components/machines/WorthKeeping.vue';
 import { Button } from '@/components/ui/button';
 import { checkedOn, scannedAgo } from '@/lib/scannedAgo';
 import { beforeAfter, history, index, summary } from '@/routes/machines';
@@ -40,6 +41,7 @@ import type {
     ReportChanges,
     Trend,
     UpgradeAdvice,
+    VerdictCard,
     Warranty,
 } from '@/types';
 
@@ -50,6 +52,7 @@ const props = defineProps<{
     report: LatestReport | null;
     changes: ReportChanges | null;
     detailCards: DetailCard[];
+    verdictCard: VerdictCard | null;
     upgradeAdvice: UpgradeAdvice | null;
     warranty: Warranty | null;
     estimate: Estimate | null;
@@ -205,6 +208,8 @@ defineOptions({
                     <p class="text-2xl font-semibold">{{ tile.value }}</p>
                 </div>
             </div>
+
+            <WorthKeeping v-if="verdictCard" :card="verdictCard" />
 
             <UpgradeAdviceLine v-if="upgradeAdvice" :advice="upgradeAdvice" />
         </section>
