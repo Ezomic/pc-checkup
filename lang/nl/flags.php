@@ -142,6 +142,8 @@ return [
     'no_updates_installed' => [
         'headline' => 'Al :days dagen geen updates geïnstalleerd',
         'advice' => 'Installeer de beschikbare updates. Ze bevatten beveiligingsverbeteringen.',
+        'advice_no_more_updates' => 'Voor :running komen geen updates meer uit. De nieuwste macOS die op deze Mac kan draaien, is :newest.',
+        'advice_already_newest' => 'Deze Mac heeft al de nieuwste macOS die erop kan draaien, :running, en krijgt geen beveiligingsupdates meer.',
     ],
     'many_admins' => [
         'headline' => ':count accounts hebben beheerdersrechten',

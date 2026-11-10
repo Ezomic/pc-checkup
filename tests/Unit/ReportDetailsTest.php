@@ -55,6 +55,13 @@ function toneOf(array $card, string $label): ?string
     return null;
 }
 
+function batteryRawSection(?string $body = null): string
+{
+    $body ??= "      \"AppleRawMaxCapacity\" = 6011\n      \"MaxCapacity\" = 6011\n      \"CycleCount\" = 391\n      \"DesignCapacity\" = 7150\n      \"BatteryData\" = {\"Voltage\"=8423,\"DesignCapacity\"=7150,\"CycleCount\"=391}";
+
+    return "\n## Battery raw (ioreg)\n\n```\n{$body}\n```\n";
+}
+
 function withBlock(string $markdown, string $before, string $after): string
 {
     $changed = str_replace($before, $after, $markdown);
@@ -303,14 +310,13 @@ describe('storage', function () {
 });
 
 describe('battery', function () {
-    it('reports a Mac battery', function () {
+    it('reports a Mac battery and hides a capacity nothing reported', function () {
         $card = detailCard('battery', macReportFixture());
 
         expect($card['title'])->toBe('Battery')
             ->and(array_column($card['rows'], 'value', 'label'))->toBe([
                 'Charge cycles' => '391',
                 'Condition' => 'Normal',
-                'Maximum capacity' => 'Not reported',
             ])
             ->and(toneOf($card, 'Condition'))->toBe('good');
     });
@@ -349,10 +355,10 @@ describe('battery', function () {
         ]);
     });
 
-    it('says not reported for a Windows battery with no numbers', function () {
+    it('says not reported for a Windows battery with no numbers and hides the capacity', function () {
         $markdown = withBlock(windowsLaptopFixture(), '312 cycles, 85% of design capacity', 'n/a cycles, n/a');
 
-        expect(detailRows($markdown)['battery'])->toBe(['Charge cycles' => 'Not reported', 'Maximum capacity' => 'Not reported']);
+        expect(detailRows($markdown)['battery'])->toBe(['Charge cycles' => 'Not reported']);
     });
 
     it('hides the battery on a machine that has none', function (string $line) {
@@ -366,11 +372,62 @@ describe('battery', function () {
 
         expect(detailRows($markdown, [], 'desktop'))->not->toHaveKey('battery')
             ->and(detailRows($markdown, [], null))->not->toHaveKey('battery')
-            ->and(detailRows($markdown, [], 'laptop')['battery'])->toBe(['Charge cycles' => 'Not reported', 'Condition' => 'Not reported', 'Maximum capacity' => 'Not reported']);
+            ->and(detailRows($markdown, [], 'laptop')['battery'])->toBe(['Charge cycles' => 'Not reported', 'Condition' => 'Not reported']);
     });
 
     it('shows the battery of a desktop that reports real data', function () {
         expect(detailRows(macReportFixture(), [], 'desktop'))->toHaveKey('battery');
+    });
+
+    it('works out the capacity from ioreg when system_profiler has none', function () {
+        $card = detailCard('battery', macReportFixture().batteryRawSection());
+
+        expect(array_column($card['rows'], 'value', 'label'))->toBe([
+            'Charge cycles' => '391',
+            'Condition' => 'Normal',
+            'Maximum capacity' => '84% of when it was new',
+        ])
+            ->and(toneOf($card, 'Maximum capacity'))->toBe('neutral');
+    });
+
+    it('keeps the system_profiler capacity over ioreg', function () {
+        $markdown = withBlock(macReportFixture(), 'max capacity n/a', 'max capacity 87%').batteryRawSection();
+
+        expect(detailRows($markdown)['battery']['Maximum capacity'])->toBe('87% of when it was new');
+    });
+
+    it('falls back to ioreg for a capacity with a decimal comma', function () {
+        $markdown = withBlock(macReportFixture(), 'max capacity n/a', 'max capacity 87,5%').batteryRawSection();
+
+        expect(detailRows($markdown)['battery']['Maximum capacity'])->toBe('84% of when it was new');
+    });
+
+    it('hides the capacity when ioreg has no usable numbers', function (string $body) {
+        expect(detailRows(macReportFixture().batteryRawSection($body))['battery'])->not->toHaveKey('Maximum capacity');
+    })->with([
+        'no design capacity' => '      "AppleRawMaxCapacity" = 6011',
+        'zero design capacity' => "      \"AppleRawMaxCapacity\" = 6011\n      \"DesignCapacity\" = 0",
+        'absurd ratio' => "      \"AppleRawMaxCapacity\" = 60110\n      \"DesignCapacity\" = 7150",
+        'a percentage only' => "      \"MaxCapacity\" = 88\n      \"DesignCapacity\" = 7150",
+        'Dutch commas' => "      \"AppleRawMaxCapacity\" = 6,011\n      \"DesignCapacity\" = 7,150",
+        'empty' => '',
+    ]);
+
+    it('shows the ioreg capacity when the header line has nothing else', function () {
+        $markdown = withBlock(macReportFixture(), '391 cycles, condition Normal, max capacity n/a', 'n/a cycles, condition n/a, max capacity n/a').batteryRawSection();
+
+        expect(detailRows($markdown, [], null)['battery'])->toBe([
+            'Charge cycles' => 'Not reported',
+            'Condition' => 'Not reported',
+            'Maximum capacity' => '84% of when it was new',
+        ]);
+    });
+
+    it('hides the battery of a Mac mini whose ioreg shows no battery', function () {
+        $markdown = withBlock(macReportFixture(), '391 cycles, condition Normal, max capacity n/a', 'n/a cycles, condition n/a, max capacity n/a')
+            .batteryRawSection("      \"MaxCapacity\" = 0\n      \"CycleCount\" = 0");
+
+        expect(detailRows($markdown, [], 'desktop'))->not->toHaveKey('battery');
     });
 });
 
