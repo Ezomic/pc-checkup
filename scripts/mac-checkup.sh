@@ -2273,6 +2273,25 @@ pcc_parts_report() {
   return 0
 }
 
+# git, python3 and the other developer commands in /usr/bin are stubs on a Mac without Xcode or the
+# command line developer tools: running one opens a dialog that offers to install them. Prints the
+# developer folder only when xcode-select names one that exists; run such a command only after that.
+pcc_devtools_dir() {
+  local dir
+  dir=$(xcode-select -p 2> /dev/null) || return 1
+  [ -d "$dir" ] || return 1
+  printf '%s\n' "$dir"
+}
+
+# command -v only looks a name up, it never runs the command.
+pcc_devtools_report() {
+  local dir
+  dir=$(pcc_devtools_dir) || { echo "Command line developer tools: not installed"; return 0; }
+  printf '%s\n' "$dir"
+  if command -v git > /dev/null 2>&1; then git --version 2>&1; else echo "git: not installed"; fi
+  if command -v python3 > /dev/null 2>&1; then python3 --version 2>&1; else echo "python3: not installed"; fi
+}
+
 # Sourcing this file (for tests) stops here instead of running the checkup.
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
 
@@ -2488,7 +2507,7 @@ sh_section "Intel apps running under Rosetta (Apple silicon only)" "if [ \"\$(un
 sh_section "Reboot history and boot time" "last reboot | head -8; sysctl kern.boottime"
 sh_section "Fans and temperatures (needs sudo)" "if [ \"\$(id -u)\" = 0 ]; then powermetrics -n 1 -i 1000 --samplers thermal 2>&1 | head -20; powermetrics -n 1 -i 1000 --samplers smc 2>&1 | grep -iE 'fan|temp' | head -10; else echo 'Run with sudo to include this section.'; fi"
 sh_section "Locale and time" "date; systemsetup -gettimezone 2>&1; defaults read NSGlobalDomain AppleLanguages 2>/dev/null"
-sh_section "Developer tools" "xcode-select -p 2>&1; git --version 2>&1; python3 --version 2>&1"
+section "Developer tools" pcc_devtools_report
 section "Memory and drives" pcc_parts_report
 
 BENCH=$(mktemp)
