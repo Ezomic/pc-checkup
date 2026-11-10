@@ -222,6 +222,7 @@ export type ReportChanges = {
     new: string[];
     fixed: string[];
     open: number;
+    newly_checked: string[];
     disk: NumberChange | null;
     memory: NumberChange | null;
     same_rights: boolean;

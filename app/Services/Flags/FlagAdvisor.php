@@ -76,6 +76,7 @@ final class FlagAdvisor
                     trans("flags.$key.advice", [], $locale),
                     $flag,
                     trans("flags.$key.headline", array_map($this->withoutNumbers(...), $values), 'en'),
+                    $key,
                 );
             }
         }

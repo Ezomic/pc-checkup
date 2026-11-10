@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ArrowRight, CircleCheck, CircleDot, CirclePlus } from '@lucide/vue';
 import { computed } from 'vue';
+import { newlyCheckedLine } from '@/lib/newlyChecked';
 import type { ReportChanges } from '@/types';
 
 const props = defineProps<{
@@ -40,6 +41,10 @@ const numbers = computed(() =>
         },
         { label: 'Memory', change: props.changes.memory, suffix: '' },
     ].filter((row) => row.change !== null),
+);
+
+const newlyChecked = computed(() =>
+    newlyCheckedLine(props.changes.newly_checked),
 );
 </script>
 
@@ -135,5 +140,13 @@ const numbers = computed(() =>
                 </li>
             </ul>
         </template>
+
+        <p
+            v-if="newlyChecked"
+            class="text-sm break-words text-muted-foreground"
+            data-test="newly-checked"
+        >
+            {{ newlyChecked }}
+        </p>
     </section>
 </template>

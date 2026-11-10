@@ -68,6 +68,7 @@ describe('the owner page', function () {
             'new' => [],
             'fixed' => [],
             'open' => 2,
+            'newly_checked' => [],
             'disk' => null,
             'memory' => null,
             'same_rights' => false,

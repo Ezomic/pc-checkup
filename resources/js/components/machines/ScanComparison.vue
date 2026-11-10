@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ArrowRight, CircleCheck, CircleDot, CirclePlus } from '@lucide/vue';
 import { computed } from 'vue';
+import { newlyCheckedLine } from '@/lib/newlyChecked';
 import { scanMoment } from '@/lib/scanDate';
 import type { ScanComparisonResult } from '@/types';
 
@@ -25,6 +26,10 @@ const unchanged = computed(
         props.comparison.new.length === 0 &&
         props.comparison.fixed.length === 0 &&
         numbers.value.length === 0,
+);
+
+const newlyChecked = computed(() =>
+    newlyCheckedLine(props.comparison.newly_checked),
 );
 </script>
 
@@ -122,5 +127,13 @@ const unchanged = computed(
                 </li>
             </ul>
         </template>
+
+        <p
+            v-if="newlyChecked"
+            class="text-sm break-words text-muted-foreground"
+            data-test="newly-checked"
+        >
+            {{ newlyChecked }}
+        </p>
     </section>
 </template>

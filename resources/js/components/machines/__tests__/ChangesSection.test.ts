@@ -9,6 +9,7 @@ function changes(overrides: Partial<ReportChanges> = {}): ReportChanges {
         new: [],
         fixed: [],
         open: 0,
+        newly_checked: [],
         disk: null,
         memory: null,
         same_rights: true,
@@ -115,6 +116,43 @@ describe('ChangesSection', () => {
         expect(text).toContain('8 GB');
         expect(text).toContain('16 GB');
         expect(text).not.toContain('Nothing changed');
+    });
+
+    it('lists newly checked issues quietly, outside the counts', () => {
+        const wrapper = render(
+            changes({ open: 1, newly_checked: ['No backup was found'] }),
+        );
+
+        expect(wrapper.find('[data-test="nothing-changed"]').exists()).toBe(
+            true,
+        );
+        expect(wrapper.find('[data-test="counts"]').exists()).toBe(false);
+        expect(wrapper.get('[data-test="newly-checked"]').text()).toBe(
+            'Newly checked: No backup was found. The earlier scan did not check for this, so it is not counted as new.',
+        );
+    });
+
+    it('shows newly checked issues next to real changes', () => {
+        const wrapper = render(
+            changes({
+                new: ['Secure Boot is off'],
+                newly_checked: ['No backup was found'],
+            }),
+        );
+
+        expect(wrapper.get('[data-test="counts"]').text()).toContain('1 new');
+        expect(wrapper.get('[data-test="new-list"]').text()).not.toContain(
+            'No backup was found',
+        );
+        expect(wrapper.find('[data-test="newly-checked"]').exists()).toBe(true);
+    });
+
+    it('leaves out the newly checked line when there is none', () => {
+        const wrapper = render(changes({ new: ['Secure Boot is off'] }));
+
+        expect(wrapper.find('[data-test="newly-checked"]').exists()).toBe(
+            false,
+        );
     });
 
     it('omits the date when the earlier check has none', () => {
