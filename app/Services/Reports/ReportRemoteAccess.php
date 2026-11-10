@@ -25,6 +25,12 @@ final readonly class ReportRemoteAccess
     private const SECTION = 'Remote access tools';
 
     /**
+     * Apple's own parsecd (Siri and Spotlight Suggestions) runs on every Mac, and older Mac scans
+     * reported it as Parsec, so on a Mac only an installed Parsec counts.
+     */
+    private const MAC_LOOKALIKE = 'Parsec';
+
+    /**
      * @return Card|null
      */
     public function card(ReportSections $sections): ?array
@@ -76,7 +82,8 @@ final readonly class ReportRemoteAccess
         $lines = $text === null ? [] : (preg_split('/\r\n|\r|\n/', $text) ?: []);
         $scan = strtolower((string) ReportDates::keyValue($lines, 'scan'));
         $partial = str_starts_with($scan, 'partial');
-        $tools = $this->tools($lines);
+        $mac = strtolower((string) $sections->header('os')) === 'macos';
+        $tools = array_values(array_filter($this->tools($lines), fn (array $tool): bool => ! $mac || $tool['name'] !== self::MAC_LOOKALIKE || $tool['installed']));
 
         if (($scan !== 'complete' && ! $partial) || ($partial && $tools === [])) {
             return null;
