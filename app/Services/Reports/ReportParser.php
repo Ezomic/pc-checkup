@@ -52,7 +52,7 @@ final class ReportParser
             fixes: $this->fixes($lines),
             benchmark: $this->benchmark($lines),
             rustdeskId: RustDeskId::orNull($header['rustdesk id'] ?? null),
-            ranAsAdmin: $this->rights($header['run as administrator'] ?? null),
+            ranAsAdmin: self::rights($header['run as administrator'] ?? null),
             scriptVersion: $this->scriptVersion($header['script version'] ?? null),
             updateCheck: $this->updateCheck($header['update check'] ?? null),
         );
@@ -70,7 +70,7 @@ final class ReportParser
         return in_array($value, self::UPDATE_CHECKS, true) ? $value : null;
     }
 
-    private function rights(?string $value): ?bool
+    public static function rights(?string $value): ?bool
     {
         if ($value === null || preg_match('/\A(yes|no)(?:,|\z)/i', $value, $match) !== 1) {
             return null;
