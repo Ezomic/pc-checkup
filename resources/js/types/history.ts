@@ -29,6 +29,7 @@ export type ScanComparisonResult = {
     new: string[];
     fixed: string[];
     open: number;
+    newly_checked: string[];
     disk: NumberChange | null;
     memory: NumberChange | null;
     verdict: { from: ScanVerdict; to: ScanVerdict } | null;

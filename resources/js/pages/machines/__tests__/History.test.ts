@@ -165,6 +165,7 @@ describe('machines/History', () => {
                 new: ['No antivirus is protecting this PC'],
                 fixed: [],
                 open: 0,
+                newly_checked: [],
                 disk: { from: '40%', to: '30%' },
                 memory: null,
                 verdict: { from: 'Keep', to: 'Repair' },
@@ -185,6 +186,9 @@ describe('machines/History', () => {
         expect(comparison.find('[data-test="rights-note"]').exists()).toBe(
             false,
         );
+        expect(comparison.find('[data-test="newly-checked"]').exists()).toBe(
+            false,
+        );
     });
 
     it('says nothing changed and warns about different rights next to fixed items', () => {
@@ -193,6 +197,7 @@ describe('machines/History', () => {
             after: { id: 2, created_at: '2026-10-20T10:00:00.000000Z' },
             new: [],
             open: 1,
+            newly_checked: [],
             disk: null,
             memory: null,
             verdict: null,
@@ -212,6 +217,31 @@ describe('machines/History', () => {
         expect(fixed.find('[data-test="rights-note"]').exists()).toBe(true);
         expect(fixed.get('[data-test="fixed-list"]').text()).toContain(
             'Low disk space',
+        );
+    });
+
+    it('lists what only the newer scan checked apart from what changed', () => {
+        const wrapper = render([scan(1), scan(2)], {
+            comparison: {
+                before: { id: 1, created_at: '2026-11-01T10:00:00.000000Z' },
+                after: { id: 2, created_at: '2026-11-10T10:00:00.000000Z' },
+                new: [],
+                fixed: [],
+                open: 1,
+                newly_checked: ['No backup was found'],
+                disk: null,
+                memory: null,
+                verdict: null,
+                same_rights: true,
+            },
+        });
+        const comparison = wrapper.get('[data-test="comparison"]');
+
+        expect(
+            comparison.find('[data-test="comparison-unchanged"]').exists(),
+        ).toBe(true);
+        expect(comparison.get('[data-test="newly-checked"]').text()).toBe(
+            'Newly checked: No backup was found. The earlier scan did not check for this, so it is not counted as new.',
         );
     });
 });

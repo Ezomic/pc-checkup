@@ -14,7 +14,7 @@ final readonly class CompareReportPair
     public function __construct(private CompareLatestReports $compare, private ReportFacts $facts, private ReportVerdict $verdict) {}
 
     /**
-     * @return array{before: array{id: int, created_at: string|null}, after: array{id: int, created_at: string|null}, new: list<string>, fixed: list<string>, open: int, disk: array{from: string, to: string}|null, memory: array{from: string, to: string}|null, verdict: array{from: string, to: string}|null, same_rights: bool}
+     * @return array{before: array{id: int, created_at: string|null}, after: array{id: int, created_at: string|null}, new: list<string>, fixed: list<string>, open: int, newly_checked: list<string>, disk: array{from: string, to: string}|null, memory: array{from: string, to: string}|null, verdict: array{from: string, to: string}|null, same_rights: bool}
      */
     public function handle(Report $one, Report $two): array
     {
@@ -27,6 +27,7 @@ final readonly class CompareReportPair
             'new' => $changes['new'],
             'fixed' => $changes['fixed'],
             'open' => $changes['open'],
+            'newly_checked' => $changes['newly_checked'],
             'disk' => $changes['disk'],
             'memory' => $changes['memory'],
             'verdict' => $this->verdictChange($before, $after),

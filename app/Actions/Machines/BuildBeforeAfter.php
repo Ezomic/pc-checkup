@@ -22,6 +22,7 @@ final readonly class BuildBeforeAfter
 
     /**
      * A client only ever gets the plain wording: a flag no rule matched carries the scanner's raw text, which stays with the owner.
+     * A flag the earlier scan could not raise is not new, but it is still to do, so the document never calls the machine clear while it has one.
      *
      * @return Document
      */
@@ -35,7 +36,7 @@ final readonly class BuildBeforeAfter
             'after' => $after->created_at?->toJSON(),
             'same_rights' => $this->compare->sameRights($before, $after),
             'fixed' => array_map($headline, $diff['fixed']),
-            'open' => array_map($headline, $diff['open']),
+            'open' => array_map($headline, [...$diff['open'], ...$diff['newly_checked']]),
             'new' => array_map($headline, $diff['new']),
             'numbers' => $this->rows($this->numbers->from($before), $this->numbers->from($after)),
         ];

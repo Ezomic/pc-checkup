@@ -14,6 +14,7 @@ final readonly class FlagAdvice
         public ?string $advice,
         public string $raw,
         public string $key,
+        public ?string $rule = null,
     ) {}
 
     /**
