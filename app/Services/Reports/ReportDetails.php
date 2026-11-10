@@ -34,9 +34,9 @@ final readonly class ReportDetails
 
     private const NOT_MEASURED = 'Not measured';
 
-    private const MAC_VOLUMES = 'macOS swap and recovery space';
+    private const MAC_VOLUMES = 'Space macOS keeps for itself';
 
-    private const MAC_VOLUMES_WHY = 'separate parts of the drive that macOS keeps for itself';
+    private const MAC_VOLUMES_WHY = 'separate parts of the drive for swap, recovery and startup files';
 
     private const PRIVATE_FOLDERS = ['Mail', 'Messages', 'Safari'];
 
@@ -353,7 +353,7 @@ final readonly class ReportDetails
         }
 
         $unreached = array_filter([
-            $unwalked['volumes'] === null ? null : 'about '.ByteSize::format($unwalked['volumes'])." is macOS's own swap and recovery space",
+            $unwalked['volumes'] === null ? null : 'about '.ByteSize::format($unwalked['volumes']).' is space macOS keeps for itself',
             $unwalked['rest'] === null ? null : ByteSize::format($unwalked['rest']).($unread ? ' could not be read' : ' was not measured'),
         ]);
 

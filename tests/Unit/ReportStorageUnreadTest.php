@@ -33,7 +33,7 @@ const NM_NOT_MEASURED_NOTE = 'Not measured is used space that the folders above 
 
 const NM_SUDO_NOTE = 'Run the scan again with sudo to measure the system files too.';
 
-const NM_VOLUMES = ['label' => 'macOS swap and recovery space', 'value' => '2.5 GB', 'detail' => '2% of used space: separate parts of the drive that macOS keeps for itself', 'share' => 5];
+const NM_VOLUMES = ['label' => 'Space macOS keeps for itself', 'value' => '2.5 GB', 'detail' => '2% of used space: separate parts of the drive for swap, recovery and startup files', 'share' => 5];
 
 const NM_UNREAD = 'system files that need admin rights, and folders macOS keeps private (Mail, Messages, Safari)';
 
@@ -84,7 +84,7 @@ describe('a Mac on macOS 10.14 scanned without admin rights', function () {
     it('says the same in the summary and tells the owner how to measure the system files', function () {
         $card = nmCard(nmDoc(NM_MOJAVE));
 
-        expect($card['summary'])->toBe("Most of the space is used by Users (50 GB), Applications (13 GB) and System (6.9 GB). Your user folder uses 50 GB; the biggest part is Applications (39 GB). About 2.5 GB is macOS's own swap and recovery space, and 20 GB could not be read.")
+        expect($card['summary'])->toBe('Most of the space is used by Users (50 GB), Applications (13 GB) and System (6.9 GB). Your user folder uses 50 GB; the biggest part is Applications (39 GB). About 2.5 GB is space macOS keeps for itself, and 20 GB could not be read.')
             ->and(array_slice($card['notes'], 0, 3))->toBe([
                 'Could not be read: Library: Mail, Library: Messages, Library: Safari.',
                 NM_NOT_MEASURED_NOTE,
@@ -101,7 +101,7 @@ describe('a Mac on macOS 10.14 scanned without admin rights', function () {
         $drive = nmDrive(nmCard(nmDoc(NM_MOJAVE, $dutch)));
 
         expect(array_slice($drive, -2))->toBe([
-            ['label' => 'macOS swap and recovery space', 'value' => '2.5 GB', 'detail' => '3% of used space: separate parts of the drive that macOS keeps for itself', 'share' => 5],
+            ['label' => 'Space macOS keeps for itself', 'value' => '2.5 GB', 'detail' => '3% of used space: separate parts of the drive for swap, recovery and startup files', 'share' => 5],
             ['label' => 'Not measured', 'value' => '20 GB', 'detail' => '20% of used space: '.NM_UNREAD, 'share' => 40],
         ]);
     });
@@ -139,7 +139,7 @@ describe('a scan that stopped at its time limit', function () {
             NM_VOLUMES,
             ['label' => 'Not measured', 'value' => '20 GB', 'detail' => '20% of used space', 'share' => 40],
         ])
-            ->and($card['summary'])->toEndWith("About 2.5 GB is macOS's own swap and recovery space, and 20 GB was not measured.")
+            ->and($card['summary'])->toEndWith('About 2.5 GB is space macOS keeps for itself, and 20 GB was not measured.')
             ->and($card['notes'])->toContain(NM_NOT_MEASURED_NOTE)
             ->and($card['notes'])->not->toContain(NM_SUDO_NOTE);
     })->with(['no', 'yes', null]);
@@ -150,10 +150,10 @@ describe('macOS 11 and later', function () {
         $card = nmCard(nmDoc(NM_SEQUOIA, NM_SEQUOIA_DISK, 'yes'));
 
         expect(array_slice(nmDrive($card), -2))->toBe([
-            ['label' => 'macOS swap and recovery space', 'value' => '17 GB', 'detail' => '6% of used space: separate parts of the drive that macOS keeps for itself', 'share' => 8],
+            ['label' => 'Space macOS keeps for itself', 'value' => '17 GB', 'detail' => '6% of used space: separate parts of the drive for swap, recovery and startup files', 'share' => 8],
             ['label' => 'Not measured', 'value' => '7.3 GB', 'detail' => '2% of used space: folders macOS keeps private', 'share' => 4],
         ])
-            ->and($card['summary'])->toEndWith("About 17 GB is macOS's own swap and recovery space, and 7.3 GB could not be read.")
+            ->and($card['summary'])->toEndWith('About 17 GB is space macOS keeps for itself, and 7.3 GB could not be read.')
             ->and($card['notes'])->not->toContain(NM_SUDO_NOTE);
     });
 });
@@ -166,7 +166,7 @@ describe('macOS volumes bigger than what the walk did not reach', function () {
         expect(end($drive))->toBe(NM_VOLUMES)
             ->and(array_column($drive, 'label'))->not->toContain('Not measured')
             ->and(implode(' ', array_column($drive, 'value')))->not->toContain('-')
-            ->and($card['summary'])->toEndWith("About 2.5 GB is macOS's own swap and recovery space.")
+            ->and($card['summary'])->toEndWith('About 2.5 GB is space macOS keeps for itself.')
             ->and($card['notes'])->not->toContain(NM_NOT_MEASURED_NOTE)
             ->and($card['notes'])->not->toContain(NM_SUDO_NOTE);
     })->with([

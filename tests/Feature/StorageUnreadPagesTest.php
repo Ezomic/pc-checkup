@@ -18,7 +18,7 @@ const SU_MARKDOWN = "# Mac checkup: Test Air\n\n- Format: 1\n- OS: macOS\n- Free
     ."## Storage breakdown\n\n```\nscan: complete\nformat: 2\nroot|Users|52499440\nroot|Applications|13333212\nroots_total|81398076\n"
     ."missing|library/Mail\nmissing|library/Messages\nmissing|library/Safari\n```\n";
 
-const SU_OWNER_WORDS = ['sudo', 'swap and recovery', 'Not measured', 'admin rights', 'could not be read', 'keeps private'];
+const SU_OWNER_WORDS = ['sudo', 'keeps for itself', 'swap, recovery', 'Not measured', 'admin rights', 'could not be read', 'keeps private'];
 
 it('gives the owner the macOS volumes and the reason for the rest in the detail cards prop', function () {
     $user = User::factory()->create();
@@ -33,7 +33,7 @@ it('gives the owner the macOS volumes and the reason for the rest in the detail 
         });
 
     expect(array_slice($card['bars'][0]['items'], -2))->toBe([
-        ['label' => 'macOS swap and recovery space', 'value' => '2.5 GB', 'detail' => '2% of used space: separate parts of the drive that macOS keeps for itself', 'share' => 5],
+        ['label' => 'Space macOS keeps for itself', 'value' => '2.5 GB', 'detail' => '2% of used space: separate parts of the drive for swap, recovery and startup files', 'share' => 5],
         ['label' => 'Not measured', 'value' => '20 GB', 'detail' => '20% of used space: system files that need admin rights, and folders macOS keeps private (Mail, Messages, Safari)', 'share' => 40],
     ])
         ->and($card['notes'])->toContain('Run the scan again with sudo to measure the system files too.');
