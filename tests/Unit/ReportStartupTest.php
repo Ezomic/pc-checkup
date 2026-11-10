@@ -406,9 +406,9 @@ it('puts random looking names first and shows at most six', function () {
 });
 
 it('only treats long vowel-free names as random', function () {
-    $card = suCard([SU_LOGIN => 'GTK, RTHDVCPL']);
+    $card = suCard([SU_LOGIN => 'GTK, XKCDRTQZ']);
 
-    expect(array_column($card['list']['items'], 'value', 'label'))->toBe(['RTHDVCPL' => 'Odd looking name. From: login item.', 'GTK' => 'Not recognised. From: login item.']);
+    expect(array_column($card['list']['items'], 'value', 'label'))->toBe(['XKCDRTQZ' => 'Odd looking name. From: login item.', 'GTK' => 'Not recognised. From: login item.']);
 });
 
 it('does not call a long non-Latin name random', function () {
@@ -552,12 +552,28 @@ it('stops reading the Windows table at the first blank line', function () {
     expect(suLabels($card))->toBe(['First']);
 });
 
-it('is not fooled by a command that imitates a known app, because commands are never read', function () {
-    $card = suCard([SU_PROGRAMS => suTable([['Updater', 'C:\Users\bob\OneDrive\evil.exe --token=abc', 'HKU\Run']])]);
+it('reads only the program a startup entry runs, never its folders or arguments', function (string $command) {
+    $card = suCard([SU_PROGRAMS => suTable([['Updater', $command, 'HKU\Run']])]);
 
-    expect($card['list']['items'][0])->toBe(['label' => 'Updater', 'value' => 'Not recognised', 'tone' => 'neutral'])
-        ->and((string) json_encode($card))->not->toContain('bob')->not->toContain('token');
-});
+    expect($card['list']['items'])->toBe([['label' => 'Updater', 'value' => 'Not recognised', 'tone' => 'neutral']])
+        ->and((string) json_encode($card))->not->toContain('bob')->not->toContain('token')->not->toContain('evil');
+})->with([
+    'familiar folder' => ['C:\Users\bob\OneDrive\evil.exe --token=abc'],
+    'familiar argument' => ['"C:\Users\bob\AppData\Local\evil\Update.exe" --processStart Discord.exe'],
+    'slash switch before a familiar program' => ['cmd /c start C:\Users\bob\steam.exe'],
+    'dash switch before a familiar program' => ['powershell -w hidden C:\Users\bob\steam.exe'],
+    'script in an argument' => ['mshta javascript:x=C:\Users\bob\steam.exe'],
+    'launcher word before a familiar program' => ['powershell Start-Process C:\Users\bob\steam.exe'],
+    'script host before a familiar program' => ['wscript discord.exe'],
+    'html host before a familiar program' => ['mshta steam.exe'],
+    'whole command quoted' => ['"cmd /c steam.exe"'],
+    'quoted launcher word before a familiar program' => ['"wscript discord.exe"'],
+    'batch file with a familiar argument' => ['C:\Users\bob\evil.bat steam.exe'],
+    'quoted script, not a program' => ['"C:\Users\bob\steam.bat"'],
+    'shortcut' => ['Steam.lnk'],
+    'look-alike program' => ['C:\Users\bob\steamy.exe'],
+    'empty command' => [''],
+]);
 
 it('handles a very large listing', function () {
     $plists = "/Library/LaunchAgents:\n".implode("\n", array_map(fn (int $i): string => "com.example.item{$i}.plist", range(1, 5000)));
@@ -572,4 +588,234 @@ it('never prints placeholder values', function () {
     $encoded = (string) json_encode($card);
 
     expect($encoded)->not->toContain('null,')->not->toContain('undefined')->not->toContain('NaN')->not->toContain('--');
+});
+
+const SU_REAL_WINDOWS = [
+    ['Battle.net', '"C:\Program Files (x86)\Battle.net\Battle.net.exe" --autostarted', 'HKU\S-1-5-21-1-1001\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'],
+    ['Discord', '"C:\Users\<user>\AppData\Local\Discord\Update.exe" --processStart Discord.exe', 'HKU\S-1-5-21-1-1001\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'],
+    ['EpicGamesLauncher', '"C:\Program Files (x86)\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe" -silent', 'HKU\S-1-5-21-1-1001\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'],
+    ['LGHUB', '"C:\Program Files\LGHUB\lghub.exe" --background', 'HKU\S-1-5-21-1-1001\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'],
+    ['EADM', '"C:\Program Files\Electronic Arts\EA Desktop\EA Desktop\EALauncher.exe" -silent', 'HKU\S-1-5-21-1-1001\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'],
+    ['Overwolf', '"C:\Program Files (x86)\Overwolf\OverwolfLauncher.exe" -launcherautolaunch', 'HKU\S-1-5-21-1-1001\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'],
+    ['OneDrive', '"C:\Users\<user>\AppData\Local\Microsoft\OneDrive\OneDrive.exe" /background', 'HKU\S-1-5-21-1-1001\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'],
+    ['Steam', '"C:\Program Files (x86)\Steam\steam.exe" -silent', 'HKU\S-1-5-21-1-1001\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'],
+    ['SteelSeries Sonar', '"C:\Program Files\SteelSeries\GG\SteelSeriesGG.exe" -dataPath="C:\ProgramData\SteelSeries\GG"', 'HKU\S-1-5-21-1-1001\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'],
+    ['NVIDIA', '"C:\Program Files\NVIDIA Corporation\NVIDIA app\CEF\NVIDIA app.exe" --minimized', 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'],
+    ['Claude', '"C:\Users\<user>\AppData\Local\AnthropicClaude\claude.exe" --startup', 'HKU\S-1-5-21-1-1001\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'],
+    ['com.overwolf.curseforge', '"C:\Users\<user>\AppData\Local\Programs\CurseForge Windows\CurseForge.exe" --hidden', 'HKU\S-1-5-21-1-1001\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'],
+    ['Spotify', '"C:\Users\<user>\AppData\Roaming\Spotify\Spotify.exe" --autostart --minimized', 'HKU\S-1-5-21-1-1001\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'],
+    ['RtkAudUService', '"C:\Windows\System32\RtkAudUService64.exe" -background', 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'],
+];
+
+it('recognises every startup program from a real Windows 11 scan by its name alone', function (string $name, string $label, string $description) {
+    $card = suCard([SU_PROGRAMS => suTable([[$name, 'C:\x\run.exe', 'HKU\Run']])]);
+
+    expect($card['list']['items'])->toBe([['label' => $label, 'value' => $description, 'tone' => 'neutral']]);
+})->with([
+    ['Battle.net', 'Battle.net', 'Game store from Blizzard'],
+    ['Discord', 'Discord', 'Chat and voice app'],
+    ['EpicGamesLauncher', 'Epic Games Launcher', 'Game store from Epic Games'],
+    ['LGHUB', 'Logitech G HUB', 'Settings app for Logitech gaming mice, keyboards and headsets'],
+    ['EADM', 'EA app', 'Game store from EA'],
+    ['Overwolf', 'Overwolf', 'Add-on platform for games'],
+    ['OneDrive', 'OneDrive', 'Syncs OneDrive files'],
+    ['Steam', 'Steam', 'Game store'],
+    ['SteelSeries Sonar', 'SteelSeries GG', 'Settings app for SteelSeries gear, includes Sonar audio'],
+    ['NVIDIA', 'NVIDIA', 'Graphics driver helper'],
+    ['Claude', 'Claude', 'AI assistant app'],
+    ['com.overwolf.curseforge', 'CurseForge', 'Mod manager for games'],
+    ['Spotify', 'Spotify', 'Music app'],
+    ['RtkAudUService', 'Realtek Audio', 'Sound driver helper'],
+]);
+
+it('recognises the whole real Windows 11 scan and still lists unknown programs first', function () {
+    $rows = SU_REAL_WINDOWS;
+    array_splice($rows, 7, 0, [['Docker Desktop', 'C:\Program Files\Docker\Docker\Docker Desktop.exe -Autostart', 'HKU\Run']]);
+    $rows[] = ['Mystery', '"C:\Users\<user>\AppData\Roaming\m\m.exe"', 'HKU\Run'];
+    $card = suCard([SU_PROGRAMS => suTable($rows)]);
+    $values = array_column($card['list']['items'], 'value', 'label');
+
+    expect(suRows($card))->toBe(['Startup programs' => '16'])
+        ->and(suLabels($card))->toBe(['Docker Desktop', 'Mystery', 'Battle.net', 'Discord', 'Epic Games Launcher', 'Logitech G HUB'])
+        ->and(array_slice($values, 0, 2))->toBe(['Docker Desktop' => 'Not recognised', 'Mystery' => 'Not recognised'])
+        ->and(array_slice($values, 2))->not->toContain('Not recognised')
+        ->and($card['notes'])->toContain('The scan does not record how much each item slows startup, so this list puts unfamiliar names first instead of the heaviest. Names are matched by wording only: a familiar name is not proof an item is genuine.')
+        ->and((string) json_encode($card))->not->toContain('<user>')->not->toContain('AppData');
+});
+
+it('recognises the common chat, gaming, peripheral, driver, cloud, browser, password and AI apps on Windows', function (string $name, string $label) {
+    $card = suCard([SU_PROGRAMS => suTable([[$name, 'C:\x\run.exe', 'HKU\Run']])]);
+
+    expect(suLabels($card))->toBe([$label])
+        ->and($card['list']['items'][0]['value'])->not->toBe('Not recognised');
+})->with([
+    ['Microsoft Teams', 'Teams'],
+    ['com.squirrel.Teams.Teams', 'Teams'],
+    ['Slack', 'Slack'],
+    ['WhatsApp', 'WhatsApp'],
+    ['Zoom', 'Zoom'],
+    ['Skype for Desktop', 'Skype'],
+    ['Telegram Desktop', 'Telegram'],
+    ['DiscordPTB', 'Discord'],
+    ['Battle.net Update Agent', 'Battle.net'],
+    ['Epic Games Launcher', 'Epic Games Launcher'],
+    ['EA Desktop', 'EA app'],
+    ['Origin', 'EA Origin'],
+    ['UbisoftConnect', 'Ubisoft Connect'],
+    ['Uplay', 'Ubisoft Connect'],
+    ['GOG Galaxy', 'GOG Galaxy'],
+    ['GalaxyClient', 'GOG Galaxy'],
+    ['RiotClient', 'Riot Games'],
+    ['Riot Vanguard', 'Riot Games'],
+    ['OverwolfLauncher', 'Overwolf'],
+    ['CurseForge', 'CurseForge'],
+    ['Xbox', 'Xbox'],
+    ['Logitech Download Assistant', 'Logitech'],
+    ['LogiOptionsPlus', 'Logitech'],
+    ['Razer Synapse', 'Razer Synapse'],
+    ['Corsair iCUE5 Software', 'Corsair iCUE'],
+    ['iCUE', 'Corsair iCUE'],
+    ['SteelSeriesGG', 'SteelSeries GG'],
+    ['RTHDVCPL', 'Realtek Audio'],
+    ['NvBackend', 'NVIDIA'],
+    ['NVIDIA GeForce Experience', 'NVIDIA'],
+    ['AMDNoiseSuppression', 'AMD Software'],
+    ['RadeonSoftware', 'AMD Software'],
+    ['AMD Adrenalin', 'AMD Software'],
+    ['IntelGraphicsCommandCenter', 'Intel'],
+    ['Intel(R) Driver & Support Assistant', 'Intel'],
+    ['igfxTray', 'Intel'],
+    ['GoogleDriveFS', 'Google Drive'],
+    ['Dropbox', 'Dropbox'],
+    ['iCloudServices', 'iCloud'],
+    ['Box', 'Box'],
+    ['MEGAsync', 'MEGA'],
+    ['iTunesHelper', 'iTunes'],
+    ['GoogleChromeAutoLaunch_A1B2C3', 'Google'],
+    ['BraveSoftware Update', 'Brave'],
+    ['Opera Browser Assistant', 'Opera'],
+    ['Opera GX Browser Assistant', 'Opera'],
+    ['OperaGX', 'Opera'],
+    ['Mozilla Firefox', 'Firefox'],
+    ['Vivaldi Update Notifier', 'Vivaldi'],
+    ['1Password', '1Password'],
+    ['Bitwarden', 'Bitwarden'],
+    ['LastPass', 'LastPass'],
+    ['Dashlane', 'Dashlane'],
+    ['KeePassXC', 'KeePass'],
+    ['NordPass', 'NordPass'],
+    ['ChatGPT', 'ChatGPT'],
+]);
+
+it('recognises the same apps in the forms a Mac lists them', function (string $section, string $body, string $label) {
+    $card = suCard([$section => $body]);
+
+    expect(suLabels($card))->toBe([$label])
+        ->and($card['list']['items'][0]['value'])->not->toStartWith('Not recognised');
+})->with([
+    'discord login item' => [SU_LOGIN, 'Discord', 'Discord'],
+    'logi options login item' => [SU_LOGIN, 'Logi Options+', 'Logitech'],
+    'g hub login item' => [SU_LOGIN, 'Logitech G HUB', 'Logitech G HUB'],
+    'google drive login item' => [SU_LOGIN, 'Google Drive', 'Google Drive'],
+    'chatgpt login item' => [SU_LOGIN, 'ChatGPT', 'ChatGPT'],
+    'claude login item' => [SU_LOGIN, 'Claude', 'Claude'],
+    '1password login item' => [SU_LOGIN, '1Password 7', '1Password'],
+    'megasync login item' => [SU_LOGIN, 'MEGAsync', 'MEGA'],
+    'box login item' => [SU_LOGIN, 'Box Drive', 'Box'],
+    'whatsapp login item' => [SU_LOGIN, 'WhatsApp', 'WhatsApp'],
+    'telegram login item' => [SU_LOGIN, 'Telegram', 'Telegram'],
+    'epic login item' => [SU_LOGIN, 'Epic Games Launcher', 'Epic Games Launcher'],
+    'slack agent' => [SU_LAUNCH, "/Library/LaunchAgents:\ncom.tinyspeck.slackmacgap.plist", 'Slack'],
+    'claude agent' => [SU_LAUNCH, "/Users/someone/Library/LaunchAgents:\ncom.anthropic.claudefordesktop.plist", 'Claude'],
+    'chatgpt agent' => [SU_LAUNCH, "/Users/someone/Library/LaunchAgents:\ncom.openai.chat.plist", 'ChatGPT'],
+    'logitech options daemon' => [SU_LAUNCH, "/Library/LaunchDaemons:\ncom.logi.optionsplus.updater.plist", 'Logitech'],
+    'g hub agent' => [SU_LAUNCH, "/Library/LaunchAgents:\ncom.logi.ghub.plist", 'Logitech G HUB'],
+    'old logitech agent' => [SU_LAUNCH, "/Library/LaunchAgents:\ncom.logitech.manager.daemon.plist", 'Logitech'],
+    'razer agent' => [SU_LAUNCH, "/Library/LaunchAgents:\ncom.razer.rzupdater.plist", 'Razer Synapse'],
+    'corsair agent' => [SU_LAUNCH, "/Library/LaunchAgents:\ncom.corsair.cue.helper.plist", 'Corsair iCUE'],
+    'steelseries agent' => [SU_LAUNCH, "/Library/LaunchAgents:\ncom.steelseries.gg.plist", 'SteelSeries GG'],
+    'google drive agent' => [SU_LAUNCH, "/Library/LaunchAgents:\ncom.google.drivefs.plist", 'Google Drive'],
+    'box agent' => [SU_LAUNCH, "/Library/LaunchAgents:\ncom.box.desktop.helper.plist", 'Box'],
+    'epic agent' => [SU_LAUNCH, "/Users/someone/Library/LaunchAgents:\ncom.epicgames.launcher.plist", 'Epic Games Launcher'],
+    'blizzard agent' => [SU_LAUNCH, "/Library/LaunchAgents:\ncom.blizzard.agent.plist", 'Battle.net'],
+    'keepassxc agent' => [SU_LAUNCH, "/Users/someone/Library/LaunchAgents:\norg.keepassxc.keepassxc.plist", 'KeePass'],
+    'microsoft autoupdate background item' => [SU_BACKGROUND, suRecord('Microsoft AutoUpdate', 'app (0x2)', 'Microsoft Corporation'), 'Microsoft AutoUpdate'],
+    'bitwarden background item' => [SU_BACKGROUND, suRecord('Bitwarden', 'app (0x2)', 'Bitwarden Inc.'), 'Bitwarden'],
+]);
+
+it('does not mistake look-alike names for a newly known app', function (string $name) {
+    $card = suCard([SU_LOGIN => $name]);
+
+    expect($card['list']['items'])->toBe([['label' => $name, 'value' => 'Not recognised. From: login item.', 'tone' => 'neutral']]);
+})->with(['Discordia', 'MyDiscord', 'steamy', 'ZoomIt', 'TeamSpeak 3', 'IntelliJ IDEA', 'Boxer', 'Megatron', 'Claudette', 'Operator', 'EADMIN', 'Braveheart', 'Epicure', 'Logic Pro', 'Riotous', 'Galaxy Buds', 'Amdocs', 'Telegraph']);
+
+it('recognises a program by the file it runs when the entry name says nothing', function (string $name, string $command, string $label) {
+    $card = suCard([SU_PROGRAMS => suTable([[$name, $command, 'HKU\Run']])]);
+
+    expect(suLabels($card))->toBe([$label])
+        ->and($card['list']['items'][0]['value'])->not->toBe('Not recognised');
+})->with([
+    'quoted path' => ['Helper', '"C:\Program Files (x86)\Steam\steam.exe" -silent', 'Steam'],
+    'quoted path with a longer file name' => ['ElevatedStartup', '"C:\Program Files (x86)\Overwolf\OverwolfLauncher.exe" -launcherautolaunch', 'Overwolf'],
+    'unquoted path with spaces' => ['Assistant', 'C:\Program Files\Opera\Opera Browser Assistant.exe --autostart', 'Opera'],
+    'unquoted path with dots' => ['Launcher', 'C:\Program Files (x86)\Battle.net\Battle.net.exe', 'Battle.net'],
+    'environment variable' => ['AudioTray', '%windir%\System32\RtkAudUService64.exe -background', 'Realtek Audio'],
+    'upper case short path' => ['Startup', 'C:\PROGRA~2\STEAM\STEAM.EXE', 'Steam'],
+    'masked user folder' => ['Tray', '"C:\Users\<user>\AppData\Local\AnthropicClaude\claude.exe"', 'Claude'],
+    'bare program with a switch' => ['Sync', 'MEGAsync.exe /autostart', 'MEGA'],
+    'network path' => ['Remote', '\\\\server\share\Dropbox.exe', 'Dropbox'],
+    'unquoted network path with spaces' => ['Remote', '\\\\server\share\Sync Tools\Dropbox Update.exe -q', 'Dropbox'],
+    'quoted path with spaces in the file name' => ['Tray', '"C:\Program Files\NVIDIA Corporation\NVIDIA app\CEF\NVIDIA app.exe" --minimized', 'NVIDIA'],
+]);
+
+it('does not let a familiar program vouch for an odd looking, Apple style or system name', function () {
+    $table = suTable([
+        ['x7k2qz9wrt', '"C:\x\steam.exe"', 'HKU\Run'],
+        ['com.apple.tracer', '"C:\x\Discord.exe"', 'HKU\Run'],
+        ['SecurityHealth', '"C:\x\Spotify.exe"', 'HKLM\Run'],
+    ]);
+
+    expect(array_column(suCard([SU_PROGRAMS => $table])['list']['items'], 'value', 'label'))->toBe([
+        'x7k2qz9wrt' => 'Odd looking name',
+        'tracer' => 'Apple style name, unusual place',
+    ]);
+});
+
+it('keeps an Apple style label flagged even when it holds a familiar name', function () {
+    $card = suCard([SU_LAUNCH => "/Library/LaunchAgents:\ncom.apple.icloud.helper.plist\ncom.apple.ituneshelper.plist"]);
+
+    expect(array_column($card['list']['items'], 'value', 'label'))->toBe([
+        'icloud' => 'Apple style name, unusual place. From: system launch agent.',
+        'ituneshelper' => 'Apple style name, unusual place. From: system launch agent.',
+    ]);
+});
+
+it('groups an entry found by name and one found by its program into one row', function () {
+    $card = suCard([SU_PROGRAMS => suTable([['Discord', 'C:\x\run.exe', 'HKU\Run'], ['Updater', '"C:\x\Discord.exe"', 'HKU\Run']])]);
+
+    expect($card['list']['items'])->toBe([['label' => 'Discord', 'value' => 'Chat and voice app', 'tone' => 'neutral']])
+        ->and(suRows($card))->toBe(['Startup programs' => '2']);
+});
+
+it('survives control characters, unicode and broken bytes in a command', function () {
+    $table = suTable([
+        ["Caf\u{e9}", "\"C:\\Users\\J\u{f6}rg\\Spotify\u{202e}.exe\"", 'HKU\Run'],
+        ['Broken', "\"C:\\x\\Bad\xC3\x28.exe\"", 'HKU\Run'],
+    ]);
+    $card = suCard([SU_PROGRAMS => $table]);
+
+    expect(array_column($card['list']['items'], 'value', 'label'))->toBe(['Broken' => 'Not recognised', 'Spotify' => 'Music app'])
+        ->and(json_encode($card))->not->toBeFalse()->not->toContain('202e')->not->toContain('J\u00f6rg');
+});
+
+it('reads a huge or space-padded command quickly', function () {
+    $table = suTable([
+        ['Huge', 'C:\\'.str_repeat('folder\\', 5000).'steam.exe', 'HKU\Run'],
+        ['Padded', 'a '.str_repeat(' ', 5000).str_repeat('b ', 5000).'c', 'HKU\Run'],
+    ]);
+    $started = microtime(true);
+    $card = suCard([SU_PROGRAMS => $table]);
+
+    expect(array_column($card['list']['items'], 'value', 'label'))->toBe(['Padded' => 'Not recognised', 'Steam' => 'Game store'])
+        ->and(microtime(true) - $started)->toBeLessThan(2.0);
 });
