@@ -2002,6 +2002,19 @@ Parsec|^parsecd?$
 EOF
 }
 
+# Program names from "ps -axo comm=", which shows most programs with their full path. Programs in the
+# macOS system folders are left out, because Apple's own parsecd (Siri and Spotlight Suggestions)
+# runs on every Mac and is not Parsec. /usr/local is not a system folder. A program shown without a
+# path keeps its name, also when ps puts it in brackets.
+pcc_remote_program_names() {
+  LC_ALL=C awk '
+    { sub(/^[ \t]+/, ""); sub(/[ \t]+$/, "") }
+    /^\(.*\)$/ { $0 = substr($0, 2, length($0) - 2) }
+    /^\/(System|usr|bin|sbin|Library\/Apple)\// && !/^\/usr\/local\// { next }
+    { sub(/.*\//, ""); print }
+  '
+}
+
 # Sites whose redirection in the hosts file is a sign of hijacking. The app holds the same list.
 PCC_WATCHED_SITES="google.com,google.nl,gmail.com,youtube.com,microsoft.com,live.com,outlook.com,office.com,microsoftonline.com,windowsupdate.com,apple.com,icloud.com,facebook.com,paypal.com,ing.nl,rabobank.nl,abnamro.nl,snsbank.nl,asnbank.nl,regiobank.nl,triodos.nl,knab.nl,bunq.com,digid.nl,belastingdienst.nl"
 
@@ -2023,7 +2036,7 @@ pcc_remote_report() {
     if [ "$rc" = 142 ]; then scan="partial (time limit of $PCC_REMOTE_CAP seconds reached)"; elif [ "$rc" != 0 ]; then readable=0; break; fi
   done
   if [ "$readable" = 0 ]; then scan="partial (installed apps could not be read)"; fi
-  running=$(pcc_capped "$PCC_REMOTE_CAP" ps -axco comm 2> /dev/null)
+  running=$(pcc_capped "$PCC_REMOTE_CAP" ps -axo comm= 2> /dev/null)
   rc=$?
   if [ "$rc" = 142 ]; then scan="partial (time limit of $PCC_REMOTE_CAP seconds reached)"; fi
   echo "format: 1"
@@ -2036,7 +2049,7 @@ pcc_remote_report() {
     scan="partial (running programs could not be read)"
   fi
   echo "scan: $scan"
-  running=$(printf '%s\n' "$running" | grep -iv hamachi)
+  running=$(printf '%s\n' "$running" | pcc_remote_program_names | grep -iv hamachi)
   printf '%s\n' "$(sed -e 's|.*/||' -e 's|\.app$||' "$installed" | grep -iv hamachi)" > "$installed"
   while IFS= read -r line; do
     name=${line%%|*}
