@@ -172,8 +172,15 @@ describe('no updates on a macOS that gets no more updates', function () {
             ->and($advice->headline)->toBe((new FlagAdvisor)->advise(faNoUpdates(), $locale)->headline)
             ->and($advice->severity)->toBe(FlagSeverity::Medium);
     })->with([
-        'English' => ['en', 'No more updates come out for macOS 10.14 Mojave. The newest macOS this Mac can run is macOS 12 Monterey.'],
-        'Dutch' => ['nl', 'Voor macOS 10.14 Mojave komen geen updates meer uit. De nieuwste macOS die op deze Mac kan draaien, is macOS 12 Monterey.'],
+        'English' => ['en', 'No more updates come out for macOS 10.14 Mojave. The newest macOS this Mac can run, macOS 12 Monterey, no longer gets security updates either.'],
+        'Dutch' => ['nl', 'Voor macOS 10.14 Mojave komen geen updates meer uit. De nieuwste macOS die op deze Mac kan draaien, macOS 12 Monterey, krijgt ook geen beveiligingsupdates meer.'],
+    ]);
+
+    it('names a newest macOS that Apple still supports', function (string $locale, string $text) {
+        expect((new FlagAdvisor)->advise(faNoUpdates(), $locale, faOldMac('12.7.6 (21H1320)', model: 'MacBook Air (MacBookAir8,1)'))->advice)->toBe($text);
+    })->with([
+        'English' => ['en', 'No more updates come out for macOS 12 Monterey. The newest macOS this Mac can run is macOS 14 Sonoma.'],
+        'Dutch' => ['nl', 'Voor macOS 12 Monterey komen geen updates meer uit. De nieuwste macOS die op deze Mac kan draaien, is macOS 14 Sonoma.'],
     ]);
 
     it('says when the Mac already runs the newest macOS it can', function (string $locale, string $text) {
@@ -187,7 +194,7 @@ describe('no updates on a macOS that gets no more updates', function () {
         $advice = (new FlagAdvisor)->adviseAll(['macOS 10.14.6 is old and likely out of security support.', faNoUpdates()], faOldMac());
 
         expect(array_column(array_map(fn ($a) => $a->toArray(), $advice), 'advice', 'raw')[faNoUpdates()])
-            ->toBe('No more updates come out for macOS 10.14 Mojave. The newest macOS this Mac can run is macOS 12 Monterey.');
+            ->toBe('No more updates come out for macOS 10.14 Mojave. The newest macOS this Mac can run, macOS 12 Monterey, no longer gets security updates either.');
     });
 
     it('keeps the usual advice when it cannot tell', function (?ReportSections $sections) {

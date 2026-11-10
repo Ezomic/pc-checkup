@@ -152,9 +152,16 @@ describe('the updates card on a macOS that gets no more updates', function () {
         return udRows(udCard($markdown, 'updates'))['Last update installed'];
     }
 
-    it('says no more updates come out and names the newest macOS the Mac can run', function () {
+    it('says no more updates come out and that the newest macOS the Mac can run gets none either', function () {
         expect(udInstalled(udOldMac()))->toBe([
-            'value' => '24 January 2022, 1744 days before the scan. No more updates come out for macOS 10.14 Mojave. The newest macOS this Mac can run is macOS 12 Monterey.',
+            'value' => '24 January 2022, 1744 days before the scan. No more updates come out for macOS 10.14 Mojave. The newest macOS this Mac can run, macOS 12 Monterey, no longer gets security updates either.',
+            'tone' => 'bad',
+        ]);
+    });
+
+    it('names the newest macOS the Mac can run when Apple still supports it', function () {
+        expect(udInstalled(udOldMac(model: 'MacBook Air (MacBookAir8,1)', macos: '12.7.6 (21H1320)')))->toBe([
+            'value' => '24 January 2022, 1744 days before the scan. No more updates come out for macOS 12 Monterey. The newest macOS this Mac can run is macOS 14 Sonoma.',
             'tone' => 'bad',
         ]);
     });
@@ -193,7 +200,7 @@ describe('the updates card on a macOS that gets no more updates', function () {
     it('reads an old report that has the version only in the macOS version section', function () {
         $markdown = str_replace("- macOS: 10.14.6 (18G9323)\n", '', udOldMac());
 
-        expect(udInstalled($markdown)['value'])->toEndWith('No more updates come out for macOS 10.14 Mojave. The newest macOS this Mac can run is macOS 12 Monterey.');
+        expect(udInstalled($markdown)['value'])->toEndWith('No more updates come out for macOS 10.14 Mojave. The newest macOS this Mac can run, macOS 12 Monterey, no longer gets security updates either.');
     });
 
     it('leaves Windows alone even with a Software updates section', function () {

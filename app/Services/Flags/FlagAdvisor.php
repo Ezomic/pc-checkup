@@ -95,7 +95,8 @@ final class FlagAdvisor
         return match (true) {
             $outlook === null => trans("flags.$key.advice", [], $locale),
             $outlook['newest'] === null => trans("flags.$key.advice_already_newest", ['running' => $outlook['running']], $locale),
-            default => trans("flags.$key.advice_no_more_updates", $outlook, $locale),
+            ! $outlook['newestSupported'] => trans("flags.$key.advice_newest_unsupported", ['running' => $outlook['running'], 'newest' => $outlook['newest']], $locale),
+            default => trans("flags.$key.advice_no_more_updates", ['running' => $outlook['running'], 'newest' => $outlook['newest']], $locale),
         };
     }
 

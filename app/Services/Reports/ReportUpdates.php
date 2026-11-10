@@ -95,7 +95,7 @@ final readonly class ReportUpdates
 
     /**
      * @param  array{date: CarbonImmutable, days: int}  $installed
-     * @param  array{running: string, newest: string|null}|null  $outlook
+     * @param  array{running: string, newest: string|null, newestSupported: bool}|null  $outlook
      * @return Row
      */
     private function installedRow(array $installed, ?array $outlook): array
@@ -107,13 +107,14 @@ final readonly class ReportUpdates
     }
 
     /**
-     * @param  array{running: string, newest: string|null}|null  $outlook
+     * @param  array{running: string, newest: string|null, newestSupported: bool}|null  $outlook
      */
     private function advice(?array $outlook): string
     {
         return match (true) {
             $outlook === null => 'Check for updates and install them.',
             $outlook['newest'] === null => "This Mac already runs the newest macOS it can, {$outlook['running']}, and it no longer gets security updates.",
+            ! $outlook['newestSupported'] => "No more updates come out for {$outlook['running']}. The newest macOS this Mac can run, {$outlook['newest']}, no longer gets security updates either.",
             default => "No more updates come out for {$outlook['running']}. The newest macOS this Mac can run is {$outlook['newest']}.",
         };
     }

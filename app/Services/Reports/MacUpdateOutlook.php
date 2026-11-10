@@ -11,7 +11,7 @@ namespace App\Services\Reports;
 final readonly class MacUpdateOutlook
 {
     /**
-     * @return array{running: string, newest: string|null}|null The newest is null when the Mac already runs it.
+     * @return array{running: string, newest: string|null, newestSupported: bool}|null The newest is null when the Mac already runs it.
      */
     public function read(ReportSections $sections): ?array
     {
@@ -27,6 +27,7 @@ final readonly class MacUpdateOutlook
         return [
             'running' => MacNewestOs::name($running) ?? "macOS {$running}",
             'newest' => version_compare($running, $newest, '<') ? $newestName : null,
+            'newestSupported' => MacNewestOs::isSupportedByApple($newest),
         ];
     }
 

@@ -53,9 +53,9 @@ it('gives the owner the ioreg capacity and the true update advice', function () 
 
     expect(array_column($cards['battery'], 'value', 'label')['Maximum capacity'])->toBe('84% of when it was new')
         ->and(array_column($cards['updates'], 'value', 'label')['Last update installed'])
-        ->toBe('24 January 2022, 1744 days before the scan. No more updates come out for macOS 10.14 Mojave. The newest macOS this Mac can run is macOS 12 Monterey.')
+        ->toBe('24 January 2022, 1744 days before the scan. No more updates come out for macOS 10.14 Mojave. The newest macOS this Mac can run, macOS 12 Monterey, no longer gets security updates either.')
         ->and(array_column($props['report']['advice'], 'advice', 'headline')['No updates installed for 1744 days'])
-        ->toBe('No more updates come out for macOS 10.14 Mojave. The newest macOS this Mac can run is macOS 12 Monterey.');
+        ->toBe('No more updates come out for macOS 10.14 Mojave. The newest macOS this Mac can run, macOS 12 Monterey, no longer gets security updates either.');
 });
 
 it('gives a client the same advice in plain words in their language and no cards', function (string $query, string $text) {
@@ -70,8 +70,8 @@ it('gives a client the same advice in plain words in their language and no cards
         expect($payload)->not->toContain($hidden);
     }
 })->with([
-    'Dutch by default' => ['', 'Voor macOS 10.14 Mojave komen geen updates meer uit. De nieuwste macOS die op deze Mac kan draaien, is macOS 12 Monterey.'],
-    'English when asked' => ['?lang=en', 'No more updates come out for macOS 10.14 Mojave. The newest macOS this Mac can run is macOS 12 Monterey.'],
+    'Dutch by default' => ['', 'Voor macOS 10.14 Mojave komen geen updates meer uit. De nieuwste macOS die op deze Mac kan draaien, macOS 12 Monterey, krijgt ook geen beveiligingsupdates meer.'],
+    'English when asked' => ['?lang=en', 'No more updates come out for macOS 10.14 Mojave. The newest macOS this Mac can run, macOS 12 Monterey, no longer gets security updates either.'],
 ]);
 
 it('does not show the machine to another account or through another client link', function () {

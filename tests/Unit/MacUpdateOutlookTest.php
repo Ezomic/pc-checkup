@@ -17,33 +17,36 @@ function outlookOf(?string $model, ?string $macos, ?string $updates): ?array
     return (new MacUpdateOutlook)->read(ReportSections::parse($markdown));
 }
 
-it('names the newest macOS a Mac on an unsupported macOS can still run', function () {
+it('names the newest macOS a Mac on an unsupported macOS can still run, and that it is unsupported too', function () {
     expect(outlookOf('MacBook Air (MacBookAir7,2)', '10.14.6 (18G9323)', NOTHING_OFFERED))
-        ->toBe(['running' => 'macOS 10.14 Mojave', 'newest' => 'macOS 12 Monterey']);
+        ->toBe(['running' => 'macOS 10.14 Mojave', 'newest' => 'macOS 12 Monterey', 'newestSupported' => false]);
 });
 
 it('says nothing newer when the Mac already runs the newest macOS it can', function (string $model, string $macos, string $running) {
-    expect(outlookOf($model, $macos, NOTHING_OFFERED))->toBe(['running' => $running, 'newest' => null]);
+    expect(outlookOf($model, $macos, NOTHING_OFFERED))->toBe(['running' => $running, 'newest' => null, 'newestSupported' => false]);
 })->with([
     'Monterey on a 2015 Air' => ['MacBook Air (MacBookAir7,2)', '12.7.6 (21H1320)', 'macOS 12 Monterey'],
     'Ventura on a 2017 Pro' => ['MacBook Pro (MacBookPro14,1)', '13.7.8 (22H730)', 'macOS 13 Ventura'],
     'High Sierra on a 2011 iMac' => ['iMac (iMac12,1)', '10.13.6 (17G14042)', 'macOS 10.13 High Sierra'],
 ]);
 
-it('names a newer macOS that Apple still supports', function () {
-    expect(outlookOf('MacBook Air (MacBookAir8,1)', '12.7.6 (21H1320)', NOTHING_OFFERED))
-        ->toBe(['running' => 'macOS 12 Monterey', 'newest' => 'macOS 14 Sonoma']);
-});
+it('names a newer macOS that Apple still supports', function (string $model, string $newest) {
+    expect(outlookOf($model, '12.7.6 (21H1320)', NOTHING_OFFERED))
+        ->toBe(['running' => 'macOS 12 Monterey', 'newest' => $newest, 'newestSupported' => true]);
+})->with([
+    'the oldest supported line' => ['MacBook Air (MacBookAir8,1)', 'macOS 14 Sonoma'],
+    'a newer line' => ['MacBook Pro (MacBookPro15,1)', 'macOS 15 Sequoia'],
+]);
 
 it('names a running macOS it has no name for by its number', function () {
     expect(outlookOf('MacBook Pro (MacBookPro5,1)', '10.10.5 (14F2511)', NOTHING_OFFERED))
-        ->toBe(['running' => 'macOS 10.10', 'newest' => 'OS X 10.11 El Capitan']);
+        ->toBe(['running' => 'macOS 10.10', 'newest' => 'OS X 10.11 El Capitan', 'newestSupported' => false]);
 });
 
 it('reads the version from the macOS version section of an old report', function () {
     $markdown = "# Mac checkup: Test-Mac\n\n- Model: MacBook Air (MacBookAir7,2)\n\n## macOS version\n\n```\nProductName:\tMac OS X\nProductVersion:\t10.14.6\n```\n\n## Software updates\n\n```\n".NOTHING_OFFERED."\n```\n";
 
-    expect((new MacUpdateOutlook)->read(ReportSections::parse($markdown)))->toBe(['running' => 'macOS 10.14 Mojave', 'newest' => 'macOS 12 Monterey']);
+    expect((new MacUpdateOutlook)->read(ReportSections::parse($markdown)))->toBe(['running' => 'macOS 10.14 Mojave', 'newest' => 'macOS 12 Monterey', 'newestSupported' => false]);
 });
 
 it('has nothing to say when updates are waiting', function (string $updates) {
