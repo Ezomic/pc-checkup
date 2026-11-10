@@ -327,6 +327,35 @@ it('gives the owner the startup items card from a Windows report', function () {
         ->and($card['notes'][0])->toBe('The scan named 1 of the 3 startup programs.');
 });
 
+it('recognises the common apps in a real Windows report and keeps the unknown one first', function () {
+    $card = startupCard((string) file_get_contents(__DIR__.'/../Fixtures/windows-checkup-eigenaar.md'));
+
+    expect(array_column($card['list']['items'], 'value', 'label'))->toBe([
+        'Docker Desktop' => 'Not recognised',
+        'OneDrive' => 'Syncs OneDrive files',
+        'Spotify' => 'Music app',
+        'Discord' => 'Chat and voice app',
+        'Battle.net' => 'Game store from Blizzard',
+        'Logitech G HUB' => 'Settings app for Logitech gaming mice, keyboards and headsets',
+    ]);
+});
+
+it('never gives the recognised startup names of a Windows report to a share page', function () {
+    $client = Client::factory()->withShareLink()->create();
+    $machine = Machine::factory()->for($client->user)->create(['client_id' => $client->id, 'device_type' => 'desktop']);
+    Report::factory()->for($machine)->create(['markdown' => (string) file_get_contents(__DIR__.'/../Fixtures/windows-checkup-eigenaar.md')]);
+
+    foreach (["/c/{$client->share_token}", "/c/{$client->share_token}/machines/{$machine->id}"] as $path) {
+        $this->get($path)
+            ->assertOk()
+            ->assertInertia(function ($page): void {
+                $encoded = (string) json_encode($page->toArray()['props']);
+
+                expect($encoded)->not->toContain('Worth a look')->not->toContain('Logitech G HUB')->not->toContain('Chat and voice app')->not->toContain('Not recognised');
+            });
+    }
+});
+
 it('shows no startup items card for an older report without the sections', function () {
     $markdown = (string) preg_replace('/## (?:Login items|Performance: login item and startup counts|Startup items: LaunchAgents and LaunchDaemons)\n.*?```\n.*?```\n/s', '', macReportFixture());
 

@@ -10,7 +10,7 @@ use Illuminate\Support\Str;
  * @phpstan-import-type Card from ReportDetails
  * @phpstan-import-type Row from ReportDetails
  *
- * @phpstan-type Entry array{raw: string, developer: string, source: string}
+ * @phpstan-type Entry array{raw: string, developer: string, source: string, program: string}
  * @phpstan-type Found array{rows: list<Row>, entries: list<Entry>, notes: list<string>}
  * @phpstan-type Ranked array{name: string, description: string, rank: int, sources: list<string>}
  */
@@ -69,20 +69,13 @@ final readonly class ReportStartup
 
     private const SYSTEM = '/^(?:com\.microsoft\.|securityhealth(?![a-z])|windows ?(?:security|defender)|microsoftedgeautolaunch|msedge(?:autolaunch)?(?![a-z])|ctfmon(?![a-z])|microsoft (?:edge|office|onenote|outlook))/';
 
-    private const KNOWN = [
-        ['/(?<![a-z])onedrive/', 'OneDrive', 'Syncs OneDrive files'],
-        ['/(?<![a-z])dropbox/', 'Dropbox', 'Syncs Dropbox files'],
-        ['/(?<![a-z])spotify/', 'Spotify', 'Music app'],
-        ['/(?<![a-z])(?:ms)?teams(?![a-z])|microsoft\.?teams/', 'Teams', 'Chat and video meetings'],
-        ['/(?<![a-z])zoom(?![a-z])|zoomus/', 'Zoom', 'Video meetings'],
-        ['/(?<![a-z])slack(?![a-z])/', 'Slack', 'Chat app'],
-        ['/(?<![a-z])adobe/', 'Adobe', 'Adobe updater or helper'],
-        ['/(?<![a-z])(?:google|keystone)/', 'Google', 'Google updater or helper'],
-        ['/(?<![a-z])steam(?![a-z])|valvesoftware/', 'Steam', 'Game store'],
-        ['/(?<![a-z])icloud/', 'iCloud', 'Syncs iCloud files'],
-        ['/^(?:ea )?origin$|^com\.ea\.origin(?![a-z])/', 'EA Origin', "EA's game launcher, starts a helper at startup and can be switched off if the games are not used"],
-        ['/^loom$|^loom desktop$|^com\.loom(?![a-z])/', 'Loom', 'Screen recording app, can be switched off'],
-    ];
+    /**
+     * The program a Windows command starts, read the way Windows does: a quoted .exe path, or an
+     * unquoted one. A path may only hold spaces when it starts at a drive, %VAR% or network root,
+     * and then only between plain folder names, so "wscript steam.exe" or "cmd /c steam.exe" stay
+     * the launcher they are: an argument must never vouch for the entry.
+     */
+    private const PROGRAM = '/^(?|"((?:(?:[a-z]:|%\w+%|\\\\\\\\)[^"\/:]*|[^"\s\/:]*)\.exe)"|((?:(?:[a-z]:|%\w+%|\\\\\\\\)(?:[^"\s:\/.]+\s+(?![-\/]))*)?[^"\s:\/]*\.exe)(?=\s|$))/i';
 
     private const HASH_PART = '/^[0-9a-f]{32,}$/i';
 
@@ -95,6 +88,8 @@ final readonly class ReportStartup
     private const OVERLAP_NOTE = 'Login items, background items and launch agents overlap, so the same app can be counted in more than one row.';
 
     private const BACKGROUND_CAPPED_NOTE = 'The scan cut the background items list short, so there may be more than the count shows.';
+
+    public function __construct(private KnownStartupApps $apps = new KnownStartupApps) {}
 
     /**
      * @return Card|null
@@ -168,15 +163,15 @@ final readonly class ReportStartup
         }
 
         $count = (int) $match[1];
-        $names = $this->programs($text);
+        $entries = $this->programs($text);
         $measures = [['Startup programs', $count, self::WINDOWS_STARTUP_HIGH, null]];
 
         return [
             'rows' => $this->rows($measures),
-            'entries' => $this->entries($names, ''),
+            'entries' => $entries,
             'notes' => [
                 ...$this->highNote($measures, 'with Windows', 'Switch off what you do not need in Task Manager, on the Startup tab.'),
-                ...($names !== [] && count($names) < $count ? ['The scan named '.count($names).' of the '.number_format($count).' startup programs.'] : []),
+                ...($entries !== [] && count($entries) < $count ? ['The scan named '.count($entries).' of the '.number_format($count).' startup programs.'] : []),
             ],
         ];
     }
@@ -273,7 +268,7 @@ final readonly class ReportStartup
             $type = strtolower($record['type']);
 
             if ($type !== '' && ! str_starts_with($type, 'developer') && preg_match('/\bdisabled\b/i', $record['disposition']) !== 1) {
-                $items[$record['name'].'|'.$record['developer'].'|'.$type] = ['raw' => $record['name'] === '(null)' ? '' : $record['name'], 'developer' => $record['developer'], 'source' => self::BACKGROUND_ITEM];
+                $items[$record['name'].'|'.$record['developer'].'|'.$type] = ['raw' => $record['name'] === '(null)' ? '' : $record['name'], 'developer' => $record['developer'], 'source' => self::BACKGROUND_ITEM, 'program' => ''];
             }
         }
 
@@ -302,7 +297,7 @@ final readonly class ReportStartup
                 if ($source === self::SYSTEM_DAEMON) {
                     $daemons[] = $line;
                 } else {
-                    $agents[] = ['raw' => $line, 'developer' => '', 'source' => $source];
+                    $agents[] = ['raw' => $line, 'developer' => '', 'source' => $source, 'program' => ''];
                 }
             }
         }
@@ -331,12 +326,12 @@ final readonly class ReportStartup
     }
 
     /**
-     * @return list<string>
+     * @return list<Entry>
      */
     private function programs(string $text): array
     {
         $lines = preg_split('/\R/', $text) ?: [];
-        $names = [];
+        $entries = [];
         $starts = null;
 
         foreach ($lines as $line) {
@@ -351,13 +346,14 @@ final readonly class ReportStartup
             }
 
             $name = trim(mb_substr($line, $starts[0], $starts[1] - $starts[0]));
+            $command = trim(mb_substr($line, $starts[1]));
 
-            if ($name !== '' && trim(mb_substr($line, $starts[1])) !== '') {
-                $names[] = $name;
+            if ($name !== '' && $command !== '') {
+                $entries[] = ['raw' => $name, 'developer' => '', 'source' => '', 'program' => preg_match(self::PROGRAM, $command, $match) === 1 ? $match[1] : ''];
             }
         }
 
-        return $names;
+        return $entries;
     }
 
     /**
@@ -380,7 +376,7 @@ final readonly class ReportStartup
      */
     private function entries(array $names, string $source): array
     {
-        return array_map(fn (string $name): array => ['raw' => $name, 'developer' => '', 'source' => $source], $names);
+        return array_map(fn (string $name): array => ['raw' => $name, 'developer' => '', 'source' => $source, 'program' => ''], $names);
     }
 
     /**
@@ -447,20 +443,27 @@ final readonly class ReportStartup
 
         $key = mb_strtolower($base);
         $sources = $entry['source'] === '' ? [] : [$entry['source']];
-
-        foreach (self::KNOWN as [$pattern, $known, $description]) {
-            if (preg_match($pattern, $key) === 1) {
-                return ['name' => $known, 'description' => $description, 'rank' => self::RANK_KNOWN, 'sources' => $sources];
-            }
-        }
+        $known = $this->apps->find($key);
 
         return match (true) {
-            preg_match(self::SYSTEM, $key) === 1 => null,
             $entry['source'] === self::SYSTEM_DAEMON && in_array($key, self::APPLE_INSTALLER_DAEMONS, true) => ['name' => $name, 'description' => self::APPLE_INSTALLER, 'rank' => self::RANK_INSTALLER, 'sources' => $sources],
             str_starts_with($key, 'com.apple.') => ['name' => $name, 'description' => self::APPLE_STYLE, 'rank' => self::RANK_APPLE_STYLE, 'sources' => $sources],
+            $known !== null => [...$known, 'rank' => self::RANK_KNOWN, 'sources' => $sources],
+            preg_match(self::SYSTEM, $key) === 1 => null,
             $this->looksRandom($name) => ['name' => $name, 'description' => self::RANDOM, 'rank' => self::RANK_RANDOM, 'sources' => $sources],
-            default => ['name' => $name, 'description' => self::UNKNOWN, 'rank' => self::RANK_UNKNOWN, 'sources' => $sources],
+            default => $this->byProgram($entry['program'], $sources) ?? ['name' => $name, 'description' => self::UNKNOWN, 'rank' => self::RANK_UNKNOWN, 'sources' => $sources],
         };
+    }
+
+    /**
+     * @param  list<string>  $sources
+     * @return Ranked|null
+     */
+    private function byProgram(string $program, array $sources): ?array
+    {
+        $known = $program === '' ? null : $this->apps->find(mb_strtolower($this->base($program)));
+
+        return $known === null ? null : [...$known, 'rank' => self::RANK_KNOWN, 'sources' => $sources];
     }
 
     private function base(string $raw): string

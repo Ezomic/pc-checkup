@@ -74,7 +74,7 @@ describe('a Windows report from a Dutch PC whose account is Eigenaar', function 
         $cards = array_column(umcCards((new ReportRedactor)->redact(umcFixture('windows-checkup-eigenaar.md'))), null, 'id');
 
         expect(array_column($cards['startup']['list']['items'], 'label'))
-            ->toBe(['Discord', 'Docker Desktop', 'Battle.net', 'LGHUB', 'RtkAudUService', 'OneDrive'])
+            ->toBe(['Docker Desktop', 'OneDrive', 'Spotify', 'Discord', 'Battle.net', 'Logitech G HUB'])
             ->and(array_column($cards['crashing-apps']['rows'], 'label'))
             ->toBe(['Spotify.exe', 'Discord.exe', 'Battle.net.exe', 'explorer.exe']);
     });
