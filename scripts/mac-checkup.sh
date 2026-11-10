@@ -2316,7 +2316,7 @@ section() {
     echo "## $title"
     echo
     echo '```'
-    "$@" 2>&1 | sed 's/\r$//'
+    "$@" 2>&1 | LC_ALL=C tr -d '\r'
     echo '```'
   } >> "$BODY"
 }
