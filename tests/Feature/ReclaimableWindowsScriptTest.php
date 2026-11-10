@@ -128,6 +128,19 @@ try {
             $env:PCC_SPACE_CAP = $env:CASE_CAP
             Get-SpaceReport
         }
+        'apps' {
+            $a = "$base/apps"
+            foreach ($item in @(
+                @("$a/AppData/Local/Programs/Game/game.pak", 5000),
+                @("$a/Games/SteamApps/downloading/patch.bin", 5500),
+                @("$a/steamapps/common/Other/other.pak", 4500),
+                @("$a/Documents/steamapps notes/list.bin", 700),
+                @("$a/Videos/holiday.mp4", 1000)
+            )) { New-Sized $item[0] $item[1] }
+            foreach ($n in 1..12) { New-Sized "$a/SteamLibrary/steamapps/common/Game/data$n.pak" (4000 + $n) }
+            Set-Env $a
+            Get-SpaceReport
+        }
     }
 } finally {
     Remove-Item -Recurse -Force $base -ErrorAction SilentlyContinue
@@ -248,4 +261,15 @@ describe('the Windows space step on a tree with known files', function () {
         expect(preg_match('/[^\x00-\x7F]/', $script))->toBe(0)
             ->and($script)->toContain('$SpaceCapSeconds = 60')->toContain('$minKb = 51200');
     });
+});
+
+describe('the Windows biggest files leave apps and games out', function () {
+    it('skips per-user programs and Steam game libraries in any case, so other files fill the list', function () {
+        $files = array_values(array_filter(spwLines(spwRun('apps')), fn (string $line): bool => str_starts_with($line, 'file|')));
+
+        expect($files)->toBe([
+            'file|holiday.mp4|1000|Videos|Videos',
+            'file|list.bin|700|Other|steamapps notes',
+        ]);
+    })->skip(spwMissing(), 'PowerShell is not installed here');
 });
