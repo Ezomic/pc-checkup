@@ -10,11 +10,17 @@ use Illuminate\Support\Str;
 /**
  * @phpstan-type Row array{label: string, value: string, tone: 'good'|'bad'|'neutral'}
  * @phpstan-type PlainBar array{label: string, value: string, detail: string|null, share: int}
- * @phpstan-type Bar array{label: string, value: string, detail: string|null, share: int, inside?: array{title: string, items: list<PlainBar>}}
+ * @phpstan-type LeafBar array{label: string, value: string, detail: string|null, share: int, children?: list<PlainBar>}
+ * @phpstan-type TwigBar array{label: string, value: string, detail: string|null, share: int, children?: list<LeafBar>}
+ * @phpstan-type BranchBar array{label: string, value: string, detail: string|null, share: int, children?: list<TwigBar>}
+ * @phpstan-type Bar array{label: string, value: string, detail: string|null, share: int, inside?: array{title: string, items: list<PlainBar>}, children?: list<BranchBar>}
  * @phpstan-type Card array{id: string, title: string, rows: list<Row>, list: array{title: string, items: list<Row>}|null, summary?: string|null, bars?: list<array{title: string, items: list<Bar>}>, notes?: list<string>, group?: string, status?: 'attention'|'fine'|'neutral'}
  * @phpstan-type BarItem array{name: string, bytes: float, count: int|null, why?: string|null}
  *
  * @phpstan-import-type Breakdown from ReportStorage
+ * @phpstan-import-type TreeItem from ReportStorage
+ * @phpstan-import-type TreeBranch from ReportStorage
+ * @phpstan-import-type TreeTwig from ReportStorage
  */
 final readonly class ReportDetails
 {
@@ -29,6 +35,10 @@ final readonly class ReportDetails
     private const NAMED_SHARE = 20;
 
     private const HOME_TITLE = 'Biggest folders in your user folder';
+
+    private const TREE_OTHER = 'Other files and smaller folders';
+
+    private const TREE_OTHER_MINIMUM = 1024 ** 2;
 
     private const HOME_ON_DRIVE = 'Users (your folder)';
 
@@ -227,7 +237,7 @@ final readonly class ReportDetails
             ['Biggest folders on the drive', $drive, $used, 'used space', false],
             [self::HOME_TITLE, $read['homeFolders'], $used, 'used space', false],
             ['Your folders', $read['homeFolders'] === [] ? $mine : [], $used, 'used space', false],
-            ['Library and AppData', $read['library'], $used, 'used space', false],
+            ['Library and AppData', $read['homeTree'] === [] ? $read['library'] : [], $used, 'used space', false],
             ['Kinds of files in your user folder', $read['categories'], $counted, 'what was counted', true],
             ['Biggest file endings', $read['extensions'], $counted, 'what was counted', true],
         ];
@@ -236,7 +246,7 @@ final readonly class ReportDetails
         foreach ($groups as [$title, $items, $whole, $of, $withCount]) {
             if ($items !== []) {
                 $drawn = $this->bars($items, $whole, $of, $withCount, $title === 'Biggest file endings');
-                $bars[] = ['title' => $title, 'items' => $title === self::HOME_TITLE ? $this->withInside($drawn, $read) : $drawn];
+                $bars[] = ['title' => $title, 'items' => $title === self::HOME_TITLE ? $this->homeBars($drawn, $read, $used) : $drawn];
             }
         }
 
@@ -388,6 +398,81 @@ final readonly class ReportDetails
      * @param  Breakdown  $read
      * @return list<Bar>
      */
+    private function homeBars(array $drawn, array $read, float $used): array
+    {
+        if ($read['homeTree'] === []) {
+            return $this->withInside($drawn, $read);
+        }
+
+        return $this->treeBars($read['homeTree'], $read['home'] ?? $used, $read['home'] === null ? 'used space' : 'your user folder', $read['home'] !== null, $this->branchBars(...));
+    }
+
+    /**
+     * @param  TreeItem  $folder
+     * @return list<BranchBar>
+     */
+    private function branchBars(array $folder): array
+    {
+        return $this->treeBars($folder['children'], $folder['bytes'], $folder['name'], true, $this->twigBars(...));
+    }
+
+    /**
+     * @param  TreeBranch  $folder
+     * @return list<TwigBar>
+     */
+    private function twigBars(array $folder): array
+    {
+        return $this->treeBars($folder['children'], $folder['bytes'], $folder['name'], true, $this->leafBars(...));
+    }
+
+    /**
+     * @param  TreeTwig  $folder
+     * @return list<LeafBar>
+     */
+    private function leafBars(array $folder): array
+    {
+        return $this->treeBars($folder['children'], $folder['bytes'], $folder['name'], true, fn (): array => []);
+    }
+
+    /**
+     * One level of the folder tree, each folder as a share of its parent, ending with what the
+     * listed folders leave of the parent when that is worth a line.
+     *
+     * @template N of array{name: string, bytes: float}
+     * @template C
+     *
+     * @param  list<N>  $nodes
+     * @param  callable(N): list<C>  $grow
+     * @return list<array{label: string, value: string, detail: string|null, share: int, children?: list<C>}>
+     */
+    private function treeBars(array $nodes, float $whole, string $of, bool $withOther, callable $grow): array
+    {
+        if ($nodes === []) {
+            return [];
+        }
+
+        $items = array_map(fn (array $node): array => ['name' => $node['name'], 'bytes' => $node['bytes'], 'count' => null], $nodes);
+        $rest = $whole - array_sum(array_column($nodes, 'bytes'));
+
+        if ($withOther && $rest >= self::TREE_OTHER_MINIMUM) {
+            $items[] = ['name' => self::TREE_OTHER, 'bytes' => $rest, 'count' => null];
+        }
+
+        $bars = [];
+
+        foreach ($this->bars($items, $whole, $of, false, false, true) as $index => $bar) {
+            $children = isset($nodes[$index]) ? $grow($nodes[$index]) : [];
+            $bars[] = $children === [] ? $bar : [...$bar, 'children' => $children];
+        }
+
+        return $bars;
+    }
+
+    /**
+     * @param  list<PlainBar>  $drawn
+     * @param  Breakdown  $read
+     * @return list<Bar>
+     */
     private function withInside(array $drawn, array $read): array
     {
         $bars = [];
@@ -417,7 +502,7 @@ final readonly class ReportDetails
             ...($hasNotMeasured ? ['Not measured is used space that the folders above do not add up to, such as hidden system files, snapshots and anything the scan could not read.'] : []),
             ...($suggestSudo ? [self::SUDO_NOTE] : []),
             ...($both ? ['Applications in your user folder is a separate folder from the Applications folder on the drive.'] : []),
-            ...($named ? ['The names and sizes of the biggest folders in your user folder were recorded so this card can say what takes the space. Only you see them: they are not on the pages you share with clients.'] : []),
+            ...($named ? [($read['homeTree'] === [] ? 'The names and sizes of the biggest folders in your user folder were recorded' : 'The names and sizes of the biggest folders in your user folder, up to 4 levels deep, were recorded').' so this card can say what takes the space. Only you see them: they are not on the pages you share with clients.'] : []),
             ...($read['categories'] !== [] || $read['extensions'] !== [] ? ['Kinds of files count your own user folder only. '.($named ? 'For them only sizes and counts were recorded, never file names.' : 'Only sizes and counts were recorded, no file names.')] : []),
         ];
     }
@@ -426,14 +511,14 @@ final readonly class ReportDetails
      * @param  list<BarItem>  $items
      * @return list<PlainBar>
      */
-    private function bars(array $items, float $whole, string $of, bool $withCount, bool $endings): array
+    private function bars(array $items, float $whole, string $of, bool $withCount, bool $endings, bool $ofWhole = false): array
     {
-        $biggest = max(1.0, ...array_column($items, 'bytes'));
+        $scale = $ofWhole && $whole > 0 ? $whole : max(1.0, ...array_column($items, 'bytes'));
 
-        return array_map(function (array $item) use ($biggest, $whole, $of, $withCount, $endings): array {
+        return array_map(function (array $item) use ($scale, $whole, $of, $withCount, $endings): array {
             $percent = $whole > 0 && $item['bytes'] > 0 ? $this->percentText(min($item['bytes'] / $whole * 100, 100.0), $of) : null;
             $files = $withCount && $item['count'] !== null ? number_format($item['count']).' '.Str::plural('file', $item['count']) : null;
-            $share = $item['bytes'] > 0 ? max((int) round($item['bytes'] / $biggest * 100), self::MINIMUM_SHARE) : 0;
+            $share = $item['bytes'] > 0 ? min(max((int) round($item['bytes'] / $scale * 100), self::MINIMUM_SHARE), 100) : 0;
             $other = $withCount && ! $endings && $item['name'] === 'Other' ? 'mostly system and app files' : null;
 
             return [

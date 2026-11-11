@@ -9,9 +9,10 @@
 # The storage step measures folder sizes and groups the user folder by kind of file, for at most
 # 150 seconds, your user folder first and then the rest of the drive. To be quick it reads several
 # folders at a time with a small helper that PowerShell compiles in memory. It stores sizes and
-# counts, plus the names and sizes of the biggest folders in your user profile (8 folders, and 5
-# inside each of the 2 biggest), never a file name or a full path. It follows no junctions or links
-# and leaves other disks alone. If the time runs out the report says the numbers are partial.
+# counts, plus the names and sizes of the biggest folders in your user profile, up to 4 levels deep
+# (8 folders, and inside a folder of 1 GB or more its 6 biggest of 100 MB or more), never a file
+# name or a full path. It follows no junctions or links and leaves other disks alone. If the time
+# runs out the report says the numbers are partial.
 #
 # The space step looks, for at most 60 seconds, at a few fixed places where space can be got back:
 # the Recycle Bin, the Temp folders, downloaded Windows updates, installers in Downloads and
@@ -181,8 +182,8 @@ function Test-StorageEngine {
             private sealed class Frame
             {
                 public DirectoryInfo Folder;
-                public string One;
-                public string Two;
+                public string[] Keys;
+                public int Depth;
             }
 
             private sealed class Counts
@@ -191,9 +192,15 @@ function Test-StorageEngine {
                 public readonly long[] Bare = new long[2];
                 public readonly Dictionary<string, long[]> Kinds = new Dictionary<string, long[]>(StringComparer.Ordinal);
                 public readonly Dictionary<string, long[]> Extensions = new Dictionary<string, long[]>(StringComparer.Ordinal);
-                public readonly Dictionary<string, long> One = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
-                public readonly Dictionary<string, long> Two = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+                public readonly Dictionary<string, long>[] Levels = new Dictionary<string, long>[Deepest];
+
+                public Counts()
+                {
+                    for (int i = 0; i < Deepest; i++) Levels[i] = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+                }
             }
+
+            private const int Deepest = 4;
 
             private const FileAttributes CloudOnly = (FileAttributes)(0x400000 | 0x40000 | 0x1000);
             private readonly object gate = new object();
@@ -210,8 +217,11 @@ function Test-StorageEngine {
             public Dictionary<string, long[]> Extensions = new Dictionary<string, long[]>();
             public Dictionary<string, long> One = new Dictionary<string, long>();
             public Dictionary<string, long> Two = new Dictionary<string, long>();
+            public Dictionary<string, long> Three = new Dictionary<string, long>();
+            public Dictionary<string, long> Four = new Dictionary<string, long>();
 
-            public StorageWalk(string path, string[] skip, bool tally, string one, string two)
+            // names: the folders between the user profile and path, outermost first.
+            public StorageWalk(string path, string[] skip, bool tally, string[] names)
             {
                 this.skip = new HashSet<string>(skip, StringComparer.OrdinalIgnoreCase);
                 this.tally = tally;
@@ -220,9 +230,16 @@ function Test-StorageEngine {
                 {
                     Frame frame = new Frame();
                     frame.Folder = start;
-                    // PowerShell hands a $null string over as an empty one.
-                    if (!string.IsNullOrEmpty(one)) frame.One = one;
-                    if (!string.IsNullOrEmpty(two)) frame.Two = two;
+                    frame.Keys = new string[Deepest];
+                    if (names != null)
+                    {
+                        foreach (string name in names)
+                        {
+                            if (frame.Depth >= Deepest) break;
+                            frame.Keys[frame.Depth] = frame.Depth == 0 ? name : frame.Keys[frame.Depth - 1] + "\\" + name;
+                            frame.Depth++;
+                        }
+                    }
                     stack.Push(frame);
                 }
             }
@@ -274,8 +291,10 @@ function Test-StorageEngine {
                 Bare = total.Bare;
                 Kinds = total.Kinds;
                 Extensions = total.Extensions;
-                One = total.One;
-                Two = total.Two;
+                One = total.Levels[0];
+                Two = total.Levels[1];
+                Three = total.Levels[2];
+                Four = total.Levels[3];
                 return Done;
             }
 
@@ -327,9 +346,15 @@ function Test-StorageEngine {
                             if (skip.Count > 0) { if (skip.Contains(folder.FullName)) continue; }
                             Frame child = new Frame();
                             child.Folder = folder;
-                            child.One = frame.One;
-                            child.Two = frame.Two;
-                            if (tally) { if (frame.One == null) child.One = folder.Name; else if (frame.Two == null) child.Two = folder.Name; }
+                            child.Keys = frame.Keys;
+                            child.Depth = frame.Depth;
+                            if (tally & frame.Depth < Deepest)
+                            {
+                                child.Keys = new string[Deepest];
+                                Array.Copy(frame.Keys, child.Keys, frame.Depth);
+                                child.Keys[frame.Depth] = frame.Depth == 0 ? folder.Name : frame.Keys[frame.Depth - 1] + "\\" + folder.Name;
+                                child.Depth = frame.Depth + 1;
+                            }
                             found.Add(child);
                             continue;
                         }
@@ -345,10 +370,9 @@ function Test-StorageEngine {
                     {
                     }
                 }
-                if (tally & here > 0 & frame.One != null)
+                if (tally & here > 0)
                 {
-                    Add(counts.One, frame.One, here);
-                    if (frame.Two != null) Add(counts.Two, frame.One + "\\" + frame.Two, here);
+                    for (int i = 0; i < frame.Depth; i++) Add(counts.Levels[i], frame.Keys[i], here);
                 }
             }
 
@@ -389,8 +413,10 @@ function Test-StorageEngine {
                 into.Bare[1] += from.Bare[1];
                 foreach (KeyValuePair<string, long[]> item in from.Kinds) Add(into.Kinds, item.Key, item.Value[0], item.Value[1]);
                 foreach (KeyValuePair<string, long[]> item in from.Extensions) Add(into.Extensions, item.Key, item.Value[0], item.Value[1]);
-                foreach (KeyValuePair<string, long> item in from.One) Add(into.One, item.Key, item.Value);
-                foreach (KeyValuePair<string, long> item in from.Two) Add(into.Two, item.Key, item.Value);
+                for (int i = 0; i < Deepest; i++)
+                {
+                    foreach (KeyValuePair<string, long> item in from.Levels[i]) Add(into.Levels[i], item.Key, item.Value);
+                }
             }
 
             private static void Add(Dictionary<string, long[]> table, string key, long bytes, long count)
@@ -424,19 +450,17 @@ function Test-StorageEngine {
 
 # Starts a walk over a folder, for Measure-StorageWalk to run in one go or in parts. A walk never
 # enters a junction or symbolic link, nor a folder whose full path is in $Skip. With $Tally, a folder
-# inside the user profile also adds its bytes to the folder directly inside the profile (Tally.One)
-# and to the folder inside that one (Tally.Two, keyed "parent\child"); only those two names are kept.
+# inside the user profile also adds its bytes to each folder above it up to 4 levels inside the
+# profile: Tally.One for the folder directly inside the profile, Tally.Two for the one inside that
+# (keyed "parent\child"), then Tally.Three and Tally.Four. Only names up to that depth are kept.
 function Get-StorageWalk([string]$Path, $Skip, $Tally) {
     $separators = [char[]]@('\', '/')
-    $one = $null
-    $two = $null
+    $names = [string[]]@()
     if ($Tally) {
         $full = [System.IO.Path]::GetFullPath($Path).TrimEnd($separators)
         $inside = $Tally.Profile + [System.IO.Path]::DirectorySeparatorChar
         if ($full.StartsWith($inside, [System.StringComparison]::OrdinalIgnoreCase)) {
-            $names = $full.Substring($inside.Length).Split($separators, [System.StringSplitOptions]::RemoveEmptyEntries)
-            if ($names.Count -gt 0) { $one = $names[0] }
-            if ($names.Count -gt 1) { $two = $names[1] }
+            $names = [string[]]@($full.Substring($inside.Length).Split($separators, [System.StringSplitOptions]::RemoveEmptyEntries) | Select-Object -First 4)
         } elseif ($full -ine $Tally.Profile) {
             $Tally = $null
         }
@@ -445,13 +469,17 @@ function Get-StorageWalk([string]$Path, $Skip, $Tally) {
     if (Test-StorageEngine) {
         $list = [string[]]@()
         if ($null -ne $Skip) { $list = [string[]]@($Skip) }
-        $walk.Engine = New-Object Pcc.StorageWalk -ArgumentList $Path, $list, ([bool]$Tally), $one, $two
+        $walk.Engine = New-Object Pcc.StorageWalk -ArgumentList $Path, $list, ([bool]$Tally), $names
         $walk.Done = $walk.Engine.Done
         return $walk
     }
+    $keys = New-Object string[] 4
+    for ($i = 0; $i -lt $names.Count; $i++) {
+        if ($i -eq 0) { $keys[0] = $names[0] } else { $keys[$i] = $keys[$i - 1] + '\' + $names[$i] }
+    }
     $walk.Stack = New-Object 'System.Collections.Generic.Stack[object[]]'
     $start = New-Object System.IO.DirectoryInfo($Path)
-    if (-not ([int]$start.Attributes -band [int][System.IO.FileAttributes]::ReparsePoint)) { $walk.Stack.Push([object[]]@($start, $one, $two)) }
+    if (-not ([int]$start.Attributes -band [int][System.IO.FileAttributes]::ReparsePoint)) { $walk.Stack.Push([object[]]@($start, $keys, $names.Count)) }
     $walk.Done = $walk.Stack.Count -eq 0
     return $walk
 }
@@ -463,6 +491,8 @@ function Get-StorageWalk([string]$Path, $Skip, $Tally) {
 function Measure-StorageWalk($Walk, $Clock, [long]$StopAtMs, $Stats) {
     if ($Walk.Done -or $Clock.ElapsedMilliseconds -ge $StopAtMs) { return $Walk.Done }
     $Tally = $Walk.Tally
+    $levels = $null
+    if ($Tally) { $levels = @($Tally.One, $Tally.Two, $Tally.Three, $Tally.Four) }
     if ($Walk.Engine) {
         $groups = $null
         if ($Stats) { $groups = $Stats.Group }
@@ -489,8 +519,12 @@ function Measure-StorageWalk($Walk, $Clock, [long]$StopAtMs, $Stats) {
             $Stats.Bare[1] += $Walk.Engine.Bare[1]
         }
         if ($Tally) {
-            foreach ($item in $Walk.Engine.One.GetEnumerator()) { $Tally.One[$item.Key] = [long]$Tally.One[$item.Key] + $item.Value }
-            foreach ($item in $Walk.Engine.Two.GetEnumerator()) { $Tally.Two[$item.Key] = [long]$Tally.Two[$item.Key] + $item.Value }
+            $found = @($Walk.Engine.One, $Walk.Engine.Two, $Walk.Engine.Three, $Walk.Engine.Four)
+            for ($i = 0; $i -lt 4; $i++) {
+                $table = $levels[$i]
+                if ($null -eq $table) { continue }
+                foreach ($item in $found[$i].GetEnumerator()) { $table[$item.Key] = [long]$table[$item.Key] + $item.Value }
+            }
         }
         return $Walk.Done
     }
@@ -506,8 +540,8 @@ function Measure-StorageWalk($Walk, $Clock, [long]$StopAtMs, $Stats) {
         $first = $false
         $frame = $stack.Pop()
         $current = $frame[0]
-        $one = $frame[1]
-        $two = $frame[2]
+        $keys = $frame[1]
+        $depth = [int]$frame[2]
         $here = [long]0
         try { $entries = $current.GetFileSystemInfos() } catch { continue }
         foreach ($entry in $entries) {
@@ -515,12 +549,14 @@ function Measure-StorageWalk($Walk, $Clock, [long]$StopAtMs, $Stats) {
                 $attributes = [int]$entry.Attributes
                 if ($attributes -band $directory) {
                     if (($attributes -band $reparse) -or ($Skip -and $Skip.Contains($entry.FullName))) { continue }
-                    $childOne = $one
-                    $childTwo = $two
-                    if ($Tally) {
-                        if ($null -eq $one) { $childOne = $entry.Name } elseif ($null -eq $two) { $childTwo = $entry.Name }
+                    $childKeys = $keys
+                    $childDepth = $depth
+                    if ($Tally -and $depth -lt 4) {
+                        $childKeys = [string[]]$keys.Clone()
+                        if ($depth -eq 0) { $childKeys[0] = $entry.Name } else { $childKeys[$depth] = $keys[$depth - 1] + '\' + $entry.Name }
+                        $childDepth = $depth + 1
                     }
-                    $stack.Push([object[]]@($entry, $childOne, $childTwo))
+                    $stack.Push([object[]]@($entry, $childKeys, $childDepth))
                     continue
                 }
                 if ($attributes -band $cloudOnly) { continue }
@@ -557,11 +593,10 @@ function Measure-StorageWalk($Walk, $Clock, [long]$StopAtMs, $Stats) {
                 continue
             }
         }
-        if ($Tally -and $here -gt 0 -and $null -ne $one) {
-            $Tally.One[$one] = [long]$Tally.One[$one] + $here
-            if ($null -ne $two) {
-                $key = $one + '\' + $two
-                $Tally.Two[$key] = [long]$Tally.Two[$key] + $here
+        if ($Tally -and $here -gt 0) {
+            for ($i = 0; $i -lt $depth; $i++) {
+                $table = $levels[$i]
+                if ($null -ne $table) { $table[$keys[$i]] = [long]$table[$keys[$i]] + $here }
             }
         }
     }
@@ -593,8 +628,8 @@ function Get-StorageFolderLabel([string]$Name, [int]$Limit = 60) {
 }
 
 # The biggest names of a tally as label and KB: at most $Limit, biggest first, a label that is
-# already taken skipped (the bigger folder came first), folders under 1 KB left out.
-function Get-StorageBiggest($Sizes, [int]$Limit) {
+# already taken skipped (the bigger folder came first), folders under $MinKb left out.
+function Get-StorageBiggest($Sizes, [int]$Limit, [long]$MinKb = 1) {
     $picked = New-Object System.Collections.Generic.List[object]
     $seen = New-Object 'System.Collections.Generic.HashSet[string]'
     $ordered = @($Sizes.GetEnumerator() | Sort-Object @{ Expression = { $_.Value }; Descending = $true }, @{ Expression = { $_.Key }; Descending = $false })
@@ -602,14 +637,14 @@ function Get-StorageBiggest($Sizes, [int]$Limit) {
         if ($picked.Count -ge $Limit) { break }
         $kb = [long][math]::Round([long]$item.Value / 1024.0)
         $label = Get-StorageFolderLabel $item.Key
-        if ($kb -lt 1 -or $null -eq $label -or -not $seen.Add($label)) { continue }
+        if ($kb -lt $MinKb -or $null -eq $label -or -not $seen.Add($label)) { continue }
         $picked.Add([pscustomobject]@{ Raw = $item.Key; Label = $label; Kb = $kb })
     }
     return $picked.ToArray()
 }
 
 # home|Name|KB for the 8 biggest folders directly inside the user profile, then sub|Parent|Name|KB
-# for the 5 biggest inside each of the 2 biggest of those.
+# for the 5 biggest inside each of the 2 biggest of those, then the tree| lines.
 function Get-StorageHomeLines($Tally) {
     $lines = New-Object System.Collections.Generic.List[string]
     $top = @(Get-StorageBiggest $Tally.One 8)
@@ -621,7 +656,27 @@ function Get-StorageHomeLines($Tally) {
         }
         foreach ($child in @(Get-StorageBiggest $inside 5)) { $lines.Add("sub|$($folder.Label)|$($child.Label)|$($child.Kb)") }
     }
+    foreach ($line in @(Get-StorageTreeLines $Tally $top)) { $lines.Add($line) }
     return $lines.ToArray()
+}
+
+# tree|Path|KB for the folder tree of the user profile, each folder followed by what is inside it:
+# the $Nodes given, and inside one of 1 GB or more its 6 biggest folders of 100 MB or more, never
+# deeper than 4 levels. Path is the labels joined with slashes, which a label never contains.
+function Get-StorageTreeLines($Tally, $Nodes, [string]$Parent = '', [int]$Depth = 1) {
+    $levels = @($Tally.One, $Tally.Two, $Tally.Three, $Tally.Four)
+    foreach ($node in @($Nodes)) {
+        $path = $node.Label
+        if ($Parent -ne '') { $path = "$Parent/$($node.Label)" }
+        "tree|$path|$($node.Kb)"
+        if ($Depth -ge 4 -or $node.Kb -lt 1048576 -or $null -eq $levels[$Depth]) { continue }
+        $inside = @{}
+        foreach ($item in $levels[$Depth].GetEnumerator()) {
+            if ($item.Key.StartsWith($node.Raw + '\', [System.StringComparison]::OrdinalIgnoreCase)) { $inside[$item.Key.Substring($node.Raw.Length + 1)] = $item.Value }
+        }
+        $children = @(Get-StorageBiggest $inside 6 102400 | ForEach-Object { [pscustomobject]@{ Raw = $node.Raw + '\' + $_.Raw; Label = $_.Label; Kb = $_.Kb } })
+        if ($children.Count -gt 0) { Get-StorageTreeLines $Tally $children $path ($Depth + 1) }
+    }
 }
 
 # How much of the time left in a phase one bucket may use: its weight's share of the weight still to come.
@@ -678,7 +733,7 @@ function Get-StorageBreakdown {
     $profileFull = ''
     if (Test-Path -LiteralPath $profilePath -PathType Container) { $profileFull = [System.IO.Path]::GetFullPath($profilePath).TrimEnd($separators) }
     $tally = $null
-    if ($profileFull -ne '') { $tally = @{ Profile = $profileFull; One = @{}; Two = @{} } }
+    if ($profileFull -ne '') { $tally = @{ Profile = $profileFull; One = @{}; Two = @{}; Three = @{}; Four = @{} } }
 
     $appData = Join-Path $profilePath 'AppData'
     $local = Join-Path $appData 'Local'

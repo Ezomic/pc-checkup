@@ -5,8 +5,14 @@ declare(strict_types=1);
 namespace App\Services\Reports;
 
 /**
+ * PHPStan cannot express a recursive array shape, so the four levels a tree line may have are spelled out.
+ *
  * @phpstan-type Item array{name: string, bytes: float, count: int|null}
- * @phpstan-type Breakdown array{partial: bool, version: int, home: float|null, rootsTotal: float|null, folders: list<Item>, library: list<Item>, roots: list<Item>, missing: list<string>, homeFolders: list<Item>, homeInside: list<array{parent: string, items: list<Item>}>, categories: list<Item>, extensions: list<Item>}
+ * @phpstan-type TreeLeaf array{name: string, bytes: float, children: array{}}
+ * @phpstan-type TreeTwig array{name: string, bytes: float, children: list<TreeLeaf>}
+ * @phpstan-type TreeBranch array{name: string, bytes: float, children: list<TreeTwig>}
+ * @phpstan-type TreeItem array{name: string, bytes: float, children: list<TreeBranch>}
+ * @phpstan-type Breakdown array{partial: bool, version: int, home: float|null, rootsTotal: float|null, folders: list<Item>, library: list<Item>, roots: list<Item>, missing: list<string>, homeFolders: list<Item>, homeInside: list<array{parent: string, items: list<Item>}>, homeTree: list<TreeItem>, categories: list<Item>, extensions: list<Item>}
  */
 final readonly class ReportStorage
 {
@@ -27,6 +33,10 @@ final readonly class ReportStorage
     private const INSIDE_PARENTS = 2;
 
     private const INSIDE_LIMIT = 5;
+
+    private const TREE_DEPTH = 4;
+
+    private const TREE_CHILDREN = 6;
 
     private const MAX_BYTES = 1024 ** 5;
 
@@ -75,6 +85,7 @@ final readonly class ReportStorage
             'missing' => $this->missing($lines),
             'homeFolders' => $homeFolders,
             'homeInside' => $this->homeInside($lines, $homeFolders),
+            'homeTree' => $this->homeTree($lines),
             'categories' => $this->items($lines, 'type', 3, fn (string $name): ?string => $this->known($name, self::CATEGORIES), false),
             'extensions' => $this->extensions($lines),
         ];
@@ -331,6 +342,102 @@ final readonly class ReportStorage
         }
 
         return $inside;
+    }
+
+    /**
+     * @param  list<string>  $lines
+     * @return list<TreeItem>
+     */
+    private function homeTree(array $lines): array
+    {
+        $nodes = [];
+
+        foreach ($lines as $line) {
+            $parts = explode('|', trim($line));
+
+            if (count($parts) === 3 && $parts[0] === 'tree') {
+                $this->keepTreeNode($nodes, $parts[1], $parts[2]);
+            }
+        }
+
+        return $this->treeLevel($nodes, '', self::HOME_LIMIT, $this->treeBranches(...));
+    }
+
+    /**
+     * @param  array<string, array<string, Item>>  $nodes
+     * @return list<TreeBranch>
+     */
+    private function treeBranches(array $nodes, string $parent): array
+    {
+        return $this->treeLevel($nodes, $parent, self::TREE_CHILDREN, $this->treeTwigs(...));
+    }
+
+    /**
+     * @param  array<string, array<string, Item>>  $nodes
+     * @return list<TreeTwig>
+     */
+    private function treeTwigs(array $nodes, string $parent): array
+    {
+        return $this->treeLevel($nodes, $parent, self::TREE_CHILDREN, $this->treeLeaves(...));
+    }
+
+    /**
+     * @param  array<string, array<string, Item>>  $nodes
+     * @return list<TreeLeaf>
+     */
+    private function treeLeaves(array $nodes, string $parent): array
+    {
+        return $this->treeLevel($nodes, $parent, self::TREE_CHILDREN, fn (): array => []);
+    }
+
+    /**
+     * @param  array<string, array<string, Item>>  $nodes  the folders by the lowercased path of their parent
+     */
+    private function keepTreeNode(array &$nodes, string $path, string $size): void
+    {
+        $segments = explode('/', $path);
+        $label = array_pop($segments);
+
+        if (count($segments) >= self::TREE_DEPTH) {
+            return;
+        }
+
+        $parents = [];
+
+        foreach ($segments as $segment) {
+            $name = $this->homeName($segment);
+
+            if ($name === null) {
+                return;
+            }
+
+            $parents[] = mb_strtolower($name);
+        }
+
+        $parent = implode('/', $parents);
+        $nodes[$parent] ??= [];
+        $this->keepNamed($nodes[$parent], $label, $size);
+    }
+
+    /**
+     * @template T
+     *
+     * @param  array<string, array<string, Item>>  $nodes
+     * @param  callable(array<string, array<string, Item>>, string): T  $grow
+     * @return list<array{name: string, bytes: float, children: T}>
+     */
+    private function treeLevel(array $nodes, string $parent, int $limit, callable $grow): array
+    {
+        $items = array_values($nodes[$parent] ?? []);
+        usort($items, fn (array $a, array $b): int => $b['bytes'] <=> $a['bytes'] ?: strcmp($a['name'], $b['name']));
+        $level = [];
+
+        foreach (array_slice($items, 0, $limit) as $item) {
+            $path = ltrim($parent.'/'.mb_strtolower($item['name']), '/');
+            $level[] = ['name' => $item['name'], 'bytes' => $item['bytes'], 'children' => $grow($nodes, $path)];
+        }
+
+        return $level;
     }
 
     /**

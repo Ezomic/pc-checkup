@@ -14,6 +14,10 @@ const HFN_SECTION = "scan: complete\nseconds: 41\nlimit: 150\nformat: 2\nroot|Us
     ."home|Quarterly Taxes ACME|40894464\nhome|Password Vault|2097152\nhome|token-cache|1048576\n"
     ."sub|Quarterly Taxes ACME|Invoices 2025|31457280\nsub|Quarterly Taxes ACME|Scans|6291456\n";
 
+const HFN_TREE = "tree|Quarterly Taxes ACME|40894464\ntree|Quarterly Taxes ACME/Invoices 2025|31457280\n"
+    ."tree|Quarterly Taxes ACME/Invoices 2025/Client Henderson|20971520\ntree|Quarterly Taxes ACME/Invoices 2025/Client Henderson/Divorce Papers|10485760\n"
+    ."tree|Password Vault|2097152\n";
+
 function hfnMarkdown(string $section = HFN_SECTION): string
 {
     return macReportFixture()."\n## Storage breakdown\n\n```\n{$section}\n```\n";
@@ -55,6 +59,47 @@ describe('who sees the folder names', function () {
                 foreach (['Quarterly Taxes', 'Invoices 2025', 'Password Vault', 'token-cache', 'Storage breakdown', 'storage-breakdown', 'detailCards', 'home|', 'sub|'] as $hidden) {
                     expect($body)->not->toContain($hidden);
                 }
+            }
+        }
+    });
+
+    it('gives the owner the folder tree, four levels deep', function () {
+        $user = User::factory()->create();
+        $machine = Machine::factory()->for($user)->create(['device_type' => 'laptop']);
+        Report::factory()->for($machine)->create(['markdown' => hfnMarkdown(HFN_SECTION.HFN_TREE)]);
+
+        actingAs($user)->get("/machines/{$machine->id}")
+            ->assertOk()
+            ->assertInertia(function ($page): void {
+                $card = collect($page->toArray()['props']['detailCards'])->firstWhere('id', 'storage-breakdown');
+                $top = collect($card['bars'])->firstWhere('title', 'Biggest folders in your user folder')['items'][0];
+
+                expect($top['label'])->toBe('Quarterly Taxes ACME')
+                    ->and($top)->not->toHaveKey('inside')
+                    ->and($top['children'][0]['label'])->toBe('Invoices 2025')
+                    ->and($top['children'][0]['children'][0]['label'])->toBe('Client Henderson')
+                    ->and($top['children'][0]['children'][0]['children'][0]['label'])->toBe('Divorce Papers');
+            });
+    });
+
+    it('never gives the folder tree to a share page or the printable summary', function () {
+        $client = Client::factory()->withShareLink()->create();
+        $machine = Machine::factory()->for($client->user)->create(['client_id' => $client->id, 'device_type' => 'laptop']);
+        Report::factory()->for($machine)->create(['markdown' => hfnMarkdown(HFN_SECTION.HFN_TREE)]);
+        $bodies = [(string) actingAs($client->user)->get("/machines/{$machine->id}/summary")->assertOk()->getContent()];
+        auth()->logout();
+
+        foreach (["/c/{$client->share_token}", "/c/{$client->share_token}/machines/{$machine->id}"] as $path) {
+            $response = $this->get($path)->assertOk();
+            $response->assertInertia(function ($page) use (&$bodies): void {
+                $bodies[] = (string) json_encode($page->toArray()['props']);
+            });
+            $bodies[] = (string) $response->getContent();
+        }
+
+        foreach ($bodies as $body) {
+            foreach (['Client Henderson', 'Divorce Papers', 'Invoices 2025', 'Other files and smaller folders', 'tree|'] as $hidden) {
+                expect($body)->not->toContain($hidden);
             }
         }
     });
