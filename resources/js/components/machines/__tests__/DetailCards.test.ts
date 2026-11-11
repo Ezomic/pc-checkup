@@ -205,7 +205,10 @@ describe('DetailCards', () => {
                 .map((column) =>
                     column
                         .findAllComponents(DetailCardItem)
-                        .map((item) => (item.props('card') as DetailCard).id),
+                        .map(
+                            (item: { props: (key: 'card') => unknown }) =>
+                                (item.props('card') as DetailCard).id,
+                        ),
                 );
 
         expect(columns()).toEqual([
