@@ -10,6 +10,7 @@ use App\Models\Machine;
 use App\Services\Flags\FlagAdvice;
 use App\Services\Flags\FlagAdvisor;
 use App\Services\Reports\ReportFacts;
+use App\Services\Reports\ReportSections;
 
 /**
  * Builds what a client may see, field by field. Nothing here spreads a model or a
@@ -64,7 +65,7 @@ final readonly class SharedMachineView
         return [
             'scanned_at' => $report->created_at?->toJSON(),
             'facts' => $this->facts->from($report->markdown),
-            'advice' => array_map($this->advice(...), $this->advisor->adviseAll($report->flags)),
+            'advice' => array_map($this->advice(...), $this->advisor->adviseAll($report->flags, ReportSections::parse($report->markdown))),
             'fixed_count' => $this->fixedCount($machine),
         ];
     }

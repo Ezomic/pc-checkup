@@ -567,7 +567,7 @@ final readonly class ReportDetails
 
         $mac = preg_match('/^condition (.+?), max capacity (.+)$/i', $line[2], $parts) === 1;
         $condition = $mac ? $this->known($parts[1]) : null;
-        $capacity = $this->capture('/^(\d{1,3})%/', $mac ? $parts[2] : $line[2]);
+        $capacity = $this->capture('/^(\d{1,3})%/', $mac ? $parts[2] : $line[2]) ?? (new MacBatteryCapacity)->percent($sections->text('Battery raw (ioreg)'));
         $cycles = ctype_digit($line[1]) ? $line[1] : null;
 
         if ($cycles === null && $condition === null && $capacity === null && $deviceType !== 'laptop') {
@@ -577,7 +577,7 @@ final readonly class ReportDetails
         return $this->card('battery', 'Battery', [
             $this->row('Charge cycles', $cycles ?? 'Not reported'),
             $mac ? $this->conditionRow($condition) : null,
-            $this->row('Maximum capacity', $capacity === null ? 'Not reported' : "{$capacity}% of when it was new"),
+            $this->row('Maximum capacity', $capacity === null ? null : "{$capacity}% of when it was new"),
         ]);
     }
 

@@ -139,6 +139,77 @@ describe('the updates card', function () {
     });
 });
 
+describe('the updates card on a macOS that gets no more updates', function () {
+    function udOldMac(string $updates = "No new software available.\nSoftware Update Tool\n\nFinding available software", string $model = 'MacBook Air (MacBookAir7,2)', string $macos = '10.14.6 (18G9323)'): string
+    {
+        $markdown = str_replace(['- Model: MacBook Air (MacBookAir7,2)', '- macOS: 10.14.6 (18G9323)'], ["- Model: {$model}", "- macOS: {$macos}"], macReportFixture());
+
+        return $markdown.udSection('Software updates', $updates);
+    }
+
+    function udInstalled(string $markdown): array
+    {
+        return udRows(udCard($markdown, 'updates'))['Last update installed'];
+    }
+
+    it('says no more updates come out and that the newest macOS the Mac can run gets none either', function () {
+        expect(udInstalled(udOldMac()))->toBe([
+            'value' => '24 January 2022, 1744 days before the scan. No more updates come out for macOS 10.14 Mojave. The newest macOS this Mac can run, macOS 12 Monterey, no longer gets security updates either.',
+            'tone' => 'bad',
+        ]);
+    });
+
+    it('names the newest macOS the Mac can run when Apple still supports it', function () {
+        expect(udInstalled(udOldMac(model: 'MacBook Air (MacBookAir8,1)', macos: '12.7.6 (21H1320)')))->toBe([
+            'value' => '24 January 2022, 1744 days before the scan. No more updates come out for macOS 12 Monterey. The newest macOS this Mac can run is macOS 14 Sonoma.',
+            'tone' => 'bad',
+        ]);
+    });
+
+    it('says when the Mac already runs the newest macOS it can', function () {
+        expect(udInstalled(udOldMac(macos: '12.7.6 (21H1320)')))->toBe([
+            'value' => '24 January 2022, 1744 days before the scan. This Mac already runs the newest macOS it can, macOS 12 Monterey, and it no longer gets security updates.',
+            'tone' => 'bad',
+        ]);
+    });
+
+    it('keeps asking to install updates when some are waiting', function (string $updates) {
+        expect(udInstalled(udOldMac($updates))['value'])->toEndWith('Check for updates and install them.');
+    })->with([
+        'Mojave style list' => "Software Update Tool\n\nFinding available software\nSoftware Update found the following new or updated software:\n   * Security Update 2021-005-10.14.6\n\tSecurity Update 2021-005 (10.14.6), 1626783K [recommended] [restart]",
+        'label style list' => "Software Update Tool\n\nFinding available software\nSoftware Update found the following new or updated software:\n* Label: Safari15.6.1-15.6.1\n\tTitle: Safari, Version: 15.6.1, Size: 99000KiB, Recommended: YES,",
+    ]);
+
+    it('keeps today\'s wording when it cannot tell', function (string $markdown) {
+        expect(udInstalled($markdown)['value'])->toBe('24 January 2022, 1744 days before the scan. Check for updates and install them.');
+    })->with([
+        'no software updates section' => fn () => macReportFixture(),
+        'the check did not finish' => fn () => udOldMac("Software Update Tool\n\nFinding available software"),
+        'an unknown model' => fn () => udOldMac(model: 'MacBook Air (MacBookAir99,9)'),
+        'a model without identifier' => fn () => udOldMac(model: 'MacBook Air'),
+        'a macOS that still gets updates' => fn () => udOldMac(model: 'MacBook Air (MacBookAir9,1)', macos: '14.7.1 (23H222)'),
+        'a macOS newer than the model allows' => fn () => udOldMac(macos: '13.6.1 (22G313)'),
+    ]);
+
+    it('adds nothing to a recent update', function () {
+        $markdown = str_replace('2022-01-24 (1744 days ago)', '2026-10-20 (17 days ago)', udOldMac());
+
+        expect(udInstalled($markdown))->toBe(['value' => '20 October 2026, 17 days before the scan', 'tone' => 'good']);
+    });
+
+    it('reads an old report that has the version only in the macOS version section', function () {
+        $markdown = str_replace("- macOS: 10.14.6 (18G9323)\n", '', udOldMac());
+
+        expect(udInstalled($markdown)['value'])->toEndWith('No more updates come out for macOS 10.14 Mojave. The newest macOS this Mac can run, macOS 12 Monterey, no longer gets security updates either.');
+    });
+
+    it('leaves Windows alone even with a Software updates section', function () {
+        $markdown = udWindows('2026-08-01 (97 days ago)').udSection('Software updates', 'No new software available.');
+
+        expect(udInstalled($markdown)['value'])->toBe('1 August 2026, 97 days before the scan. Check for updates and install them.');
+    });
+});
+
 describe('the devices card', function () {
     it('lists each device with what its problem code means', function () {
         $card = udDevices("format: 1\nscan: complete\ntotal: 2\ndevice|Intel(R) Wireless Bluetooth(R)|43\ndevice|Unknown device|28");

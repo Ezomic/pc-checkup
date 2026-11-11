@@ -26,6 +26,7 @@ use App\Services\Reports\ReportFacts;
 use App\Services\Reports\ReportFreshness;
 use App\Services\Reports\ReportHealth;
 use App\Services\Reports\ReportScriptVersion;
+use App\Services\Reports\ReportSections;
 use App\Services\Reports\ReportTrends;
 use App\Services\Warranty\WarrantyLink;
 use Illuminate\Http\RedirectResponse;
@@ -140,7 +141,7 @@ final class MachineController extends Controller
                 'id' => $report->id,
                 'created_at' => $report->created_at,
                 'stale' => $freshness->isStale($report),
-                'advice' => array_map(fn (FlagAdvice $advice): array => $advice->toArray(), $advisor->adviseAll($report->flags)),
+                'advice' => array_map(fn (FlagAdvice $advice): array => $advice->toArray(), $advisor->adviseAll($report->flags, ReportSections::parse($report->markdown))),
                 'facts' => $facts->from($report->markdown),
                 'script' => $scriptVersion->for($report->markdown),
                 'problems' => $health->problems($report->markdown, $built['failed']),
