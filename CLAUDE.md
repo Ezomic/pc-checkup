@@ -21,8 +21,8 @@ The template runs in one of two modes, switched at runtime by `WORKFLOW_MODE` (`
   `config/` is intentionally excluded (declarative framework scaffolding). Fix the cause, never add
   baselines, `@phpstan-ignore`, or casts-to-silence.
 - **100% test coverage.** `composer test:coverage` runs `php artisan test --coverage --min=100`
-  (scoped to `app/` via `phpunit.xml`). New code ships with the tests that cover it. CI runs it with
-  xdebug. Herd bundles Xdebug but does not load it, and has no PCOV, so out of the box the command
+  (scoped to `app/` via `phpunit.xml`). New code ships with the tests that cover it. CI runs it in
+  parallel with PCOV (`composer ci:tests`). Herd bundles Xdebug but does not load it, and has no PCOV, so out of the box the command
   fails with "Code coverage driver not available" instead of a percentage. Locally we use PCOV.
   `pecl install pcov` will not work (Herd's PHP has no `phpize` or headers): build PCOV against
   Homebrew's `php@8.4` headers, which are ABI-compatible, then load it with a `pcov.ini` in Herd's
@@ -37,7 +37,11 @@ The template runs in one of two modes, switched at runtime by `WORKFLOW_MODE` (`
   Eloquent and the framework both extend them). If you need to vary behaviour, inject a
   collaborator rather than subclassing.
 - `composer ci:check` runs the JS gate (ESLint, Prettier, `vue-tsc`, Vitest), Pint, PHPStan and
-  Pest. CI additionally runs `composer test:coverage`.
+  Pest. CI runs two jobs side by side instead: `checks` (`composer ci:fast`, everything but Pest,
+  no coverage driver) and `ci` (`composer ci:tests`, Pest once with `--parallel --coverage --min=100`).
+  The suite must stay parallel safe: helpers shared between test files go in `tests/Pest.php` or
+  `tests/Support/helpers.php`, never in a test file, and a test never greps the whole machine for a
+  process another run could also have started.
 - **Vitest** (`npm run test:js`) covers composables and components. Specs live in
   `__tests__/` next to what they test and are named `*.test.ts`; `vitest.config.ts` runs jsdom
   everywhere so a component spec never has to remember an annotation. Note the 100% coverage gate

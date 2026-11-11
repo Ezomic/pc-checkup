@@ -89,6 +89,21 @@
             "@php artisan config:clear --ansi",
             "@php artisan test --coverage --min=100"
         ],
+        "ci:fast": [
+            "Composer\\Config::disableProcessTimeout",
+            "npm run lint:check",
+            "npm run format:check",
+            "npm run types:check",
+            "npm run test:js",
+            "@php artisan config:clear --ansi",
+            "@lint:check",
+            "@types:check"
+        ],
+        "ci:tests": [
+            "Composer\\Config::disableProcessTimeout",
+            "@php artisan config:clear --ansi",
+            "@php artisan test --parallel --coverage --min=100"
+        ],
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
             "@php artisan package:discover --ansi"
