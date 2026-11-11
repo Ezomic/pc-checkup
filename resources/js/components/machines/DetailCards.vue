@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import DetailCardItem from '@/components/machines/DetailCardItem.vue';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { firstTab, groupCards } from '@/lib/detailCards';
+import { firstTab, groupCards, twoColumns } from '@/lib/detailCards';
 import type { DetailCard } from '@/types';
 
 const props = defineProps<{
@@ -63,13 +63,22 @@ function needAttention(count: number): string {
                 <h2 class="mb-3 hidden text-lg font-semibold print:block">
                     {{ group.title }}
                 </h2>
-                <div class="gap-4 @2xl:columns-2">
-                    <DetailCardItem
-                        v-for="card in group.cards"
-                        :key="card.id"
-                        :card="card"
-                        class="mb-4 break-inside-avoid"
-                    />
+                <div
+                    class="flex flex-col gap-4 @2xl:grid @2xl:grid-cols-2 @2xl:items-start"
+                >
+                    <div
+                        v-for="(column, index) in twoColumns(group.cards)"
+                        :key="index"
+                        class="contents @2xl:flex @2xl:flex-col @2xl:gap-4"
+                        data-test="detail-column"
+                    >
+                        <DetailCardItem
+                            v-for="item in column"
+                            :key="item.card.id"
+                            :card="item.card"
+                            :style="{ order: item.order }"
+                        />
+                    </div>
                 </div>
             </TabsContent>
         </Tabs>

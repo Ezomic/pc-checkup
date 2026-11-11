@@ -2,7 +2,6 @@
 import { Head, Link } from '@inertiajs/vue3';
 import { ArrowLeftRight, FileText, History, Printer } from '@lucide/vue';
 import { computed } from 'vue';
-import AdviceList from '@/components/machines/AdviceList.vue';
 import AfterFixSection from '@/components/machines/AfterFixSection.vue';
 import BenchmarkSection from '@/components/machines/BenchmarkSection.vue';
 import ChangesSection from '@/components/machines/ChangesSection.vue';
@@ -215,14 +214,6 @@ defineOptions({
         </section>
 
         <ChangesSection v-if="changes" :changes="changes" />
-
-        <section
-            v-if="report && report.advice.length > 0"
-            class="flex flex-col gap-3"
-        >
-            <h2 class="text-lg font-semibold">What to do first</h2>
-            <AdviceList :advice="report.advice" />
-        </section>
 
         <DetailCards :cards="detailCards" />
 

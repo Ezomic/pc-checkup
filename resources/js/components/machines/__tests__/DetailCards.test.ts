@@ -180,7 +180,7 @@ describe('DetailCards', () => {
         wrapper.unmount();
     });
 
-    it('lets the tabs wrap on a narrow screen and lays the cards in columns that keep their height', () => {
+    it('lets the tabs wrap on a narrow screen and puts each card in a fixed column', () => {
         const wrapper = render(tabbed());
 
         expect(wrapper.get('[role="tablist"]').classes()).toContain(
@@ -188,10 +188,50 @@ describe('DetailCards', () => {
         );
         expect(
             wrapper.get('[data-test="detail-group"] > div').classes(),
-        ).toContain('@2xl:columns-2');
-        expect(wrapper.findComponent(DetailCardItem).classes()).toContain(
-            'break-inside-avoid',
+        ).toEqual(
+            expect.arrayContaining(['flex', '@2xl:grid', '@2xl:grid-cols-2']),
         );
+        wrapper.unmount();
+    });
+
+    it('keeps every card in its column when one opens, so the other column does not move', async () => {
+        const cards = [1, 2, 3, 4, 5].map((n) =>
+            card({ id: `c${n}`, title: `Card ${n}`, group: 'Hardware' }),
+        );
+        const wrapper = render(cards);
+        const columns = () =>
+            wrapper
+                .findAll('[data-test="detail-column"]')
+                .map((column) =>
+                    column
+                        .findAllComponents(DetailCardItem)
+                        .map((item) => (item.props('card') as DetailCard).id),
+                );
+
+        expect(columns()).toEqual([
+            ['c1', 'c3', 'c5'],
+            ['c2', 'c4'],
+        ]);
+        expect(
+            wrapper
+                .findAllComponents(DetailCardItem)
+                .map((item) => item.attributes('style')),
+        ).toEqual([
+            'order: 0;',
+            'order: 2;',
+            'order: 4;',
+            'order: 1;',
+            'order: 3;',
+        ]);
+
+        await wrapper
+            .get('[data-test="detail-column"] button')
+            .trigger('click');
+
+        expect(columns()).toEqual([
+            ['c1', 'c3', 'c5'],
+            ['c2', 'c4'],
+        ]);
         wrapper.unmount();
     });
 

@@ -6,6 +6,7 @@ import {
     splitBars,
     startsOpen,
     summaryLine,
+    twoColumns,
 } from '@/lib/detailCards';
 import type { DetailBarGroup, DetailCard } from '@/types';
 
@@ -217,5 +218,26 @@ describe('splitBars', () => {
     it('keeps nothing back for two lists or fewer', () => {
         expect(splitBars(bars(2)).more).toEqual([]);
         expect(splitBars([])).toEqual({ shown: [], more: [] });
+    });
+});
+
+describe('twoColumns', () => {
+    it('deals the cards left, right, left, keeping their place in the reading order', () => {
+        const cards = ['a', 'b', 'c'].map((id) => card({ id }));
+
+        expect(twoColumns(cards)).toEqual([
+            [
+                { card: cards[0], order: 0 },
+                { card: cards[2], order: 2 },
+            ],
+            [{ card: cards[1], order: 1 }],
+        ]);
+    });
+
+    it('leaves the right column empty for one card and both empty for none', () => {
+        const only = card();
+
+        expect(twoColumns([only])).toEqual([[{ card: only, order: 0 }], []]);
+        expect(twoColumns([])).toEqual([[], []]);
     });
 });
