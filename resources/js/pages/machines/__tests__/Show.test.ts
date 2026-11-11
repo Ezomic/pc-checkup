@@ -292,6 +292,27 @@ describe('machines/Show', () => {
         expect(ownerOnly.findComponent(ClientSection).exists()).toBe(true);
     });
 
+    it('shows the processor as a tile, with the cores and threads under it', () => {
+        const withCpu = report();
+        withCpu.facts.cpu =
+            'Intel(R) Core(TM) i7-14700K (20 cores, 28 threads)';
+        const tile = render(withCpu).get('[data-test="tile-processor"]');
+
+        expect(tile.text()).toContain('Processor');
+        expect(tile.get('[data-test="tile-value"]').text()).toBe(
+            'Intel Core i7-14700K',
+        );
+        expect(tile.get('[data-test="tile-detail"]').text()).toBe(
+            '20 cores, 28 threads',
+        );
+    });
+
+    it('has no processor tile when the report does not name one', () => {
+        expect(
+            render(report()).find('[data-test="tile-processor"]').exists(),
+        ).toBe(false);
+    });
+
     it('leaves the verdict and tiles outside the hidden block', () => {
         const wrapper = render(report());
         const ownerOnly = wrapper.get('[data-test="owner-only"]').element;

@@ -23,6 +23,7 @@ import UpgradeAdviceLine from '@/components/machines/UpgradeAdviceLine.vue';
 import WarrantySection from '@/components/machines/WarrantySection.vue';
 import WorthKeeping from '@/components/machines/WorthKeeping.vue';
 import { Button } from '@/components/ui/button';
+import { processor } from '@/lib/processor';
 import { checkedOn, scannedAgo } from '@/lib/scannedAgo';
 import { beforeAfter, history, index, summary } from '@/routes/machines';
 import type {
@@ -90,12 +91,24 @@ const tiles = computed(() => {
         return [];
     }
 
-    const { free_disk, memory } = props.report.facts;
+    const { free_disk, memory, cpu } = props.report.facts;
+    const chip = processor(cpu);
 
     return [
-        { label: 'Free space', value: free_disk },
-        { label: 'Memory', value: memory },
-        { label: 'To look at', value: String(props.report.advice.length) },
+        { id: 'free', label: 'Free space', value: free_disk, detail: null },
+        { id: 'memory', label: 'Memory', value: memory, detail: null },
+        {
+            id: 'processor',
+            label: 'Processor',
+            value: chip?.name ?? null,
+            detail: chip?.detail ?? null,
+        },
+        {
+            id: 'advice',
+            label: 'To look at',
+            value: String(props.report.advice.length),
+            detail: null,
+        },
     ].filter((tile) => tile.value !== null);
 });
 
@@ -193,18 +206,32 @@ defineOptions({
 
             <div
                 v-if="tiles.length > 0"
-                class="grid gap-3 sm:grid-cols-3"
+                class="grid grid-cols-2 gap-3 lg:grid-cols-4"
                 data-test="tiles"
             >
                 <div
                     v-for="tile in tiles"
-                    :key="tile.label"
-                    class="rounded-lg bg-muted p-4"
+                    :key="tile.id"
+                    class="min-w-0 rounded-lg bg-muted p-4"
+                    :data-test="`tile-${tile.id}`"
                 >
                     <p class="text-sm text-muted-foreground">
                         {{ tile.label }}
                     </p>
-                    <p class="text-2xl font-semibold">{{ tile.value }}</p>
+                    <p
+                        class="text-2xl font-semibold break-words"
+                        :class="tile.id === 'processor' ? 'text-lg' : ''"
+                        data-test="tile-value"
+                    >
+                        {{ tile.value }}
+                    </p>
+                    <p
+                        v-if="tile.detail"
+                        class="text-xs text-muted-foreground"
+                        data-test="tile-detail"
+                    >
+                        {{ tile.detail }}
+                    </p>
                 </div>
             </div>
 
