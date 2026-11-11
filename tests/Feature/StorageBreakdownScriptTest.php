@@ -334,7 +334,7 @@ describe('a Mac with a separate data volume (macOS 10.15 and later)', function (
 
     it('lists a firmlinked folder as not measured instead of trusting the empty one on the system volume', function () {
         $base = dataTree();
-        $result = runData($base, ['PCC_STORAGE_CAP' => '20'], slowDu('/data', '/Users').':/usr/bin:/bin');
+        $result = runData($base, ['PCC_STORAGE_CAP' => '10'], slowDu('/data', '/Users').':/usr/bin:/bin');
         $rows = storageRows($result->output());
         expect($result->output())->toContain('scan: partial')
             ->and(array_column($rows['root'], 0))->toContain('System')->toContain('Library')->not->toContain('Users')
@@ -369,7 +369,7 @@ describe('the time limit', function () {
 
     it('keeps what it measured before the time ran out and marks the scan partial', function () {
         $bin = fakeMacBin(['find' => 'exec sleep 120']);
-        $result = runStorage(storageTree(), ['PCC_STORAGE_CAP' => '12'], $bin.':/usr/bin:/bin');
+        $result = runStorage(storageTree(), ['PCC_STORAGE_CAP' => '6'], $bin.':/usr/bin:/bin');
         $rows = storageRows($result->output());
 
         expect($result->output())->toContain('scan: partial')
@@ -380,7 +380,7 @@ describe('the time limit', function () {
 
     it('lists the user folder as not measured when only that pass runs out of time', function () {
         $base = storageTree();
-        $result = runStorage($base, ['PCC_STORAGE_CAP' => '12'], slowHomeDu().':/usr/bin:/bin');
+        $result = runStorage($base, ['PCC_STORAGE_CAP' => '6'], slowHomeDu().':/usr/bin:/bin');
         $rows = storageRows($result->output());
 
         expect($result->output())->toContain('scan: partial')
@@ -628,11 +628,11 @@ describe('the biggest folders in the user folder (Mac)', function () {
     it('shows what it measured and stops at the limit when the user folder is slow', function () {
         $bin = fakeMacBin(['du' => 'case "$*" in *home*) exec sleep 120 ;; esac; exec /usr/bin/du "$@"', 'find' => 'exec sleep 120']);
         $start = microtime(true);
-        $result = runStorage(namedHomeTree(), ['PCC_STORAGE_CAP' => '12'], $bin.':/usr/bin:/bin');
+        $result = runStorage(namedHomeTree(), ['PCC_STORAGE_CAP' => '6'], $bin.':/usr/bin:/bin');
         $rows = storageRows($result->output());
 
-        expect(microtime(true) - $start)->toBeLessThan(12 + 20)
-            ->and($result->output())->toContain('scan: partial (time limit of 12 seconds reached)')
+        expect(microtime(true) - $start)->toBeLessThan(6 + 20)
+            ->and($result->output())->toContain('scan: partial (time limit of 6 seconds reached)')
             ->and(namedHome($rows))->toBe([])
             ->and($rows['root'])->not->toBe([])
             ->and(array_column($rows['missing'], 0))->toContain('home/Downloads');
