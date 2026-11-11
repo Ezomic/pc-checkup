@@ -142,6 +142,9 @@ return [
     'no_updates_installed' => [
         'headline' => 'No updates installed for :days days',
         'advice' => 'Install the available updates. They carry security fixes.',
+        'advice_no_more_updates' => 'No more updates come out for :running. The newest macOS this Mac can run is :newest.',
+        'advice_newest_unsupported' => 'No more updates come out for :running. The newest macOS this Mac can run, :newest, no longer gets security updates either.',
+        'advice_already_newest' => 'This Mac already runs the newest macOS it can, :running, and it no longer gets security updates.',
     ],
     'many_admins' => [
         'headline' => ':count accounts have administrator rights',

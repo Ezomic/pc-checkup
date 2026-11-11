@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Enums\FlagSeverity;
 use App\Services\Flags\FlagAdvisor;
+use App\Services\Reports\ReportSections;
 
 dataset('flags', [
     ["Disk 'Samsung SSD 990' health is 'Warning'.", FlagSeverity::High, 'A disk is reporting problems'],
@@ -152,3 +153,65 @@ it('translates every known flag into Dutch', function (string $flag, mixed $seve
         ->and($dutch->key)->toBe($en->key)
         ->and($dutch->severity)->toBe($en->severity);
 })->with('flags');
+
+describe('no updates on a macOS that gets no more updates', function () {
+    function faNoUpdates(): string
+    {
+        return 'No macOS update has been installed for 1751 days (newest: 2022-01-24).';
+    }
+
+    function faOldMac(string $macos = '10.14.6 (18G9323)', string $updates = "No new software available.\nSoftware Update Tool\n\nFinding available software", string $model = 'MacBook Air (MacBookAir7,2)'): ReportSections
+    {
+        return ReportSections::parse("# Mac checkup: Test-Mac\n\n- Model: {$model}\n- macOS: {$macos}\n\n## Software updates\n\n```\n{$updates}\n```\n");
+    }
+
+    it('says what is true instead of asking to install updates', function (string $locale, string $text) {
+        $advice = (new FlagAdvisor)->advise(faNoUpdates(), $locale, faOldMac());
+
+        expect($advice->advice)->toBe($text)
+            ->and($advice->headline)->toBe((new FlagAdvisor)->advise(faNoUpdates(), $locale)->headline)
+            ->and($advice->severity)->toBe(FlagSeverity::Medium);
+    })->with([
+        'English' => ['en', 'No more updates come out for macOS 10.14 Mojave. The newest macOS this Mac can run, macOS 12 Monterey, no longer gets security updates either.'],
+        'Dutch' => ['nl', 'Voor macOS 10.14 Mojave komen geen updates meer uit. De nieuwste macOS die op deze Mac kan draaien, macOS 12 Monterey, krijgt ook geen beveiligingsupdates meer.'],
+    ]);
+
+    it('names a newest macOS that Apple still supports', function (string $locale, string $text) {
+        expect((new FlagAdvisor)->advise(faNoUpdates(), $locale, faOldMac('12.7.6 (21H1320)', model: 'MacBook Air (MacBookAir8,1)'))->advice)->toBe($text);
+    })->with([
+        'English' => ['en', 'No more updates come out for macOS 12 Monterey. The newest macOS this Mac can run is macOS 14 Sonoma.'],
+        'Dutch' => ['nl', 'Voor macOS 12 Monterey komen geen updates meer uit. De nieuwste macOS die op deze Mac kan draaien, is macOS 14 Sonoma.'],
+    ]);
+
+    it('says when the Mac already runs the newest macOS it can', function (string $locale, string $text) {
+        expect((new FlagAdvisor)->advise(faNoUpdates(), $locale, faOldMac('12.7.6 (21H1320)'))->advice)->toBe($text);
+    })->with([
+        'English' => ['en', 'This Mac already runs the newest macOS it can, macOS 12 Monterey, and it no longer gets security updates.'],
+        'Dutch' => ['nl', 'Deze Mac heeft al de nieuwste macOS die erop kan draaien, macOS 12 Monterey, en krijgt geen beveiligingsupdates meer.'],
+    ]);
+
+    it('passes the report through when advising every flag', function () {
+        $advice = (new FlagAdvisor)->adviseAll(['macOS 10.14.6 is old and likely out of security support.', faNoUpdates()], faOldMac());
+
+        expect(array_column(array_map(fn ($a) => $a->toArray(), $advice), 'advice', 'raw')[faNoUpdates()])
+            ->toBe('No more updates come out for macOS 10.14 Mojave. The newest macOS this Mac can run, macOS 12 Monterey, no longer gets security updates either.');
+    });
+
+    it('keeps the usual advice when it cannot tell', function (?ReportSections $sections) {
+        expect((new FlagAdvisor)->advise(faNoUpdates(), 'en', $sections)->advice)->toBe('Install the available updates. They carry security fixes.');
+    })->with([
+        'no report' => null,
+        'updates waiting' => fn () => faOldMac(updates: "Software Update found the following new or updated software:\n   * Security Update 2021-005-10.14.6"),
+        'the check did not finish' => fn () => faOldMac(updates: 'Software Update Tool'),
+        'an unknown model' => fn () => faOldMac(model: 'MacBook Air (MacBookAir99,9)'),
+        'a macOS that still gets updates' => fn () => faOldMac('14.7.1 (23H222)', model: 'MacBook Air (MacBookAir9,1)'),
+        'a Windows report' => fn () => ReportSections::parse("# Windows checkup: PC\n\n- Windows: Windows 10 Pro 22H2\n"),
+    ]);
+
+    it('leaves every other flag and the key alone', function () {
+        $advisor = new FlagAdvisor;
+
+        expect($advisor->advise('FileVault is OFF.', 'en', faOldMac()))->toEqual($advisor->advise('FileVault is OFF.', 'en'))
+            ->and($advisor->advise(faNoUpdates(), 'en', faOldMac())->key)->toBe($advisor->advise(faNoUpdates(), 'en')->key);
+    });
+});

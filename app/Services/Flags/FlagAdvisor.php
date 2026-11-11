@@ -5,10 +5,14 @@ declare(strict_types=1);
 namespace App\Services\Flags;
 
 use App\Enums\FlagSeverity;
+use App\Services\Reports\MacUpdateOutlook;
+use App\Services\Reports\ReportSections;
 
 final class FlagAdvisor
 {
     public const UNSUPPORTED_OS = '/end of support|out of security support/';
+
+    private const NO_UPDATES = 'no_updates_installed';
 
     /**
      * The first matching rule wins. The third entry is the key of its texts in lang/{locale}/flags.php, the fourth names the pattern's capture groups as placeholders in those texts.
@@ -51,7 +55,7 @@ final class FlagAdvisor
         ['/^Automatic sign-in is on/', FlagSeverity::Medium, 'auto_signin', []],
         ['/^No backup was found/', FlagSeverity::Medium, 'no_backup', []],
         ['/^The last backup was (\d+) days ago/', FlagSeverity::Medium, 'old_backup', ['days']],
-        ['/^No (?:Windows|macOS) update has been installed for (\d+) days/', FlagSeverity::Medium, 'no_updates_installed', ['days']],
+        ['/^No (?:Windows|macOS) update has been installed for (\d+) days/', FlagSeverity::Medium, self::NO_UPDATES, ['days']],
         ['/^(\d+) accounts have administrator rights/', FlagSeverity::Low, 'many_admins', ['count']],
         ['/^The BIOS \(firmware\) is (\d+) years old/', FlagSeverity::Low, 'old_bios', ['years']],
         ['/tamper protection is off/', FlagSeverity::Low, 'tamper_protection', []],
@@ -63,7 +67,7 @@ final class FlagAdvisor
         ['/load average|thermally throttled|Low Power Mode|Background indexing/', FlagSeverity::Low, 'running_slow', []],
     ];
 
-    public function advise(string $flag, ?string $locale = null): FlagAdvice
+    public function advise(string $flag, ?string $locale = null, ?ReportSections $report = null): FlagAdvice
     {
         foreach (self::RULES as [$pattern, $severity, $key, $names]) {
             if (preg_match($pattern, $flag, $matches) === 1) {
@@ -73,7 +77,7 @@ final class FlagAdvisor
                 return new FlagAdvice(
                     $severity,
                     trans("flags.$key.headline", $values, $locale),
-                    trans("flags.$key.advice", [], $locale),
+                    $this->advice($key, $locale, $report),
                     $flag,
                     trans("flags.$key.headline", array_map($this->withoutNumbers(...), $values), 'en'),
                     $key,
@@ -82,6 +86,18 @@ final class FlagAdvisor
         }
 
         return new FlagAdvice(FlagSeverity::Low, rtrim($flag, '.'), null, $flag, $this->withoutNumbers(rtrim($flag, '.')));
+    }
+
+    private function advice(string $key, ?string $locale, ?ReportSections $report): string
+    {
+        $outlook = $key === self::NO_UPDATES && $report !== null ? (new MacUpdateOutlook)->read($report) : null;
+
+        return match (true) {
+            $outlook === null => trans("flags.$key.advice", [], $locale),
+            $outlook['newest'] === null => trans("flags.$key.advice_already_newest", ['running' => $outlook['running']], $locale),
+            ! $outlook['newestSupported'] => trans("flags.$key.advice_newest_unsupported", ['running' => $outlook['running'], 'newest' => $outlook['newest']], $locale),
+            default => trans("flags.$key.advice_no_more_updates", ['running' => $outlook['running'], 'newest' => $outlook['newest']], $locale),
+        };
     }
 
     private function withoutNumbers(string $text): string
@@ -93,9 +109,9 @@ final class FlagAdvisor
      * @param  list<string>  $flags
      * @return list<FlagAdvice>
      */
-    public function adviseAll(array $flags): array
+    public function adviseAll(array $flags, ?ReportSections $report = null): array
     {
-        $advice = array_map($this->advise(...), $flags);
+        $advice = array_map(fn (string $flag): FlagAdvice => $this->advise($flag, null, $report), $flags);
 
         usort($advice, fn (FlagAdvice $a, FlagAdvice $b): int => $a->severity->rank() <=> $b->severity->rank());
 
