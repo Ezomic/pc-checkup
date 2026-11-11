@@ -12,6 +12,7 @@ use Illuminate\Support\Str;
  * @phpstan-type PlainBar array{label: string, value: string, detail: string|null, share: int}
  * @phpstan-type Bar array{label: string, value: string, detail: string|null, share: int, inside?: array{title: string, items: list<PlainBar>}}
  * @phpstan-type Card array{id: string, title: string, rows: list<Row>, list: array{title: string, items: list<Row>}|null, summary?: string|null, bars?: list<array{title: string, items: list<Bar>}>, notes?: list<string>, group?: string, status?: 'attention'|'fine'|'neutral'}
+ * @phpstan-type BarItem array{name: string, bytes: float, count: int|null, why?: string|null}
  *
  * @phpstan-import-type Breakdown from ReportStorage
  */
@@ -30,6 +31,16 @@ final readonly class ReportDetails
     private const HOME_TITLE = 'Biggest folders in your user folder';
 
     private const HOME_ON_DRIVE = 'Users (your folder)';
+
+    private const NOT_MEASURED = 'Not measured';
+
+    private const MAC_VOLUMES = 'Space macOS keeps for itself';
+
+    private const MAC_VOLUMES_WHY = 'separate parts of the drive for swap, recovery and startup files';
+
+    private const PRIVATE_FOLDERS = ['Mail', 'Messages', 'Safari'];
+
+    private const SUDO_NOTE = 'Run the scan again with sudo to measure the system files too.';
 
     private const UNITS = ['B' => 1, 'K' => 1024, 'M' => 1024 ** 2, 'G' => 1024 ** 3, 'T' => 1024 ** 4, 'P' => 1024 ** 5];
 
@@ -205,10 +216,13 @@ final readonly class ReportDetails
         $used = $capacity === null ? 0.0 : max($capacity['size'] - $capacity['free'], 0.0);
         $counted = array_sum(array_column($read['categories'], 'bytes'));
         $home = $this->homeOutsideRoots($read);
-        $notMeasured = $this->notMeasured($read, $used, $home ?? 0.0);
+        $unwalked = $this->unwalked($read, $used, $home ?? 0.0, (new ReportMacVolumes)->bytes($sections->text('Disk usage')));
+        $admin = ReportParser::rights($sections->header('run as administrator'));
+        $why = ! $read['partial'] && $this->macCapacity($sections->text('Disk usage')) !== null ? $this->unreadReason($read, $admin) : null;
         $roots = $home === null ? $read['roots'] : $this->byBytes([...$read['roots'], ['name' => self::HOME_ON_DRIVE, 'bytes' => $home, 'count' => null]]);
-        $drive = $notMeasured === null ? $roots : [...$roots, ['name' => 'Not measured', 'bytes' => $notMeasured, 'count' => null]];
+        $drive = $this->drive($roots, $unwalked, $why);
         $mine = $read['home'] === null ? $read['folders'] : [['name' => 'Everything in your user folder', 'bytes' => $read['home'], 'count' => null], ...$read['folders']];
+        /** @var list<array{string, list<BarItem>, float, string, bool}> $groups */
         $groups = [
             ['Biggest folders on the drive', $drive, $used, 'used space', false],
             [self::HOME_TITLE, $read['homeFolders'], $used, 'used space', false],
@@ -229,26 +243,61 @@ final readonly class ReportDetails
         return [
             'id' => 'storage-breakdown',
             'title' => 'Storage breakdown',
-            'summary' => $this->summary($read, $roots, $used, $notMeasured),
+            'summary' => $this->summary($read, $roots, $used, $unwalked, $why !== null),
             'rows' => [],
             'list' => null,
             'bars' => $bars,
-            'notes' => $this->breakdownNotes($read, $notMeasured !== null),
+            'notes' => $this->breakdownNotes($read, $unwalked['rest'] !== null, $unwalked['rest'] !== null && $why !== null && $admin === false),
         ];
     }
 
     /**
+     * The used space the walk of the drive did not reach: the other macOS volumes in the startup
+     * container, and the rest. Neither is shown when it is zero or less.
+     *
      * @param  Breakdown  $read
+     * @return array{volumes: float|null, rest: float|null}
      */
-    private function notMeasured(array $read, float $used, float $home): ?float
+    private function unwalked(array $read, float $used, float $home, float $volumes): array
     {
         if ($read['version'] < 2 || $read['rootsTotal'] === null || $used <= 0) {
-            return null;
+            return ['volumes' => null, 'rest' => null];
         }
 
-        $rest = $used - $read['rootsTotal'] - $home;
+        $rest = $used - $read['rootsTotal'] - $home - $volumes;
 
-        return $rest > 0 ? $rest : null;
+        return ['volumes' => $volumes > 0 ? $volumes : null, 'rest' => $rest > 0 ? $rest : null];
+    }
+
+    /**
+     * @param  list<array{name: string, bytes: float, count: int|null}>  $roots
+     * @param  array{volumes: float|null, rest: float|null}  $unwalked
+     * @return list<BarItem>
+     */
+    private function drive(array $roots, array $unwalked, ?string $why): array
+    {
+        return [
+            ...$roots,
+            ...($unwalked['volumes'] === null ? [] : [['name' => self::MAC_VOLUMES, 'bytes' => $unwalked['volumes'], 'count' => null, 'why' => self::MAC_VOLUMES_WHY]]),
+            ...($unwalked['rest'] === null ? [] : [['name' => self::NOT_MEASURED, 'bytes' => $unwalked['rest'], 'count' => null, 'why' => $why]]),
+        ];
+    }
+
+    /**
+     * Why a complete Mac scan could not read the rest of the used space, for the rights it ran with.
+     *
+     * @param  Breakdown  $read
+     */
+    private function unreadReason(array $read, ?bool $admin): string
+    {
+        $names = array_values(array_filter(self::PRIVATE_FOLDERS, fn (string $name): bool => in_array("Library: {$name}", $read['missing'], true)));
+        $private = 'folders macOS keeps private'.($names === [] ? '' : ' ('.implode(', ', $names).')');
+
+        return match ($admin) {
+            false => "system files that need admin rights, and {$private}",
+            true => $private,
+            null => "files the scan could not open, such as system files and {$private}",
+        };
     }
 
     /**
@@ -282,8 +331,9 @@ final readonly class ReportDetails
     /**
      * @param  Breakdown  $read
      * @param  list<array{name: string, bytes: float, count: int|null}>  $roots
+     * @param  array{volumes: float|null, rest: float|null}  $unwalked
      */
-    private function summary(array $read, array $roots, float $used, ?float $notMeasured): ?string
+    private function summary(array $read, array $roots, float $used, array $unwalked, bool $unread): ?string
     {
         $top = array_slice($roots, 0, 3);
         $homeNamed = in_array(self::HOME_ON_DRIVE, array_column($top, 'name'), true);
@@ -302,8 +352,13 @@ final readonly class ReportDetails
             $sentence = trim("{$sentence} {$named}");
         }
 
-        if ($notMeasured !== null) {
-            $sentence = trim("{$sentence} ".ByteSize::format($notMeasured).' was not measured.');
+        $unreached = array_filter([
+            $unwalked['volumes'] === null ? null : 'about '.ByteSize::format($unwalked['volumes']).' is space macOS keeps for itself',
+            $unwalked['rest'] === null ? null : ByteSize::format($unwalked['rest']).($unread ? ' could not be read' : ' was not measured'),
+        ]);
+
+        if ($unreached !== []) {
+            $sentence = trim("{$sentence} ".ucfirst(implode(', and ', $unreached)).'.');
         }
 
         return $sentence;
@@ -350,7 +405,7 @@ final readonly class ReportDetails
      * @param  Breakdown  $read
      * @return list<string>
      */
-    private function breakdownNotes(array $read, bool $hasNotMeasured): array
+    private function breakdownNotes(array $read, bool $hasNotMeasured, bool $suggestSudo): array
     {
         $both = in_array('Applications (in your user folder)', array_column($read['folders'], 'name'), true) && in_array('Applications', array_column($read['roots'], 'name'), true);
         $named = $read['homeFolders'] !== [];
@@ -360,6 +415,7 @@ final readonly class ReportDetails
             ...($read['partial'] && $named ? ['The scan stopped at its time limit, so a big folder may be missing from the folders in your user folder.'] : []),
             ...($read['missing'] === [] ? [] : [($read['partial'] ? 'Not measured before the time ran out: ' : 'Could not be read: ').implode(', ', $read['missing']).'.']),
             ...($hasNotMeasured ? ['Not measured is used space that the folders above do not add up to, such as hidden system files, snapshots and anything the scan could not read.'] : []),
+            ...($suggestSudo ? [self::SUDO_NOTE] : []),
             ...($both ? ['Applications in your user folder is a separate folder from the Applications folder on the drive.'] : []),
             ...($named ? ['The names and sizes of the biggest folders in your user folder were recorded so this card can say what takes the space. Only you see them: they are not on the pages you share with clients.'] : []),
             ...($read['categories'] !== [] || $read['extensions'] !== [] ? ['Kinds of files count your own user folder only. '.($named ? 'For them only sizes and counts were recorded, never file names.' : 'Only sizes and counts were recorded, no file names.')] : []),
@@ -367,7 +423,7 @@ final readonly class ReportDetails
     }
 
     /**
-     * @param  list<array{name: string, bytes: float, count: int|null}>  $items
+     * @param  list<BarItem>  $items
      * @return list<PlainBar>
      */
     private function bars(array $items, float $whole, string $of, bool $withCount, bool $endings): array
@@ -383,7 +439,7 @@ final readonly class ReportDetails
             return [
                 'label' => ($endings && ctype_alnum($item['name']) ? '.' : '').$item['name'],
                 'value' => ByteSize::format($item['bytes']),
-                'detail' => implode(', ', array_filter([$files, $percent, $other])) ?: null,
+                'detail' => implode(': ', array_filter([implode(', ', array_filter([$files, $percent, $other])), $item['why'] ?? null])) ?: null,
                 'share' => $share,
             ];
         }, $items);
@@ -419,8 +475,8 @@ final readonly class ReportDetails
                 continue;
             }
 
-            $size = $this->bytes($match[1]);
-            $free = $this->bytes($match[3]);
+            $size = ByteSize::human($match[1]);
+            $free = ByteSize::human($match[3]);
 
             if ($size !== null && $free !== null) {
                 return ['size' => $size, 'free' => $free];
@@ -539,7 +595,7 @@ final readonly class ReportDetails
                 continue;
             }
 
-            $bytes = $this->bytes($match[1]);
+            $bytes = ByteSize::human($match[1]);
 
             if ($bytes !== null) {
                 $items[] = ['label' => $this->folderName($match[2]), 'value' => ByteSize::format($bytes), 'tone' => 'neutral'];
@@ -567,7 +623,7 @@ final readonly class ReportDetails
 
         $mac = preg_match('/^condition (.+?), max capacity (.+)$/i', $line[2], $parts) === 1;
         $condition = $mac ? $this->known($parts[1]) : null;
-        $capacity = $this->capture('/^(\d{1,3})%/', $mac ? $parts[2] : $line[2]);
+        $capacity = $this->capture('/^(\d{1,3})%/', $mac ? $parts[2] : $line[2]) ?? (new MacBatteryCapacity)->percent($sections->text('Battery raw (ioreg)'));
         $cycles = ctype_digit($line[1]) ? $line[1] : null;
 
         if ($cycles === null && $condition === null && $capacity === null && $deviceType !== 'laptop') {
@@ -577,7 +633,7 @@ final readonly class ReportDetails
         return $this->card('battery', 'Battery', [
             $this->row('Charge cycles', $cycles ?? 'Not reported'),
             $mac ? $this->conditionRow($condition) : null,
-            $this->row('Maximum capacity', $capacity === null ? 'Not reported' : "{$capacity}% of when it was new"),
+            $this->row('Maximum capacity', $capacity === null ? null : "{$capacity}% of when it was new"),
         ]);
     }
 
@@ -632,12 +688,5 @@ final readonly class ReportDetails
     private function capture(string $pattern, ?string $text): ?string
     {
         return $text !== null && preg_match($pattern, $text, $match) === 1 ? $match[1] : null;
-    }
-
-    private function bytes(string $token): ?float
-    {
-        $amount = preg_match('/^('.LocaleNumber::PATTERN.')([BKMGTP]?)i?B?$/', $token, $match) === 1 ? LocaleNumber::float($match[1]) : null;
-
-        return $amount === null ? null : $amount * self::UNITS[$match[2] === '' ? 'B' : $match[2]];
     }
 }

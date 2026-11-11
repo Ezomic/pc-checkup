@@ -29,7 +29,7 @@ final readonly class ReportUpdates
         $installed = $this->installed($sections);
         $restart = $this->restart($sections);
         $rows = array_values(array_filter([
-            $installed === null ? null : $this->installedRow($installed),
+            $installed === null ? null : $this->installedRow($installed, (new MacUpdateOutlook)->read($sections)),
             $restart === null ? null : $this->restartRow($restart, $this->renames($sections)),
         ]));
 
@@ -95,14 +95,28 @@ final readonly class ReportUpdates
 
     /**
      * @param  array{date: CarbonImmutable, days: int}  $installed
+     * @param  array{running: string, newest: string|null, newestSupported: bool}|null  $outlook
      * @return Row
      */
-    private function installedRow(array $installed): array
+    private function installedRow(array $installed, ?array $outlook): array
     {
         $stale = $this->stale($installed['days']);
         $when = $installed['date']->format('j F Y').", {$installed['days']} ".Str::plural('day', $installed['days']).' before the scan';
 
-        return ['label' => 'Last update installed', 'value' => $stale ? "{$when}. Check for updates and install them." : $when, 'tone' => $stale ? 'bad' : 'good'];
+        return ['label' => 'Last update installed', 'value' => $stale ? "{$when}. {$this->advice($outlook)}" : $when, 'tone' => $stale ? 'bad' : 'good'];
+    }
+
+    /**
+     * @param  array{running: string, newest: string|null, newestSupported: bool}|null  $outlook
+     */
+    private function advice(?array $outlook): string
+    {
+        return match (true) {
+            $outlook === null => 'Check for updates and install them.',
+            $outlook['newest'] === null => "This Mac already runs the newest macOS it can, {$outlook['running']}, and it no longer gets security updates.",
+            ! $outlook['newestSupported'] => "No more updates come out for {$outlook['running']}. The newest macOS this Mac can run, {$outlook['newest']}, no longer gets security updates either.",
+            default => "No more updates come out for {$outlook['running']}. The newest macOS this Mac can run is {$outlook['newest']}.",
+        };
     }
 
     /**
