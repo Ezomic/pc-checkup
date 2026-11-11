@@ -56,6 +56,21 @@ export function summaryLine(card: DetailCard): string {
     return first ? `${first.label}: ${first.value}` : '';
 }
 
+export type PlacedCard = { card: DetailCard; order: number };
+
+/**
+ * Fixed columns, so opening a card only pushes down the cards under it. The order is the place
+ * in the reading order, used to keep a single column on a narrow screen in the original order.
+ */
+export function twoColumns(cards: DetailCard[]): [PlacedCard[], PlacedCard[]] {
+    const placed = cards.map((card, order) => ({ card, order }));
+
+    return [
+        placed.filter((item) => item.order % 2 === 0),
+        placed.filter((item) => item.order % 2 === 1),
+    ];
+}
+
 export function splitBars(bars: DetailBarGroup[]): {
     shown: DetailBarGroup[];
     more: DetailBarGroup[];

@@ -292,7 +292,7 @@ describe('machines/Show', () => {
         expect(ownerOnly.findComponent(ClientSection).exists()).toBe(true);
     });
 
-    it('leaves the verdict, tiles and advice outside the hidden block', () => {
+    it('leaves the verdict and tiles outside the hidden block', () => {
         const wrapper = render(report());
         const ownerOnly = wrapper.get('[data-test="owner-only"]').element;
 
@@ -302,9 +302,16 @@ describe('machines/Show', () => {
         expect(
             ownerOnly.contains(wrapper.get('[data-test="tiles"]').element),
         ).toBe(false);
-        expect(
-            ownerOnly.contains(wrapper.getComponent(AdviceList).element),
-        ).toBe(false);
+    });
+
+    it('has no what to do first list, the cards in tabs show what needs attention', () => {
+        const wrapper = render(report());
+
+        expect(wrapper.findComponent(AdviceList).exists()).toBe(false);
+        expect(wrapper.text()).not.toContain('What to do first');
+        expect(wrapper.get('[data-test="verdict"]').text()).toBe(
+            report().advice[0].headline,
+        );
     });
 
     it('shows the worth keeping verdict right under the tiles, and nothing without one', () => {
