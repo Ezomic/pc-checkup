@@ -84,13 +84,13 @@ describe('the card for the biggest folders in the user folder', function () {
     });
 
     it('names the biggest folder in the summary when it is at least a fifth of the used space', function () {
-        expect(hcCard(HC_LINES)['summary'])->toBe('Most of the space is used by Users (50 GB). Your user folder uses 50 GB; the biggest part is Library (39 GB). 30 GB was not measured.');
+        expect(hcCard(HC_LINES)['summary'])->toBe('Most of the space is used by Users (50 GB). Your user folder uses 50 GB; the biggest part is Library (39 GB). 30 GB could not be read.');
     });
 
     it('does not name a folder that is under a fifth of the used space', function () {
         $card = hcCard("scan: complete\nformat: 2\nroot|Users|52428800\nroots_total|52428800\nhome|52428800\nhome|Library|16777215\nhome|Documents|100");
 
-        expect($card['summary'])->toBe('Most of the space is used by Users (50 GB). 30 GB was not measured.');
+        expect($card['summary'])->toBe('Most of the space is used by Users (50 GB). 30 GB could not be read.');
     });
 
     it('names a folder at exactly a fifth', function () {
