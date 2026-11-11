@@ -286,7 +286,7 @@ describe('the time limit of the space step', function () {
 
     it('keeps the places it measured when only the biggest files search runs out of time', function () {
         $bin = fakeMacBin(['find' => 'case " $* " in *" -size "*) exec sleep 120 ;; esac; exec /usr/bin/find "$@"']);
-        $result = spcRun(spcTree(), ['PCC_SPACE_CAP' => '12'], $bin.':/usr/bin:/bin');
+        $result = spcRun(spcTree(), ['PCC_SPACE_CAP' => '6'], $bin.':/usr/bin:/bin');
         $rows = spcRows($result->output());
 
         expect($result->output())->toContain('scan: partial')
@@ -296,7 +296,7 @@ describe('the time limit of the space step', function () {
 
     it('keeps the files it found when a place runs out of time', function () {
         $bin = fakeMacBin(['du' => 'for last; do :; done; case "$last" in *Caches) exec sleep 120 ;; esac; exec /usr/bin/du "$@"']);
-        $result = spcRun(spcTree(), ['PCC_SPACE_CAP' => '12'], $bin.':/usr/bin:/bin');
+        $result = spcRun(spcTree(), ['PCC_SPACE_CAP' => '6'], $bin.':/usr/bin:/bin');
         $rows = spcRows($result->output());
 
         expect($result->output())->toContain('scan: partial')

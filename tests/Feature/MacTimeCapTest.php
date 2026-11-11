@@ -45,6 +45,14 @@ function capSpace(string $base, string $path, int $cap): ProcessResult
 }
 
 /**
+ * A sleep whose command line no other test run on the machine shares, so pgrep finds only this one.
+ */
+function capOwnSleep(int $seconds): string
+{
+    return sprintf('sleep %d.%09d', $seconds, random_int(0, 999_999_999));
+}
+
+/**
  * A find that runs the stubborn du under it for every file, as find -exec du does, and waits for it.
  */
 function stuckFindDu(): string
@@ -109,14 +117,16 @@ describe('the capped runner', function () {
     });
 
     it('stops the command when it is told to stop, so Ctrl-C leaves nothing behind', function () {
-        $result = capRun('perl -e "$PCC_CAP_PL" 60 sleep 117 & runner=$!; sleep 1; kill -TERM $runner; wait $runner; echo "rc=$?"; sleep 0.5; pgrep -f "^[s]leep 117" > /dev/null && echo alive || echo gone', [], '/usr/bin:/bin');
+        $sleep = capOwnSleep(117);
+        $result = capRun('perl -e "$PCC_CAP_PL" 60 '.$sleep.' & runner=$!; sleep 1; kill -TERM $runner; wait $runner; echo "rc=$?"; sleep 0.5; pgrep -fx "'.$sleep.'" > /dev/null && echo alive || echo gone', [], '/usr/bin:/bin');
 
         expect($result->output())->toBe("rc=143\ngone\n");
     });
 
     it('returns the real exit code at once when the command ends but something it started keeps the pipes open', function () {
+        $sleep = capOwnSleep(116);
         $start = microtime(true);
-        $result = capRun('pcc_capped 8 sh -c "echo hi; sleep 116 & exit 0"; echo "rc=$?"; sleep 0.5; pgrep -f "^[s]leep 116" > /dev/null && echo alive || echo gone', [], '/usr/bin:/bin');
+        $result = capRun('pcc_capped 8 sh -c "echo hi; '.$sleep.' & exit 0"; echo "rc=$?"; sleep 0.5; pgrep -fx "'.$sleep.'" > /dev/null && echo alive || echo gone', [], '/usr/bin:/bin');
 
         expect(microtime(true) - $start)->toBeLessThan(5)->and($result->output())->toBe("hi\nrc=0\ngone\n");
     });
@@ -128,8 +138,9 @@ describe('the capped runner', function () {
     });
 
     it('ends by the signal on Ctrl-C so the scan aborts instead of going on', function () {
+        $sleep = capOwnSleep(114);
         $process = Process::path(base_path())->env(['PATH' => '/usr/bin:/bin'])
-            ->start(['setsid', 'bash', '-c', 'source scripts/mac-checkup.sh; echo ready; pcc_capped 60 sleep 114; echo continued']);
+            ->start(['setsid', 'bash', '-c', 'source scripts/mac-checkup.sh; echo ready; pcc_capped 60 '.$sleep.'; echo continued']);
         $deadline = microtime(true) + 10;
 
         while (! str_contains($process->output(), 'ready') && microtime(true) < $deadline) {
@@ -145,7 +156,7 @@ describe('the capped runner', function () {
         }
 
         expect($process->output())->not->toContain('continued')
-            ->and(Process::run(['bash', '-c', 'pgrep -f "^[s]leep 114" > /dev/null && echo alive || echo gone'])->output())->toBe("gone\n");
+            ->and(Process::run(['bash', '-c', 'pgrep -fx "'.$sleep.'" > /dev/null && echo alive || echo gone'])->output())->toBe("gone\n");
     });
 
     it('relays everything to a slow reader', function () {
@@ -156,9 +167,10 @@ describe('the capped runner', function () {
     });
 
     it('stops the command when the reader of its output goes away', function () {
-        $result = capRun('pcc_capped 60 yes | head -n 1; sleep 0.5; pgrep -x yes > /dev/null && echo alive || echo gone', [], '/usr/bin:/bin');
+        $word = 'pcc-'.bin2hex(random_bytes(6));
+        $result = capRun('pcc_capped 60 yes '.$word.' | head -n 1; sleep 0.5; pgrep -fx "yes '.$word.'" > /dev/null && echo alive || echo gone', [], '/usr/bin:/bin');
 
-        expect($result->output())->toBe("y\ngone\n");
+        expect($result->output())->toBe("{$word}\ngone\n");
     });
 
     it('is available to the sections that run in their own bash', function () {

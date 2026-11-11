@@ -17,6 +17,8 @@ use function Pest\Laravel\call;
 use function Pest\Laravel\get;
 use function Pest\Laravel\mock;
 
+require_once __DIR__.'/Support/helpers.php';
+
 /*
 |--------------------------------------------------------------------------
 | Test Case
