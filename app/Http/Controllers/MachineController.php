@@ -21,6 +21,7 @@ use App\Services\Flags\FlagAdvisor;
 use App\Services\NeedsAttention;
 use App\Services\Quote\EstimateContext;
 use App\Services\Quote\EuroAmount;
+use App\Services\Reports\DetailCardTabs;
 use App\Services\Reports\ReportDetails;
 use App\Services\Reports\ReportFacts;
 use App\Services\Reports\ReportFreshness;
@@ -126,13 +127,14 @@ final class MachineController extends Controller
         ]);
     }
 
-    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts, BuildReportInsights $insights, ReportFreshness $freshness, CompareLatestReports $changes, ReportDetails $details, ReportTrends $trends, ReportScriptVersion $scriptVersion, WarrantyLink $warranty, EstimateContext $estimate, BuildUpgradeAdvice $upgrade, ReportHealth $health): Response
+    public function show(Machine $machine, ChecklistResolver $resolver, FlagAdvisor $advisor, ReportFacts $facts, BuildReportInsights $insights, ReportFreshness $freshness, CompareLatestReports $changes, ReportDetails $details, ReportTrends $trends, ReportScriptVersion $scriptVersion, WarrantyLink $warranty, EstimateContext $estimate, BuildUpgradeAdvice $upgrade, ReportHealth $health, DetailCardTabs $tabs): Response
     {
         $this->authorize('view', $machine);
 
         $report = $machine->latestReport();
         $built = $report === null ? ['cards' => [], 'failed' => []] : $details->build($report->markdown, $report->flags, $machine->device_type);
         $cards = $built['cards'];
+        $tabbed = $tabs->arrange($cards, $report === null ? [] : $report->flags);
         $priceItems = array_values($machine->user?->priceItems()->get(['id', 'name', 'price_cents', 'unit'])->all() ?? []);
 
         return Inertia::render('machines/Show', [
@@ -148,7 +150,8 @@ final class MachineController extends Controller
                 'markdown' => $report->markdown,
             ],
             'changes' => $changes->handle($machine),
-            'detailCards' => $cards,
+            'detailCards' => $tabbed['cards'],
+            'verdictCard' => $tabbed['verdict'],
             'upgradeAdvice' => $upgrade->handle($report, $cards, $priceItems),
             'warranty' => $report === null ? null : $warranty->for($report->markdown),
             'estimate' => $estimate->from($cards),

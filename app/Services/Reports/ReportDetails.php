@@ -11,7 +11,7 @@ use Illuminate\Support\Str;
  * @phpstan-type Row array{label: string, value: string, tone: 'good'|'bad'|'neutral'}
  * @phpstan-type PlainBar array{label: string, value: string, detail: string|null, share: int}
  * @phpstan-type Bar array{label: string, value: string, detail: string|null, share: int, inside?: array{title: string, items: list<PlainBar>}}
- * @phpstan-type Card array{id: string, title: string, rows: list<Row>, list: array{title: string, items: list<Row>}|null, summary?: string|null, bars?: list<array{title: string, items: list<Bar>}>, notes?: list<string>}
+ * @phpstan-type Card array{id: string, title: string, rows: list<Row>, list: array{title: string, items: list<Row>}|null, summary?: string|null, bars?: list<array{title: string, items: list<Bar>}>, notes?: list<string>, group?: string, status?: 'attention'|'fine'|'neutral'}
  * @phpstan-type BarItem array{name: string, bytes: float, count: int|null, why?: string|null}
  *
  * @phpstan-import-type Breakdown from ReportStorage
@@ -226,7 +226,7 @@ final readonly class ReportDetails
         $groups = [
             ['Biggest folders on the drive', $drive, $used, 'used space', false],
             [self::HOME_TITLE, $read['homeFolders'], $used, 'used space', false],
-            ['Your folders', $mine, $used, 'used space', false],
+            ['Your folders', $read['homeFolders'] === [] ? $mine : [], $used, 'used space', false],
             ['Library and AppData', $read['library'], $used, 'used space', false],
             ['Kinds of files in your user folder', $read['categories'], $counted, 'what was counted', true],
             ['Biggest file endings', $read['extensions'], $counted, 'what was counted', true],

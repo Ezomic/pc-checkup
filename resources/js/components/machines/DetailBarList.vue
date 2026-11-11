@@ -35,9 +35,9 @@ defineProps<{
                 class="mt-3 ml-2 border-l border-border pl-3"
                 data-test="detail-inside"
             >
-                <h4 class="text-xs font-medium text-muted-foreground">
+                <h5 class="text-xs font-medium text-muted-foreground">
                     {{ item.inside.title }}
-                </h4>
+                </h5>
                 <DetailBarList class="mt-2" :items="item.inside.items" small />
             </div>
         </li>

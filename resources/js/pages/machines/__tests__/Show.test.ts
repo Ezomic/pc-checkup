@@ -10,6 +10,7 @@ import ScriptVersionNote from '@/components/machines/ScriptVersionNote.vue';
 import StaleNote from '@/components/machines/StaleNote.vue';
 import TrendsCard from '@/components/machines/TrendsCard.vue';
 import UpgradeAdviceLine from '@/components/machines/UpgradeAdviceLine.vue';
+import WorthKeeping from '@/components/machines/WorthKeeping.vue';
 import { Button } from '@/components/ui/button';
 import Show from '@/pages/machines/Show.vue';
 import type {
@@ -17,6 +18,7 @@ import type {
     ReportChanges,
     Trend,
     UpgradeAdvice,
+    VerdictCard,
 } from '@/types';
 
 vi.mock('@inertiajs/vue3', () => ({
@@ -57,6 +59,7 @@ function render(
     changes: ReportChanges | null = null,
     trends: Trend[] = [],
     upgradeAdvice: UpgradeAdvice | null = null,
+    verdictCard: VerdictCard | null = null,
 ) {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-11-02T12:00:00Z'));
@@ -78,6 +81,7 @@ function render(
             report: latest,
             changes,
             detailCards: [],
+            verdictCard,
             upgradeAdvice,
             warranty: null,
             estimate: null,
@@ -301,6 +305,30 @@ describe('machines/Show', () => {
         expect(
             ownerOnly.contains(wrapper.getComponent(AdviceList).element),
         ).toBe(false);
+    });
+
+    it('shows the worth keeping verdict right under the tiles, and nothing without one', () => {
+        const card: VerdictCard = {
+            id: 'verdict',
+            title: 'Worth keeping?',
+            rows: [{ label: 'Verdict', value: 'Keep', tone: 'good' }],
+            list: null,
+        };
+        const wrapper = render(report(), null, [], null, card);
+        const box = wrapper.getComponent(WorthKeeping);
+
+        expect(box.props('card')).toEqual(card);
+        expect(
+            wrapper.get('[data-test="tiles"]').element.nextElementSibling,
+        ).toBe(box.element);
+        expect(
+            wrapper
+                .get('[data-test="owner-only"]')
+                .element.contains(box.element),
+        ).toBe(false);
+        expect(render(report()).findComponent(WorthKeeping).exists()).toBe(
+            false,
+        );
     });
 
     it('prints the detail cards, outside the hidden owner-only block', () => {

@@ -72,6 +72,58 @@ final readonly class FlagChecks
     ];
 
     /**
+     * Per FlagAdvisor rule, the id of the machine page card the flag belongs to, so that card asks for attention.
+     *
+     * @var array<string, string>
+     */
+    public const array CARDS = [
+        'disk_problem' => 'storage',
+        'disk_errors' => 'storage',
+        'ssd_wear' => 'storage',
+        'drive_full' => 'storage',
+        'disk_full' => 'storage',
+        'unexpected_shutdowns' => 'stability',
+        'kernel_panics' => 'stability',
+        'not_restarted' => 'stability',
+        'no_antivirus' => 'security',
+        'sip_disabled' => 'security',
+        'gatekeeper_disabled' => 'security',
+        'smbv1' => 'security',
+        'rdp' => 'security',
+        'no_password_accounts' => 'security',
+        'encryption_off' => 'security',
+        'secure_boot' => 'security',
+        'no_tpm' => 'security',
+        'tpm_not_ready' => 'security',
+        'firewall_off' => 'security',
+        'defender_old' => 'security',
+        'tamper_protection' => 'security',
+        'activation_lock' => 'security',
+        'remote_login' => 'security',
+        'screen_sharing' => 'security',
+        'auto_signin' => 'security',
+        'many_admins' => 'security',
+        'managed' => 'security',
+        'windows_not_activated' => 'activation-bitlocker',
+        'windows_updates_pending' => 'updates',
+        'software_updates_pending' => 'updates',
+        'no_updates_installed' => 'updates',
+        'restart_pending' => 'updates',
+        'old_bios' => 'updates',
+        'remote_agents' => 'remote-access',
+        'no_backup' => 'backups',
+        'old_backup' => 'backups',
+        'low_ram' => 'slowness',
+        'short_memory' => 'slowness',
+        'spinning_drive' => 'slowness',
+        'running_slow' => 'slowness',
+        'startup_programs' => 'startup',
+        'driver_problems' => 'device-problems',
+        'battery_worn' => 'battery',
+        'unsupported_os' => 'age',
+    ];
+
+    /**
      * Whether only the report that raised a flag shows its check, so the other scan could not have raised it.
      * A flag no rule matched, or a pair where neither report shows the check (an older layout), gives false.
      */

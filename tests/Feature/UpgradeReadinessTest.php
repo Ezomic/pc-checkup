@@ -117,7 +117,7 @@ describe('Newest macOS on the Age and support card', function () {
     {
         $markdown = preg_replace(['/^- Model: .*$/m', '/^- macOS: .*$/m'], ["- Model: {$model}", "- macOS: {$macos}"], macReportFixture());
 
-        return upgradeOwnerCards((string) $markdown)[0]['rows'];
+        return cardById(upgradeOwnerCards((string) $markdown), 'age')['rows'];
     }
 
     it('names the newest macOS and offers the update when the Mac runs an older one', function () {

@@ -74,6 +74,8 @@ export type DetailBarGroup = {
     items: DetailBar[];
 };
 
+export type DetailStatus = 'attention' | 'fine' | 'neutral';
+
 export type DetailCard = {
     id: string;
     title: string;
@@ -82,7 +84,11 @@ export type DetailCard = {
     summary?: string | null;
     bars?: DetailBarGroup[];
     notes?: string[];
+    group: string;
+    status: DetailStatus;
 };
+
+export type VerdictCard = Omit<DetailCard, 'group' | 'status'>;
 
 export type MachineDetails = Pick<
     Machine,

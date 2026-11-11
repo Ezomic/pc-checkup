@@ -46,13 +46,29 @@ function hcGroup(array $card, string $title): ?array
 }
 
 describe('the card for the biggest folders in the user folder', function () {
-    it('puts the group after the drive and before the well-known folders', function () {
+    it('puts the group right after the drive', function () {
         expect(array_column(hcCard(HC_LINES)['bars'], 'title'))->toBe([
             'Biggest folders on the drive',
             'Biggest folders in your user folder',
-            'Your folders',
             'Kinds of files in your user folder',
         ]);
+    });
+
+    it('no longer repeats the user folder as a list of your folders', function () {
+        $lines = HC_LINES."folder|Downloads|1048576\nfolder|Library|40894464\nlibrary|Caches|6291456\n";
+
+        expect(array_column(hcCard($lines)['bars'], 'title'))->toBe([
+            'Biggest folders on the drive',
+            'Biggest folders in your user folder',
+            'Library and AppData',
+            'Kinds of files in your user folder',
+        ]);
+    });
+
+    it('keeps the list of your folders when the scan named no folders in the user folder', function () {
+        $lines = "scan: partial\nformat: 2\nroot|Users|52428800\nroots_total|52428800\nhome|52428800\nfolder|Downloads|1048576\n";
+
+        expect(array_column(hcCard($lines)['bars'], 'title'))->toBe(['Biggest folders on the drive', 'Your folders']);
     });
 
     it('draws a bar per folder with its size and share of the used space', function () {
