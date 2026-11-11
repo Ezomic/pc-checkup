@@ -330,3 +330,61 @@ describe('what the space step may not do', function () {
             ->and(str_replace('rm -f "$rc_file"', '', $match[0]))->not->toMatch('/\b(rm|mv|cp|curl|tmutil (delete|thinlocalsnapshots)|chmod|touch|tee)\b/');
     });
 });
+
+function spcGameHome(string $home): void
+{
+    foreach (range(1, 12) as $i) {
+        spcFile($home.sprintf('/Applications/Game Packs/EP%02d/ClientFullBuild0.package', $i), 2000 + $i);
+    }
+
+    spcFile($home.'/Movies/holiday.mov', 1000);
+}
+
+describe('the biggest files leave apps and their files out', function () {
+    it('skips game files under Applications and files inside an app anywhere, so other files fill the list', function () {
+        $base = ScriptTemp::dir('pcc-script-space');
+        spcGameHome($base.'/home');
+        spcFile($base.'/home/Downloads/Something.app/Contents/Resources/game.data', 4000);
+        spcFile($base."/home/Documents/Sp\u{eb}l.app/Contents/MacOS/sp\u{eb}l", 3000);
+        $files = spcRows(spcRun($base)->output())['file'] ?? [];
+
+        expect($files)->toHaveCount(1)
+            ->and(array_slice($files[0], 0, 1))->toBe(['holiday.mov'])
+            ->and(array_slice($files[0], 2))->toBe(['Videos', 'Movies'])
+            ->and(spcNear((int) $files[0][1], 1000))->toBeTrue();
+    });
+
+    it('only skips the Applications folder directly inside the user folder', function () {
+        $base = ScriptTemp::dir('pcc-script-space');
+        spcGameHome($base.'/home');
+        spcFile($base.'/home/Documents/Applications/notes.bin', 700);
+        spcFile($base.'/home/Applications Old/setup.bin', 600);
+
+        expect(array_column(spcRows(spcRun($base)->output())['file'] ?? [], 0))->toBe(['holiday.mov', 'notes.bin', 'setup.bin']);
+    });
+
+    it('skips the Applications folder whatever its case, as a Mac disk ignores case', function () {
+        $base = ScriptTemp::dir('pcc-script-space');
+        spcFile($base.'/home/applications/Game Packs/EP01/ClientFullBuild0.package', 5000);
+        spcFile($base.'/home/APPLICATIONS/Other Game/data.bin', 4000);
+        spcFile($base.'/home/Movies/holiday.mov', 1000);
+
+        expect(array_column(spcRows(spcRun($base)->output())['file'] ?? [], 0))->toBe(['holiday.mov']);
+    });
+
+    it('does not read a glob in the home folder name as a pattern, so Applications stays out', function () {
+        $base = ScriptTemp::dir('pcc-script-space');
+        spcGameHome($base.'/ho[m]e*');
+
+        expect(array_column(spcRows(spcRun($base, ['PCC_SPACE_HOME' => $base.'/ho[m]e*'])->output())['file'] ?? [], 0))->toBe(['holiday.mov']);
+    });
+
+    it('does not follow an Applications folder that is a link', function () {
+        $base = ScriptTemp::dir('pcc-script-space');
+        spcFile($base.'/outside/Game Packs/EP01/ClientFullBuild0.package', 5000);
+        spcFile($base.'/home/Movies/holiday.mov', 1000);
+        symlink($base.'/outside', $base.'/home/Applications');
+
+        expect(array_column(spcRows(spcRun($base)->output())['file'] ?? [], 0))->toBe(['holiday.mov']);
+    });
+});

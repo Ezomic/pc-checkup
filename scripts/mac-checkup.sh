@@ -18,7 +18,8 @@
 # the Trash, user caches, installers and disk images in Downloads, old iPhone and iPad backups
 # (size and count, never a device name), the number of Time Machine snapshots, and Xcode build
 # folders if they exist. It also notes the 10 biggest files of 50 MB or more in your user folder
-# (file name, size and the name of the folder above it, never a full path). It deletes nothing.
+# (file name, size and the name of the folder above it, never a full path), leaving out apps and
+# everything in ~/Applications, because deleting part of an app breaks it. It deletes nothing.
 #
 # The apps step looks, for at most 45 seconds, at the apps in /Applications and ~/Applications that
 # Spotlight says were not opened for 12 months or more. It stores the name, the size and the date of
@@ -1614,18 +1615,18 @@ EOF
 }
 
 # The biggest single files under the user folder as file|name|KB|kind|folder: at most 10, each of at
-# least $3 KB. Hidden items, Library, app and library packages, links and other disks are not
-# entered, and a cloud-only file has no size on disk, so it drops out. The name
+# least $3 KB. Hidden items, Library, Applications, app and library packages, links and other disks
+# are not entered, and a cloud-only file has no size on disk, so it drops out. The name
 # and the folder directly above it are cleaned (control characters, pipes and slashes removed,
 # 80 and 60 characters at most), and a full path is never printed.
 pcc_space_files() {
-  local home=$1 stop=$2 min_kb=$3 rc_file=$4 left library
+  local home=$1 stop=$2 min_kb=$3 rc_file=$4 left escaped
   [ -d "$home" ] || return 0
   left=$((stop - SECONDS))
   if [ "$left" -le 0 ]; then echo 142 >> "$rc_file"; return 0; fi
-  library=$(printf '%s' "$home/Library" | sed -e 's/[][*?\\]/\\&/g')
+  escaped=$(printf '%s' "$home" | sed -e 's/[][*?\\]/\\&/g')
   {
-    pcc_capped "$left" find "$home" -mindepth 1 -xdev \( -path "$library" -o -name '.*' -o \( -type d \( -name '*.app' -o -name '*.framework' -o -name '*.bundle' -o -name '*.plugin' -o -name '*.kext' -o -name '*.xpc' -o -name '*.appex' -o -name '*.photoslibrary' -o -name '*.musiclibrary' -o -name '*.tvlibrary' -o -name '*.imovielibrary' -o -name '*.fcpbundle' -o -name '*.sparsebundle' \) \) \) -prune -o -type f -size +"${min_kb}k" -exec du -x -k {} + 2>/dev/null
+    pcc_capped "$left" find "$home" -mindepth 1 -xdev \( -path "$escaped/Library" -o -ipath "$escaped/Applications" -o -name '.*' -o \( -type d \( -name '*.app' -o -name '*.framework' -o -name '*.bundle' -o -name '*.plugin' -o -name '*.kext' -o -name '*.xpc' -o -name '*.appex' -o -name '*.photoslibrary' -o -name '*.musiclibrary' -o -name '*.tvlibrary' -o -name '*.imovielibrary' -o -name '*.fcpbundle' -o -name '*.sparsebundle' \) \) \) -prune -o -type f -size +"${min_kb}k" -exec du -x -k {} + 2>/dev/null
     echo $? >> "$rc_file"
   } | perl -e '
     use strict;
@@ -2002,6 +2003,19 @@ Parsec|^parsecd?$
 EOF
 }
 
+# Program names from "ps -axo comm=", which shows most programs with their full path. Programs in the
+# macOS system folders are left out, because Apple's own parsecd (Siri and Spotlight Suggestions)
+# runs on every Mac and is not Parsec. /usr/local is not a system folder. A program shown without a
+# path keeps its name, also when ps puts it in brackets.
+pcc_remote_program_names() {
+  LC_ALL=C awk '
+    { sub(/^[ \t]+/, ""); sub(/[ \t]+$/, "") }
+    /^\(.*\)$/ { $0 = substr($0, 2, length($0) - 2) }
+    /^\/(System|usr|bin|sbin|Library\/Apple)\// && !/^\/usr\/local\// { next }
+    { sub(/.*\//, ""); print }
+  '
+}
+
 # Sites whose redirection in the hosts file is a sign of hijacking. The app holds the same list.
 PCC_WATCHED_SITES="google.com,google.nl,gmail.com,youtube.com,microsoft.com,live.com,outlook.com,office.com,microsoftonline.com,windowsupdate.com,apple.com,icloud.com,facebook.com,paypal.com,ing.nl,rabobank.nl,abnamro.nl,snsbank.nl,asnbank.nl,regiobank.nl,triodos.nl,knab.nl,bunq.com,digid.nl,belastingdienst.nl"
 
@@ -2023,7 +2037,7 @@ pcc_remote_report() {
     if [ "$rc" = 142 ]; then scan="partial (time limit of $PCC_REMOTE_CAP seconds reached)"; elif [ "$rc" != 0 ]; then readable=0; break; fi
   done
   if [ "$readable" = 0 ]; then scan="partial (installed apps could not be read)"; fi
-  running=$(pcc_capped "$PCC_REMOTE_CAP" ps -axco comm 2> /dev/null)
+  running=$(pcc_capped "$PCC_REMOTE_CAP" ps -axo comm= 2> /dev/null)
   rc=$?
   if [ "$rc" = 142 ]; then scan="partial (time limit of $PCC_REMOTE_CAP seconds reached)"; fi
   echo "format: 1"
@@ -2036,7 +2050,7 @@ pcc_remote_report() {
     scan="partial (running programs could not be read)"
   fi
   echo "scan: $scan"
-  running=$(printf '%s\n' "$running" | grep -iv hamachi)
+  running=$(printf '%s\n' "$running" | pcc_remote_program_names | grep -iv hamachi)
   printf '%s\n' "$(sed -e 's|.*/||' -e 's|\.app$||' "$installed" | grep -iv hamachi)" > "$installed"
   while IFS= read -r line; do
     name=${line%%|*}

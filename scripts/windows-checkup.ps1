@@ -16,8 +16,9 @@
 # The space step looks, for at most 60 seconds, at a few fixed places where space can be got back:
 # the Recycle Bin, the Temp folders, downloaded Windows updates, installers in Downloads and
 # Windows.old if it exists. It also notes the 10 biggest files of 50 MB or more in your user
-# profile (file name, size and the name of the folder above it, never a full path). It deletes
-# nothing.
+# profile (file name, size and the name of the folder above it, never a full path), leaving out
+# AppData and Steam game libraries, because deleting part of a program or game breaks it. It
+# deletes nothing.
 #
 # The apps step looks, for at most 45 seconds, at the programs in the Uninstall registry keys that were
 # not used for 12 months or more. It stores the name, the size and the date of last use of at most 15
@@ -900,8 +901,9 @@ function Get-SpaceInstallers([string]$Path) {
 }
 
 # The biggest single files under $Root: at most $Limit, each of at least $MinBytes, until $StopAtMs on
-# $Clock. Hidden and system items, AppData, junctions, links and files that only exist in the cloud
-# are never entered or listed. Names and the folder directly above are kept, never a full path.
+# $Clock. Hidden and system items, AppData (with the programs installed per user), Steam game
+# libraries (steamapps), junctions, links and files that only exist in the cloud are never entered
+# or listed. Names and the folder directly above are kept, never a full path.
 function Get-SpaceBiggestFiles([string]$Root, $Clock, [long]$StopAtMs, [long]$MinBytes, [int]$Limit) {
     $separators = [char[]]@('\', '/')
     $directory = [int][System.IO.FileAttributes]::Directory
@@ -924,7 +926,7 @@ function Get-SpaceBiggestFiles([string]$Root, $Clock, [long]$StopAtMs, [long]$Mi
                 $attributes = [int]$entry.Attributes
                 if ($attributes -band $hiddenOrSystem) { continue }
                 if ($attributes -band $directory) {
-                    if (($attributes -band $reparse) -or ($atRoot -and $entry.Name -ieq 'AppData')) { continue }
+                    if (($attributes -band $reparse) -or ($atRoot -and $entry.Name -ieq 'AppData') -or $entry.Name -ieq 'steamapps') { continue }
                     $stack.Push($entry)
                     continue
                 }
