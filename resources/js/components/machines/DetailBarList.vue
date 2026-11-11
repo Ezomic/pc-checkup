@@ -1,10 +1,23 @@
 <script setup lang="ts">
+import { ChevronRight } from '@lucide/vue';
+import { reactive, useId } from 'vue';
 import type { DetailBar } from '@/types';
 
 defineProps<{
     items: DetailBar[];
     small?: boolean;
 }>();
+
+const listId = useId();
+const open = reactive(new Set<number>());
+
+function toggle(index: number): void {
+    if (open.has(index)) {
+        open.delete(index);
+    } else {
+        open.add(index);
+    }
+}
 </script>
 
 <template>
@@ -14,7 +27,26 @@ defineProps<{
     >
         <li v-for="(item, index) in items" :key="`${index}-${item.label}`">
             <div class="flex justify-between gap-4">
-                <span class="min-w-0 break-words">{{ item.label }}</span>
+                <button
+                    v-if="item.children?.length"
+                    type="button"
+                    class="flex min-w-0 items-start gap-1 rounded-sm text-left break-words hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                    :aria-expanded="open.has(index)"
+                    :aria-controls="`${listId}-${index}`"
+                    data-test="detail-toggle"
+                    @click="toggle(index)"
+                >
+                    <ChevronRight
+                        class="mt-0.5 shrink-0 transition-transform"
+                        :class="[
+                            small ? 'size-3' : 'size-4',
+                            { 'rotate-90': open.has(index) },
+                        ]"
+                        aria-hidden="true"
+                    />
+                    <span class="min-w-0">{{ item.label }}</span>
+                </button>
+                <span v-else class="min-w-0 break-words">{{ item.label }}</span>
                 <span class="shrink-0 font-medium">{{ item.value }}</span>
             </div>
             <div
@@ -30,6 +62,15 @@ defineProps<{
             <p v-if="item.detail" class="mt-1 text-xs text-muted-foreground">
                 {{ item.detail }}
             </p>
+            <div
+                v-if="item.children?.length"
+                v-show="open.has(index)"
+                :id="`${listId}-${index}`"
+                class="mt-3 ml-2 border-l border-border pl-3"
+                data-test="detail-children"
+            >
+                <DetailBarList :items="item.children" small />
+            </div>
             <div
                 v-if="item.inside"
                 class="mt-3 ml-2 border-l border-border pl-3"

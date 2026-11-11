@@ -208,7 +208,7 @@ describe('the Mac step on a tree with known files', function () {
         $name = '[^|\/\\\\\x00-\x1f\x7f]{1,60}';
 
         foreach (explode("\n", trim($output)) as $line) {
-            expect($line)->toMatch('/^(scan: .+|seconds: \d+|limit: \d+|format: 2|home\|\d+|home\|'.$name.'\|[1-9]\d*|sub\|'.$name.'\|'.$name.'\|[1-9]\d*|roots_total\|\d+|folder\|[A-Za-z]+\|\d+|library\|[A-Za-z ]+\|\d+|root\|[A-Za-z0-9 ._()+-]{1,40}\|\d+|missing\|(root|home|library)\/[A-Za-z ]+|type\|[A-Za-z]+\|\d+\|\d+|noext\|\d+\|\d+|ext\|[a-z0-9]{1,10}\|\d+\|\d+)$/u');
+            expect($line)->toMatch('/^(scan: .+|seconds: \d+|limit: \d+|format: 2|home\|\d+|home\|'.$name.'\|[1-9]\d*|sub\|'.$name.'\|'.$name.'\|[1-9]\d*|tree\|'.$name.'(\/'.$name.'){0,3}\|[1-9]\d*|roots_total\|\d+|folder\|[A-Za-z]+\|\d+|library\|[A-Za-z ]+\|\d+|root\|[A-Za-z0-9 ._()+-]{1,40}\|\d+|missing\|(root|home|library)\/[A-Za-z ]+|type\|[A-Za-z]+\|\d+\|\d+|noext\|\d+\|\d+|ext\|[a-z0-9]{1,10}\|\d+\|\d+)$/u');
         }
 
         expect($output)->not->toContain('inner')->not->toContain('photo')->not->toContain('report')->not->toContain('hidden')->not->toContain('.dat')->not->toContain('.jpg')
@@ -475,7 +475,7 @@ function oddNamesTree(array $folders): string
 
 function lostDeepPass(): string
 {
-    return fakeMacBin(['du' => 'case " $* " in *" -d 2 "*) kill -ALRM $$ ;; esac; exec /usr/bin/du "$@"']);
+    return fakeMacBin(['du' => 'case " $* " in *" -d 4 "*) kill -ALRM $$ ;; esac; exec /usr/bin/du "$@"']);
 }
 
 describe('the biggest folders in the user folder (Mac)', function () {
@@ -576,7 +576,7 @@ describe('the biggest folders in the user folder (Mac)', function () {
         $output = runStorage($base)->output();
 
         foreach (explode("\n", trim($output)) as $line) {
-            expect($line)->toMatch('/^(scan: .+|seconds: \d+|limit: \d+|format: 2|home\|\d+|home\|[^|\/\\\\\x00-\x1f\x7f]{1,60}\|[1-9]\d*|sub\|[^|\/\\\\\x00-\x1f\x7f]{1,60}\|[^|\/\\\\\x00-\x1f\x7f]{1,60}\|[1-9]\d*|roots_total\|\d+|folder\|[A-Za-z]+\|\d+|library\|[A-Za-z ]+\|\d+|missing\|.+|type\|[A-Za-z]+\|\d+\|\d+|noext\|\d+\|\d+|ext\|[a-z0-9]{1,10}\|\d+\|\d+)$/u');
+            expect($line)->toMatch('/^(scan: .+|seconds: \d+|limit: \d+|format: 2|home\|\d+|home\|[^|\/\\\\\x00-\x1f\x7f]{1,60}\|[1-9]\d*|sub\|[^|\/\\\\\x00-\x1f\x7f]{1,60}\|[^|\/\\\\\x00-\x1f\x7f]{1,60}\|[1-9]\d*|tree\|[^|\/\\\\\x00-\x1f\x7f]{1,60}\|[1-9]\d*|roots_total\|\d+|folder\|[A-Za-z]+\|\d+|library\|[A-Za-z ]+\|\d+|missing\|.+|type\|[A-Za-z]+\|\d+\|\d+|noext\|\d+\|\d+|ext\|[a-z0-9]{1,10}\|\d+\|\d+)$/u');
         }
 
         expect(array_keys(namedHome(storageRows($output))))->toContain('.hidden')->toContain('..x');
@@ -651,6 +651,134 @@ describe('the biggest folders in the user folder (Mac)', function () {
         $script = (string) file_get_contents(base_path('scripts/mac-checkup.sh'));
 
         expect($script)->toContain('PCC_STORAGE_CAP:-150')->and($script)->toContain('pcc_storage_stop "$start" "$cap" 40');
+    });
+});
+
+const TREE_GIB = 1048576;
+
+/**
+ * The tree| lines for du lines made up from $folders (path inside the user folder => KB).
+ *
+ * @param  array<string, int>  $folders
+ * @return list<string>
+ */
+function treeLines(array $folders): array
+{
+    $input = '';
+
+    foreach ($folders as $path => $kb) {
+        $input .= "{$kb}\t/Users/me/{$path}\n";
+    }
+
+    $output = Process::path(base_path())->input($input)->run(['bash', '-c', 'source scripts/mac-checkup.sh; pcc_storage_homerows /Users/me'])->output();
+
+    return array_values(array_filter(explode("\n", trim($output)), fn (string $line): bool => str_starts_with($line, 'tree|')));
+}
+
+/**
+ * A du that reports every size 1024 times bigger, so a few MiB on disk act as GiB. With $lose the
+ * pass four levels deep is stopped by the clock and prints nothing.
+ */
+function scaledDu(bool $lose = false): string
+{
+    $scale = <<<'SH'
+        /usr/bin/du "$@" | awk -F '\t' 'BEGIN { OFS = "\t" } { $1 = $1 * 1024; print }'
+        SH;
+
+    return fakeMacBin(['du' => ($lose ? 'case " $* " in *" -d 4 "*) kill -ALRM $$ ;; esac; ' : '').$scale]);
+}
+
+function deepHomeTree(): string
+{
+    $base = namedHomeTree();
+    storageFile("{$base}/home/Projects/app/node_modules/pkg/deep/y.js", 200);
+
+    return $base;
+}
+
+/**
+ * @param  list<string>  $lines
+ * @return list<string>
+ */
+function treePaths(array $lines, string $prefix): array
+{
+    $paths = array_map(fn (string $line): string => explode('|', $line)[1], $lines);
+
+    return array_values(array_filter($paths, fn (string $path): bool => str_starts_with($path, $prefix)));
+}
+
+describe('the folder tree in the user folder (Mac)', function () {
+    it('starts with the same eight folders as the home names, whatever their size, and opens none under 1 GiB', function () {
+        $lines = treeLines([
+            'A' => 900, 'A/inside' => 800, 'B' => 800, 'C' => 700, 'D' => 600, 'E' => 500, 'F' => 400, 'G' => 300, 'H' => 200, 'I' => 100,
+        ]);
+
+        expect($lines)->toBe(['tree|A|900', 'tree|B|800', 'tree|C|700', 'tree|D|600', 'tree|E|500', 'tree|F|400', 'tree|G|300', 'tree|H|200']);
+    });
+
+    it('opens a folder of 1 GiB or more to its six biggest folders of 100 MiB or more, biggest first and then by name', function () {
+        $lines = treeLines([
+            'Big' => 2 * TREE_GIB, 'Big/c1' => 300000, 'Big/c2' => 200000, 'Big/b' => 200000, 'Big/c3' => 150000, 'Big/c4' => 120000,
+            'Big/c5' => 110000, 'Big/c6' => 102400, 'Big/small' => 102399,
+            'Exact' => TREE_GIB, 'Exact/y' => 102400, 'Exact/z' => 102399,
+            'Under' => TREE_GIB - 1, 'Under/x' => 500000,
+        ]);
+
+        expect($lines)->toBe([
+            'tree|Big|2097152', 'tree|Big/c1|300000', 'tree|Big/b|200000', 'tree|Big/c2|200000', 'tree|Big/c3|150000', 'tree|Big/c4|120000', 'tree|Big/c5|110000',
+            'tree|Exact|1048576', 'tree|Exact/y|102400',
+            'tree|Under|1048575',
+        ]);
+    });
+
+    it('goes at most four levels deep and puts every folder right before the folders inside it', function () {
+        $lines = treeLines([
+            'A' => 5 * TREE_GIB, 'A/B' => 4 * TREE_GIB, 'A/B/C' => 3 * TREE_GIB, 'A/B/C/D' => 2 * TREE_GIB, 'A/B/C/D/E' => TREE_GIB + 1,
+            'A/B/C/D/E/F' => TREE_GIB, 'A/B/C/D2' => 102399, 'A/B/C2' => 500000, 'A/B/C2/x' => 300000, 'A/B2' => 200000, 'Z' => 10,
+        ]);
+
+        expect($lines)->toBe([
+            'tree|A|5242880', 'tree|A/B|4194304', 'tree|A/B/C|3145728', 'tree|A/B/C/D|2097152', 'tree|A/B/C2|500000', 'tree|A/B2|200000', 'tree|Z|10',
+        ]);
+    });
+
+    it('keeps the bigger of two folders that clean to the same name and fills the six from the rest', function () {
+        $lines = treeLines([
+            'P' => 3 * TREE_GIB, 'P|' => 50, 'P/dup|' => 400000, 'P/dup' => 500000, "P/a\tb" => 300000, 'P/a b' => 450000,
+            'P/k1' => 200000, 'P/k2' => 190000, 'P/k3' => 180000, 'P/k4' => 170000, 'P/k5' => 160000,
+            'Q' => 2 * TREE_GIB, 'Q/dup' => 200000, 'Q/'.str_repeat('L', 80) => 150000,
+        ]);
+
+        expect($lines)->toBe([
+            'tree|P|3145728', 'tree|P/dup|500000', 'tree|P/a b|450000', 'tree|P/k1|200000', 'tree|P/k2|190000', 'tree|P/k3|180000', 'tree|P/k4|170000',
+            'tree|Q|2097152', 'tree|Q/dup|200000', 'tree|Q/'.str_repeat('L', 60).'|150000',
+        ]);
+    });
+
+    it('counts a folder listed twice once, with the bigger number', function () {
+        $output = Process::path(base_path())->input("100\t/Users/me/A\n".TREE_GIB."\t/Users/me/A\n200000\t/Users/me/A/x\n150000\t/Users/me/A/x\n")
+            ->run(['bash', '-c', 'source scripts/mac-checkup.sh; pcc_storage_homerows /Users/me'])->output();
+
+        expect(array_values(array_filter(explode("\n", trim($output)), fn (string $line): bool => str_starts_with($line, 'tree|'))))
+            ->toBe(['tree|A|1048576', 'tree|A/x|200000']);
+    });
+
+    it('prints the tree after the sub lines, four levels deep from one du pass, with no deeper folder', function () {
+        $output = runStorage(deepHomeTree(), [], scaledDu().':/usr/bin:/bin')->output();
+        $kinds = array_map(fn (string $line): string => explode('|', $line)[0], explode("\n", trim($output)));
+        $tree = array_values(array_filter(explode("\n", trim($output)), fn (string $line): bool => str_starts_with($line, 'tree|')));
+
+        expect(treePaths($tree, 'Projects'))->toBe(['Projects', 'Projects/app', 'Projects/app/node_modules', 'Projects/app/node_modules/pkg', 'Projects/site'])
+            ->and(array_search('tree', $kinds, true))->toBeGreaterThan(array_search('sub', array_reverse($kinds, true), true))
+            ->and($output)->not->toContain('deep')->not->toContain('y.js');
+    });
+
+    it('still lists three levels inside the two biggest folders when the pass over the user folder is lost', function () {
+        $result = runStorage(deepHomeTree(), [], scaledDu(true).':/usr/bin:/bin');
+        $tree = array_values(array_filter(explode("\n", trim($result->output())), fn (string $line): bool => str_starts_with($line, 'tree|')));
+
+        expect($result->output())->toContain('scan: partial')
+            ->and(treePaths($tree, 'Projects'))->toBe(['Projects', 'Projects/app', 'Projects/app/node_modules', 'Projects/app/node_modules/pkg', 'Projects/site']);
     });
 });
 

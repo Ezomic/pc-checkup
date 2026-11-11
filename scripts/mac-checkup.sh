@@ -10,7 +10,8 @@
 #
 # The storage step measures folder sizes and groups the user folder by kind of file, for at most
 # 150 seconds. It stores sizes and counts, plus the names and sizes of the biggest folders in your
-# user folder (8 folders, and 5 inside each of the 2 biggest), never a file name or a full path.
+# user folder up to 4 levels deep (the 8 biggest, and inside a folder of 1 GB or more its 6 biggest
+# of 100 MB or more), never a file name or a full path.
 # It follows no links and leaves other disks alone. If the time runs out the report says the
 # numbers are partial.
 #
@@ -1241,11 +1242,36 @@ pcc_storage_missing_roots() {
 # Turns "KB<TAB>path" lines inside the user folder into home|KB, folder|Name|KB and library|Name|KB
 # for the well-known names, and into the names the report shows: home|Name|KB for the 8 biggest
 # folders directly inside the user folder and sub|Parent|Name|KB for the 5 biggest inside each of
-# the 2 biggest of those. A name loses its control characters, pipes and slashes, has its spaces
-# collapsed and is cut at 60 bytes without splitting a character. Only folder names are ever kept,
+# the 2 biggest of those. Then tree|Seg1/Seg2|KB lines, depth first: the same 8 folders, and inside
+# any of them of 1 GiB or more its 6 biggest folders of 100 MiB or more, and so on, at most 4 levels
+# deep. A name loses its control characters, pipes and slashes, has its spaces collapsed and is cut
+# at 60 bytes without splitting a character, so "/" can join the names of a tree line. Of two
+# folders that clean to the same name only the bigger is listed. Only folder names are ever kept,
 # never a full path or a file name. A folder listed twice counts once, with the bigger number.
 pcc_storage_homerows() {
   LC_ALL=C awk -F '\t' -v home="${1%/}" -v names="$PCC_STORAGE_HOME_NAMES" -v library="$PCC_STORAGE_LIBRARY_NAMES" '
+    function tree(rel, lpath, depth,    count, i, name, best, key, label) {
+      if (depth >= 4 || size[rel] + 0 < 1048576) return
+      count = 0
+      while (count < 6) {
+        best = ""
+        for (i = 1; i <= ntkids[rel]; i++) {
+          name = tkids[rel, i]
+          key = rel "/" name
+          if (key in tused) continue
+          if (best == "" || size[key] + 0 > size[rel "/" best] + 0 || (size[key] + 0 == size[rel "/" best] + 0 && name < best)) best = name
+        }
+        if (best == "" || size[rel "/" best] + 0 < 102400) break
+        key = rel "/" best
+        tused[key] = 1
+        label = clean(best)
+        if (label == "" || label == "." || label == ".." || ((lpath "/" label) in tseen)) continue
+        tseen[lpath "/" label] = 1
+        count++
+        print "tree|" lpath "/" label "|" size[key]
+        tree(key, lpath "/" label, depth + 1)
+      }
+    }
     function clean(s,    n, i, b, need) {
       gsub(/[\011-\015]/, " ", s)
       gsub(/[\001-\037\177]/, "", s)
@@ -1279,7 +1305,16 @@ pcc_storage_homerows() {
       path = substr($0, length($1) + 2)
       if (path == home) { if ($1 + 0 > total) total = $1 + 0; next }
       if (index(path, home "/") != 1) next
-      parts = split(substr(path, length(home) + 2), seg, "/")
+      rel = substr(path, length(home) + 2)
+      parts = split(rel, seg, "/")
+      if (parts >= 1 && parts <= 4 && index(rel, SUBSEP) == 0 && index("/" rel "/", "//") == 0) {
+        if (!(rel in size)) {
+          up = substr(rel, 1, length(rel) - length(seg[parts]) - 1)
+          ntkids[up]++
+          tkids[up, ntkids[up]] = seg[parts]
+        }
+        if (!(rel in size) || $1 + 0 > size[rel] + 0) size[rel] = $1
+      }
       if (parts == 1 && seg[1] != "") {
         if (!(seg[1] in one) || $1 + 0 > one[seg[1]] + 0) one[seg[1]] = $1
       } else if (parts == 2 && seg[1] != "" && seg[2] != "" && index(seg[1] seg[2], SUBSEP) == 0) {
@@ -1305,6 +1340,8 @@ pcc_storage_homerows() {
         seen[label] = 1
         shown++
         print "home|" label "|" one[best]
+        topname[shown] = best
+        toplabel[shown] = label
         if (shown <= 2) { parent[shown] = best; plabel[shown] = label; pindex[best] = shown }
       }
       for (key in two) {
@@ -1329,6 +1366,10 @@ pcc_storage_homerows() {
           count++
           print "sub|" plabel[p] "|" label "|" two[parent[p] SUBSEP best]
         }
+      }
+      for (t = 1; t <= shown; t++) {
+        print "tree|" toplabel[t] "|" one[topname[t]]
+        tree(topname[t], toplabel[t], 1)
       }
     }'
 }
@@ -1367,7 +1408,8 @@ pcc_storage_home_biggest() {
 
 # What a stopped pass over the user folder did not report, measured one folder at a time: every
 # folder directly inside it, the well-known ones inside Library, Library itself and the total last,
-# then the inside of the two biggest folders. The raw "KB<TAB>path" lines are appended to file $4.
+# then the inside of the two biggest folders, 3 levels down. The raw "KB<TAB>path" lines are
+# appended to file $4.
 pcc_storage_home_rest() {
   local home=${1%/} stop=$2 rc_file=$3 raw=$4 seen rows dir name left parents old_ifs=$IFS
   seen=$(mktemp)
@@ -1392,21 +1434,22 @@ pcc_storage_home_rest() {
   left=$(printf '%s\n' "$parents" | grep -c .)
   printf '%s\n' "$parents" | while IFS= read -r dir; do
     if [ -z "$dir" ]; then continue; fi
-    if ! grep -Fq -- "$dir/" "$raw"; then pcc_storage_du 1 $(((stop - SECONDS + left - 1) / left)) "$dir" "$rc_file" >> "$raw"; fi
+    if ! grep -Fq -- "$dir/" "$raw"; then pcc_storage_du 3 $(((stop - SECONDS + left - 1) / left)) "$dir" "$rc_file" >> "$raw"; fi
     left=$((left - 1))
   done
   rm -f "$seen"
 }
 
-# The user folder in one pass, two levels deep: its total, the folders in it and the folders inside
-# those. When the pass is stopped, what it did not report is measured one folder at a time.
+# The user folder in one pass, four levels deep: its total and the folders in it down to that depth
+# (du walks every level anyway, so the depth only adds lines, not time). When the pass is stopped,
+# what it did not report is measured one folder at a time.
 pcc_storage_home() {
   local home=$1 stop=$2 rc_file=$3 pass_rc pass_end raw
   [ -d "$home" ] || return 0
   pass_rc=$(mktemp)
   raw=$(mktemp)
   pass_end=$((SECONDS + ((stop - SECONDS) * 60 + 99) / 100))
-  pcc_storage_du 2 $((pass_end - SECONDS)) "$home" "$pass_rc" > "$raw"
+  pcc_storage_du 4 $((pass_end - SECONDS)) "$home" "$pass_rc" > "$raw"
   if grep -q '^142$' "$pass_rc"; then pcc_storage_home_rest "$home" "$stop" "$pass_rc" "$raw"; fi
   cat "$pass_rc" >> "$rc_file"
   pcc_storage_homerows "$home" < "$raw"
@@ -1522,7 +1565,7 @@ pcc_storage_report() {
   printf '%s\n' "$roots" | grep '^root|' | sort -t '|' -k 3,3nr -k 2,2 | head -n 6
   if [ -d "$root" ]; then printf '%s\n' "$roots" | awk -F '|' '$1 == "root" && $3 ~ /^[0-9]+$/ { total += $3 } END { print "roots_total|" total + 0 }'; fi
   pcc_storage_missing_roots "$root" "$data" "$roots"
-  printf '%s\n' "$homes" | grep -E '^(home|folder|library|sub)\|'
+  printf '%s\n' "$homes" | grep -E '^(home|folder|library|sub|tree)\|'
   pcc_storage_missing_home "$home" "$homes"
   printf '%s\n' "$types" | grep -E '^(type|noext|ext)\|'
   return 0

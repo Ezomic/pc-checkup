@@ -142,6 +142,32 @@ try {
             "same|$($tables[0] -eq $tables[1])"
             "profile|$($tables[1])"
         }
+        'tree' {
+            $big = "$base/big"
+            foreach ($item in @(
+                @("$big/Media/A/B/C/D/d.bin", 1126400), @("$big/Media/A/B/C/c.bin", 153600), @("$big/Media/A/B/small/s.bin", 51200),
+                @("$big/Media/A/B2/b.bin", 204800), @("$big/Media/Dup  Name/x.bin", 307200), @("$big/Media/Dup Name/x.bin", 204800),
+                @("$big/Media/s1/x.bin", 153600), @("$big/Media/tieb/x.bin", 122880), @("$big/Media/tiea/x.bin", 122880),
+                @("$big/Media/s4/x.bin", 112640), @("$big/Media/s5/x.bin", 107520),
+                @("$big/Games/save/s.bin", 102400), @("$big/Games/cache/c.bin", 102399), @("$big/Games/g.pak", 843777),
+                @("$big/Almost/inner/i.bin", 204800), @("$big/Almost/a.bin", 843775),
+                @("$big/AppData/Local/Temp/T1/t.bin", 512000), @("$big/AppData/Local/Temp/t2.bin", 614400), @("$big/AppData/Local/Pkg/p.bin", 153600),
+                @("$big/t1/x.bin", 1), @("$big/t2/x.bin", 2), @("$big/t3/x.bin", 3), @("$big/t4/x.bin", 4), @("$big/t5/x.bin", 5), @("$big/t6/x.bin", 6)
+            )) { New-Sized $item[0] $item[1] }
+            $env:PCC_STORAGE_PROFILE = $big
+            $env:PCC_STORAGE_ROOT = "$base/nothing"
+            Get-StorageBreakdown
+            $tally = @{ Profile = [System.IO.Path]::GetFullPath($big).TrimEnd('\', '/'); One = @{}; Two = @{}; Three = @{}; Four = @{} }
+            $clock = [System.Diagnostics.Stopwatch]::StartNew()
+            $walk = Get-StorageWalk $big $null $tally
+            while (-not (Measure-StorageWalk $walk $clock ($clock.ElapsedMilliseconds + 100000) $null)) { }
+            $depths = foreach ($level in 1, 2, 3, 4) {
+                $table = @($tally.One, $tally.Two, $tally.Three, $tally.Four)[$level - 1]
+                @($table.Keys | Where-Object { $_.Split('\').Count -ne $level }).Count
+            }
+            "depths|$($depths -join ',')"
+            "four|$(Get-Sorted $tally.Four)"
+        }
         'nowhere' {
             $env:PCC_STORAGE_PROFILE = "$base/nowhere"
             $env:PCC_STORAGE_ROOT = "$base/nowhere"
@@ -204,6 +230,12 @@ const SBW_FULL = [
     'home|Desktop|10',
     'sub|Projects|app|400',
     'sub|Projects|site|60',
+    'tree|Downloads|500',
+    'tree|Projects|460',
+    'tree|Documents|150',
+    'tree|AppData|135',
+    'tree|Pictures|40',
+    'tree|Desktop|10',
     'folder|Downloads|500',
     'folder|Documents|150',
     'folder|Desktop|10',
@@ -252,6 +284,57 @@ describe('the Windows storage step measuring a tree with known files', function 
         expect($result->successful())->toBeTrue()
             ->and(array_values(array_filter(sbwLines($result), fn (string $line): bool => ! str_starts_with($line, 'seconds:'))))->toBe(['scan: complete', 'limit: 150', 'format: 2']);
     })->with(['engine', 'script'])->skip(sbwMissing(), 'PowerShell is not installed here');
+});
+
+const SBW_TREE = [
+    'tree|Media|2667520',
+    'tree|Media/A|1536000',
+    'tree|Media/A/B|1331200',
+    'tree|Media/A/B/C|1280000',
+    'tree|Media/A/B2|204800',
+    'tree|Media/Dup Name|307200',
+    'tree|Media/s1|153600',
+    'tree|Media/tiea|122880',
+    'tree|Media/tieb|122880',
+    'tree|Media/s4|112640',
+    'tree|AppData|1280000',
+    'tree|AppData/Local|1280000',
+    'tree|AppData/Local/Temp|1126400',
+    'tree|AppData/Local/Temp/T1|512000',
+    'tree|AppData/Local/Pkg|153600',
+    'tree|Games|1048576',
+    'tree|Games/save|102400',
+    'tree|Almost|1048575',
+    'tree|t6|6',
+    'tree|t5|5',
+    'tree|t4|4',
+    'tree|t3|3',
+];
+
+describe('the folder tree of the Windows storage step', function () {
+    it('lists folders 4 levels deep inside the big ones, biggest first, one per label', function (string $engine) {
+        $lines = sbwLines(sbwRun('tree', $engine));
+
+        expect(sbwKind($lines, 'tree'))->toBe(SBW_TREE)
+            ->and(sbwKind($lines, 'home'))->toBe(['home|6044692', 'home|Media|2667520', 'home|AppData|1280000', 'home|Games|1048576', 'home|Almost|1048575', 'home|t6|6', 'home|t5|5', 'home|t4|4', 'home|t3|3']);
+    })->with(['engine', 'script'])->skip(sbwMissing(), 'PowerShell is not installed here');
+
+    it('puts the tree lines right after the sub lines', function () {
+        $lines = sbwLines(sbwRun('tree'));
+        $kinds = array_values(array_unique(array_map(fn (string $line): string => explode('|', $line)[0], array_filter($lines, fn (string $line): bool => str_contains($line, '|')))));
+
+        expect(array_slice($kinds, 0, 4))->toBe(['home', 'sub', 'tree', 'folder']);
+    })->skip(sbwMissing(), 'PowerShell is not installed here');
+
+    it('keeps tallies only for folders up to 4 levels inside the user folder, the same with both walkers', function () {
+        $engine = sbwLines(sbwRun('tree', 'engine'));
+        $script = sbwLines(sbwRun('tree', 'script'));
+
+        expect(sbwKind($engine, 'depths'))->toBe(['depths|0,0,0,0'])
+            ->and(sbwKind($engine, 'four'))->toBe(['four|AppData\Local\Temp\T1=524288000;Media\A\B\C=1310720000;Media\A\B\small=52428800'])
+            ->and(array_values(array_filter($script, fn (string $line): bool => ! str_starts_with($line, 'seconds:'))))
+            ->toBe(array_values(array_filter($engine, fn (string $line): bool => ! str_starts_with($line, 'seconds:'))));
+    })->skip(sbwMissing(), 'PowerShell is not installed here');
 });
 
 describe('the order and the time limit of the Windows storage step', function () {
