@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\DB;
 
 final class IssueScanCode
 {
-    public const LIFETIME_MINUTES = 15;
+    public const LIFETIME_MINUTES = 30;
 
     /**
      * Returns the plain code. It is not stored anywhere, so this is the only time it can be shown.
