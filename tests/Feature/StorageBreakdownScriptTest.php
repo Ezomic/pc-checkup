@@ -838,8 +838,8 @@ describe('what the scripts contain', function () {
             ->and($windows)->toContain('Stopwatch');
     });
 
-    it('uses a hundred and fifty second limit in both scripts', function () {
-        expect((string) file_get_contents(base_path('scripts/windows-checkup.ps1')))->toContain('PCC_STORAGE_CAP')->toContain('$StorageCapSeconds = 150')
+    it('uses a six hundred second limit in both scripts', function () {
+        expect((string) file_get_contents(base_path('scripts/windows-checkup.ps1')))->toContain('PCC_STORAGE_CAP')->toContain('$StorageCapSeconds = 600')
             ->and((string) file_get_contents(base_path('scripts/mac-checkup.sh')))->toContain('limit: ');
     });
 
