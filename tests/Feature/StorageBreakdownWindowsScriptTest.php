@@ -212,7 +212,7 @@ function sbwKind(array $lines, string $kind): array
 
 const SBW_FULL = [
     'scan: complete',
-    'limit: 150',
+    'limit: 600',
     'format: 2',
     'root|Users|1380',
     'root|Windows|750',
@@ -282,7 +282,7 @@ describe('the Windows storage step measuring a tree with known files', function 
         $result = sbwRun('nowhere', $engine);
 
         expect($result->successful())->toBeTrue()
-            ->and(array_values(array_filter(sbwLines($result), fn (string $line): bool => ! str_starts_with($line, 'seconds:'))))->toBe(['scan: complete', 'limit: 150', 'format: 2']);
+            ->and(array_values(array_filter(sbwLines($result), fn (string $line): bool => ! str_starts_with($line, 'seconds:'))))->toBe(['scan: complete', 'limit: 600', 'format: 2']);
     })->with(['engine', 'script'])->skip(sbwMissing(), 'PowerShell is not installed here');
 });
 

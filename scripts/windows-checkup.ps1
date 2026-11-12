@@ -7,7 +7,7 @@
 # file without a byte order mark as ANSI.
 #
 # The storage step measures folder sizes and groups the user folder by kind of file, for at most
-# 150 seconds, your user folder first and then the rest of the drive. To be quick it reads several
+# 600 seconds, your user folder first and then the rest of the drive. To be quick it reads several
 # folders at a time with a small helper that PowerShell compiles in memory. It stores sizes and
 # counts, plus the names and sizes of the biggest folders in your user profile, up to 4 levels deep
 # (8 folders, and inside a folder of 1 GB or more its 6 biggest of 100 MB or more), never a file
@@ -694,7 +694,7 @@ function Get-StorageKnownIndex($Known, [string]$Name) {
     return -1
 }
 
-# Measures disk usage once, read only, and never longer than the cap (150 seconds by default).
+# Measures disk usage once, read only, and never longer than the cap (600 seconds by default).
 # The user folder comes first, then Users, Windows, the Program Files folders, ProgramData and the
 # other folders at the top of the drive. Each folder gets its share of the clock and hands back what
 # it did not use; one that needs more waits, and once every folder had its turn the waiting ones
@@ -702,7 +702,7 @@ function Get-StorageKnownIndex($Known, [string]$Name) {
 # listed as missing instead of with a number that would be too small. Returns the lines of the
 # "Storage breakdown" section; progress goes to the screen.
 function Get-StorageBreakdown {
-    $StorageCapSeconds = 150
+    $StorageCapSeconds = 600
     if ($env:PCC_STORAGE_CAP -match '^[1-9][0-9]{0,4}$') { $StorageCapSeconds = [int]$env:PCC_STORAGE_CAP }
     $clock = [System.Diagnostics.Stopwatch]::StartNew()
     $capMs = [long]$StorageCapSeconds * 1000

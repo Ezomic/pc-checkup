@@ -33,7 +33,7 @@ describe('starting a scan', function () {
         getJson(route('scans.status'))->assertUnauthorized();
     });
 
-    it('shows a six digit code once, valid for fifteen minutes', function () {
+    it('shows a six digit code once, valid for thirty minutes', function () {
         $this->freezeTime();
         actingAs(User::factory()->create());
 
@@ -42,11 +42,11 @@ describe('starting a scan', function () {
         get(route('scans.show'))->assertInertia(fn (Assert $page) => $page
             ->component('scans/Show')
             ->where('code', fn (string $code) => preg_match('/^\d{6}$/', $code) === 1)
-            ->where('expiresAt', now()->addMinutes(15)->toIso8601String()));
+            ->where('expiresAt', now()->addMinutes(30)->toIso8601String()));
 
         get(route('scans.show'))->assertInertia(fn (Assert $page) => $page
             ->where('code', null)
-            ->where('expiresAt', now()->addMinutes(15)->toIso8601String()));
+            ->where('expiresAt', now()->addMinutes(30)->toIso8601String()));
     });
 
     it('stores only a keyed hash of the code', function () {
@@ -109,11 +109,11 @@ describe('waiting for the report', function () {
         getJson(route('scans.status'))->assertOk()->assertExactJson(['status' => 'received', 'machine_id' => $machine->id]);
     });
 
-    it('reports expired after fifteen minutes', function () {
+    it('reports expired after thirty minutes', function () {
         actingAs(User::factory()->create());
         post(route('scans.store'));
 
-        $this->travel(16)->minutes();
+        $this->travel(31)->minutes();
 
         getJson(route('scans.status'))->assertOk()->assertExactJson(['status' => 'expired', 'machine_id' => null]);
     });

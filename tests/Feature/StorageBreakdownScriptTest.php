@@ -199,7 +199,7 @@ describe('the Mac step on a tree with known files', function () {
 
         expect($lines[0])->toBe('scan: complete')
             ->and($lines[1])->toMatch('/^seconds: \d+$/')
-            ->and($lines[2])->toBe('limit: 150')
+            ->and($lines[2])->toBe('limit: 600')
             ->and($lines[3])->toBe('format: 2');
     });
 
@@ -411,11 +411,11 @@ describe('the time limit', function () {
     });
 
     it('falls back to the default limit for a value that is not a positive whole number', function (string $cap) {
-        expect(runStorage(storageTree(), ['PCC_STORAGE_CAP' => $cap])->output())->toContain('limit: 150');
+        expect(runStorage(storageTree(), ['PCC_STORAGE_CAP' => $cap])->output())->toContain('limit: 600');
     })->with(['abc', '0', '-5', '1.5', '']);
 
-    it('defaults to a hundred and fifty seconds', function () {
-        expect((string) file_get_contents(base_path('scripts/mac-checkup.sh')))->toContain('PCC_STORAGE_CAP:-150');
+    it('defaults to six hundred seconds', function () {
+        expect((string) file_get_contents(base_path('scripts/mac-checkup.sh')))->toContain('PCC_STORAGE_CAP:-600');
     });
 });
 
@@ -650,7 +650,7 @@ describe('the biggest folders in the user folder (Mac)', function () {
     it('keeps the limit at a hundred and fifty seconds and gives the user folder a bigger share of it', function () {
         $script = (string) file_get_contents(base_path('scripts/mac-checkup.sh'));
 
-        expect($script)->toContain('PCC_STORAGE_CAP:-150')->and($script)->toContain('pcc_storage_stop "$start" "$cap" 40');
+        expect($script)->toContain('PCC_STORAGE_CAP:-600')->and($script)->toContain('pcc_storage_stop "$start" "$cap" 40');
     });
 });
 
@@ -838,8 +838,8 @@ describe('what the scripts contain', function () {
             ->and($windows)->toContain('Stopwatch');
     });
 
-    it('uses a hundred and fifty second limit in both scripts', function () {
-        expect((string) file_get_contents(base_path('scripts/windows-checkup.ps1')))->toContain('PCC_STORAGE_CAP')->toContain('$StorageCapSeconds = 150')
+    it('uses a six hundred second limit in both scripts', function () {
+        expect((string) file_get_contents(base_path('scripts/windows-checkup.ps1')))->toContain('PCC_STORAGE_CAP')->toContain('$StorageCapSeconds = 600')
             ->and((string) file_get_contents(base_path('scripts/mac-checkup.sh')))->toContain('limit: ');
     });
 

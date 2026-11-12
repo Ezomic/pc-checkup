@@ -9,7 +9,7 @@
 # default). Everything it does is logged in the report ("Fix log") and in a text file next to it.
 #
 # The storage step measures folder sizes and groups the user folder by kind of file, for at most
-# 150 seconds. It stores sizes and counts, plus the names and sizes of the biggest folders in your
+# 600 seconds. It stores sizes and counts, plus the names and sizes of the biggest folders in your
 # user folder up to 4 levels deep (the 8 biggest, and inside a folder of 1 GB or more its 6 biggest
 # of 100 MB or more), never a file name or a full path.
 # It follows no links and leaves other disks alone. If the time runs out the report says the
@@ -1535,14 +1535,14 @@ pcc_storage_types() {
   if [ "$rc" = 142 ] || [ "$SECONDS" -ge "$stop" ]; then echo "capped|1"; fi
 }
 
-# Measures disk usage once, read only, and never longer than the cap (150 seconds by default).
+# Measures disk usage once, read only, and never longer than the cap (600 seconds by default).
 # The user folder comes first, then the drive until three quarters of the cap, then the kinds of
 # files; each phase hands on the time it did not use. Progress goes to the screen and the report
 # text goes to stdout.
 pcc_storage_report() {
   local home=${PCC_STORAGE_HOME:-$HOME} root=${PCC_STORAGE_ROOT:-/} data=${PCC_STORAGE_DATA:-/System/Volumes/Data}
-  local cap=${PCC_STORAGE_CAP:-150} start=$SECONDS roots homes types rc_file scan="complete" mine="" kb
-  case $cap in '' | *[!0-9]* | 0*) cap=150 ;; esac
+  local cap=${PCC_STORAGE_CAP:-600} start=$SECONDS roots homes types rc_file scan="complete" mine="" kb
+  case $cap in '' | *[!0-9]* | 0*) cap=600 ;; esac
   rc_file=$(mktemp)
   echo "Measuring storage (your user folder first, then the drive, then file types), stopping after $cap seconds at the latest..." >&2
   echo "  Measuring your user folder..." >&2
