@@ -21,7 +21,7 @@
         "laravel/tinker": "^3.0",
         "laravel/wayfinder": "^0.1.14",
         "thijssensoftware/flare-client": "^0.3.4",
-        "thijssensoftware/id-client": "^0.4.0",
+        "thijssensoftware/id-client": "^0.4.2",
         "thijssensoftware/snag-client": "^0.1.0"
     },
     "require-dev": {
